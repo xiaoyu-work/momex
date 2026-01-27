@@ -37,6 +37,17 @@ Configuration:
 """
 
 from .config import DEFAULT_FACT_TYPES, FactType, MemexConfig
+from .exceptions import (
+    CollectionNotFoundError,
+    ConfigurationError,
+    EmbeddingError,
+    ExportError,
+    LLMError,
+    MemexError,
+    MemoryNotFoundError,
+    StorageError,
+    ValidationError,
+)
 from .manager import MemoryManager
 from .memory import (
     AddResult,
@@ -49,11 +60,13 @@ from .memory import (
 from .query import query, search, stats
 
 __all__ = [
+    # Core classes
     "Memory",
     "MemoryManager",
     "MemexConfig",
     "FactType",
     "DEFAULT_FACT_TYPES",
+    # Data classes
     "MemoryItem",
     "MemoryEvent",
     "MemoryOperation",
@@ -63,4 +76,14 @@ __all__ = [
     "query",
     "search",
     "stats",
+    # Exceptions
+    "MemexError",
+    "CollectionNotFoundError",
+    "MemoryNotFoundError",
+    "ConfigurationError",
+    "ValidationError",
+    "StorageError",
+    "EmbeddingError",
+    "LLMError",
+    "ExportError",
 ]

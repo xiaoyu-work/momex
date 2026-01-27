@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .exceptions import ConfigurationError
+
 
 @dataclass
 class FactType:
@@ -100,7 +102,11 @@ class MemexConfig:
 
         path = Path(path)
         if not path.exists():
-            raise FileNotFoundError(f"Config file not found: {path}")
+            raise ConfigurationError(
+                message=f"Config file not found: {path}",
+                config_path=str(path),
+                suggestion="Create the config file or check the path.",
+            )
 
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}

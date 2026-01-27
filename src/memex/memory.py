@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import MemexConfig
+from .exceptions import EmbeddingError, ExportError, LLMError, MemoryNotFoundError
 
 
 @dataclass
@@ -333,10 +334,15 @@ class Memory:
             return []
 
         # Get embeddings
-        embedding_model = AsyncEmbeddingModel()
-        query_embedding = await embedding_model.get_embedding(query)
-        memory_texts = [m[1] for m in memories]
-        memory_embeddings = await embedding_model.get_embeddings(memory_texts)
+        try:
+            embedding_model = AsyncEmbeddingModel()
+            query_embedding = await embedding_model.get_embedding(query)
+            memory_texts = [m[1] for m in memories]
+            memory_embeddings = await embedding_model.get_embeddings(memory_texts)
+        except Exception as e:
+            raise EmbeddingError(
+                message=f"Failed to generate embeddings: {e}",
+            ) from e
 
         # Calculate cosine similarity scores
         # Embeddings are already normalized, so dot product = cosine similarity
@@ -441,8 +447,14 @@ class Memory:
                 }
             )
 
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except (IOError, OSError) as e:
+            raise ExportError(
+                message=f"Failed to export memories: {e}",
+                export_path=path,
+            ) from e
 
     async def add_conversation(
         self,

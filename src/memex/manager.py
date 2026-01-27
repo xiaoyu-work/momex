@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import MemexConfig
+from .exceptions import CollectionNotFoundError, ValidationError
 
 
 def _collection_to_path(collection: str) -> Path:
@@ -128,7 +129,12 @@ class MemoryManager:
             return False
 
         if new_dir.exists():
-            raise ValueError(f"Collection '{new_name}' already exists")
+            raise ValidationError(
+                message=f"Collection '{new_name}' already exists.",
+                field="new_name",
+                value=new_name,
+                suggestion="Choose a different name or delete the existing collection first.",
+            )
 
         # Ensure parent directory exists
         new_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -152,7 +158,7 @@ class MemoryManager:
         db_path = self._get_db_path(collection)
 
         if not db_path.exists():
-            raise ValueError(f"Collection '{collection}' not found")
+            raise CollectionNotFoundError(collection=collection)
 
         # Get file stats
         stat = db_path.stat()
@@ -186,10 +192,15 @@ class MemoryManager:
         dest_dir = self._get_collection_dir(destination)
 
         if not source_dir.exists():
-            raise ValueError(f"Source collection '{source}' not found")
+            raise CollectionNotFoundError(collection=source)
 
         if dest_dir.exists():
-            raise ValueError(f"Destination collection '{destination}' already exists")
+            raise ValidationError(
+                message=f"Destination collection '{destination}' already exists.",
+                field="destination",
+                value=destination,
+                suggestion="Choose a different name or delete the existing collection first.",
+            )
 
         # Ensure parent directory exists
         dest_dir.parent.mkdir(parents=True, exist_ok=True)
