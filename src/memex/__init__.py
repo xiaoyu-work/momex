@@ -34,14 +34,17 @@ Example - Managing Collections:
     >>> manager.delete("company:engineering:old_user")
 
 Configuration:
+    LLM is configured via TypeAgent's environment variables:
+        export OPENAI_API_KEY=sk-xxx
+        # or for Azure:
+        export AZURE_OPENAI_API_KEY=xxx
+        export AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
+
+    Memex-specific config (storage path, fact types) can be set via MemexConfig:
     >>> from memex import Memory, MemexConfig
     >>>
-    >>> config = MemexConfig(
-    ...     storage_path="./data",
-    ...     llm_provider="openai",
-    ...     llm_model="gpt-4o",
-    ... )
-    >>> memory = Memory(collection="company:engineering:alice", config=config)
+    >>> MemexConfig.set_default(storage_path="./my_data")
+    >>> memory = Memory(collection="user:alice")
 """
 
 from .config import DEFAULT_FACT_TYPES, FactType, MemexConfig

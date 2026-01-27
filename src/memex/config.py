@@ -5,9 +5,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
-
-LLMProvider = Literal["openai", "azure", "ollama", "anthropic"]
 
 
 @dataclass
@@ -55,74 +52,30 @@ DEFAULT_FACT_TYPES: list[FactType] = [
 class MemexConfig:
     """Configuration for Memex memory system.
 
+    LLM configuration is handled by TypeAgent via environment variables:
+        - OPENAI_API_KEY or AZURE_OPENAI_API_KEY
+        - AZURE_OPENAI_ENDPOINT (for Azure)
+
     Attributes:
         storage_path: Base directory for storing memory databases.
-            Defaults to "./memex_data".
-        llm_provider: LLM provider to use. One of "openai", "azure", "ollama", "anthropic".
-            Defaults to "openai".
-        llm_model: Model name to use. Defaults to environment variable or "gpt-4o".
-        llm_api_key: API key for the LLM provider. Defaults to environment variable.
-        llm_endpoint: Custom endpoint URL for LLM API. Optional.
-        auto_extract: Whether to automatically extract knowledge from messages.
-            Defaults to True.
-        db_name: Database filename. Defaults to "memory.db".
-        fact_types: List of fact types to extract. Defaults to DEFAULT_FACT_TYPES.
-        similarity_threshold: Minimum similarity score for memory matching. Defaults to 0.5.
+        db_name: Database filename.
+        fact_types: List of fact types to extract from conversations.
+        similarity_threshold: Minimum similarity score for memory matching (0.0-1.0).
     """
 
+    # Class-level default config
+    _default: "MemexConfig | None" = None
+
     storage_path: str = "./memex_data"
-    llm_provider: LLMProvider = "openai"
-    llm_model: str | None = None
-    llm_api_key: str | None = None
-    llm_endpoint: str | None = None
-    auto_extract: bool = True
     db_name: str = "memory.db"
     fact_types: list[FactType] = field(default_factory=lambda: DEFAULT_FACT_TYPES.copy())
     similarity_threshold: float = 0.5
 
     def __post_init__(self) -> None:
         """Load defaults from environment variables if not set."""
-        if self.llm_model is None:
-            self.llm_model = os.getenv("OPENAI_MODEL", "gpt-4o")
-
-        if self.llm_api_key is None:
-            if self.llm_provider == "azure":
-                self.llm_api_key = os.getenv("AZURE_OPENAI_API_KEY")
-            elif self.llm_provider == "anthropic":
-                self.llm_api_key = os.getenv("ANTHROPIC_API_KEY")
-            else:
-                self.llm_api_key = os.getenv("OPENAI_API_KEY")
-
-        if self.llm_endpoint is None:
-            if self.llm_provider == "azure":
-                self.llm_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-            elif self.llm_provider == "ollama":
-                self.llm_endpoint = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434")
-
-        # Handle environment variable for storage path
         env_storage = os.getenv("MEMEX_STORAGE_PATH")
         if env_storage and self.storage_path == "./memex_data":
             self.storage_path = env_storage
-
-    @classmethod
-    def from_env(cls) -> MemexConfig:
-        """Create configuration from environment variables.
-
-        Environment variables:
-            MEMEX_STORAGE_PATH: Base storage path
-            MEMEX_LLM_PROVIDER: LLM provider (openai, azure, ollama, anthropic)
-            OPENAI_MODEL: Model name
-            OPENAI_API_KEY: OpenAI API key
-            AZURE_OPENAI_API_KEY: Azure OpenAI API key
-            AZURE_OPENAI_ENDPOINT: Azure OpenAI endpoint
-
-        Returns:
-            MemexConfig instance.
-        """
-        return cls(
-            storage_path=os.getenv("MEMEX_STORAGE_PATH", "./memex_data"),
-            llm_provider=os.getenv("MEMEX_LLM_PROVIDER", "openai"),  # type: ignore
-        )
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> MemexConfig:
@@ -130,8 +83,6 @@ class MemexConfig:
 
         YAML format:
             storage_path: ./memex_data
-            llm_provider: openai
-            llm_model: gpt-4o
             similarity_threshold: 0.5
             fact_types:
               - name: Personal Preferences
@@ -169,3 +120,51 @@ class MemexConfig:
             config.fact_types = fact_types
 
         return config
+
+    @classmethod
+    def set_default(
+        cls,
+        storage_path: str = "./memex_data",
+        fact_types: list[FactType] | None = None,
+        similarity_threshold: float = 0.5,
+    ) -> "MemexConfig":
+        """Set the global default configuration.
+
+        This allows you to configure once and use everywhere:
+
+            MemexConfig.set_default(storage_path="./my_data")
+            alice = Memory(collection="user:alice")  # uses default config
+            bob = Memory(collection="user:bob")      # uses same default config
+
+        Args:
+            storage_path: Base directory for storing memory databases.
+            fact_types: List of fact types to extract.
+            similarity_threshold: Minimum similarity score for memory matching.
+
+        Returns:
+            The created default MemexConfig instance.
+        """
+        cls._default = cls(
+            storage_path=storage_path,
+            fact_types=fact_types or DEFAULT_FACT_TYPES.copy(),
+            similarity_threshold=similarity_threshold,
+        )
+        return cls._default
+
+    @classmethod
+    def get_default(cls) -> "MemexConfig":
+        """Get the global default configuration.
+
+        If no default has been set, creates one with default values.
+
+        Returns:
+            The default MemexConfig instance.
+        """
+        if cls._default is None:
+            cls._default = cls()
+        return cls._default
+
+    @classmethod
+    def clear_default(cls) -> None:
+        """Clear the global default configuration."""
+        cls._default = None

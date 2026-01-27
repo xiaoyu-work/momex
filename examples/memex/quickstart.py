@@ -2,14 +2,12 @@
 
 This example demonstrates the basic usage of Memex for structured memory.
 
-Before running:
-1. Set your OpenAI API key:
-   export OPENAI_API_KEY=your-api-key
-   export OPENAI_MODEL=gpt-4o
-
-2. Or create a .env file with:
-   OPENAI_API_KEY=your-api-key
-   OPENAI_MODEL=gpt-4o
+Prerequisites:
+    Set LLM API key via environment variable:
+        export OPENAI_API_KEY=sk-xxx
+    Or for Azure:
+        export AZURE_OPENAI_API_KEY=xxx
+        export AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
 
 Run:
     python examples/memex/quickstart.py

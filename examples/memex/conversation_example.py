@@ -2,6 +2,9 @@
 
 This example demonstrates how to store memories from conversations
 using the add_conversation() method.
+
+Prerequisites:
+    export OPENAI_API_KEY=sk-xxx
 """
 
 from memex import Memory, MemexConfig

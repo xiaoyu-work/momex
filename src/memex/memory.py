@@ -103,7 +103,7 @@ class Memory:
             config: Configuration object. If None, uses default config.
         """
         self.collection = collection
-        self.config = config or MemexConfig()
+        self.config = config or MemexConfig.get_default()
 
         # Generate database path from collection name using pathlib
         storage_path = Path(self.config.storage_path)

@@ -4,7 +4,13 @@
 
 ```bash
 pip install -e .
+
+# LLM configuration (via TypeAgent)
 export OPENAI_API_KEY=your-key
+
+# Or for Azure:
+export AZURE_OPENAI_API_KEY=your-key
+export AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
 ```
 
 ## Core Concepts
@@ -37,14 +43,9 @@ Query behavior:
 ### Create Memory
 
 ```python
-from memex import Memory, MemexConfig
+from memex import Memory
 
-# Simple - uses default config
 memory = Memory(collection="user:alice")
-
-# With custom config
-config = MemexConfig(storage_path="./my_data")
-memory = Memory(collection="user:alice", config=config)
 ```
 
 ### Add and Query
@@ -54,7 +55,7 @@ memory = Memory(collection="user:alice")
 
 # Add memories manually
 memory.add("I love Python programming")
-memory.add("Project deadline is Friday", speaker="Manager")
+memory.add("Project deadline is Friday")
 
 # Query
 answer = memory.query("What programming language does the user like?")
@@ -118,15 +119,16 @@ manager.rename("user:old", "user:new")
 ### MemexConfig
 
 ```python
-from memex import MemexConfig
+from memex import Memory, MemexConfig
 
-config = MemexConfig(
-    storage_path="./memex_data",      # Where to store databases
-    llm_provider="openai",            # "openai", "azure", "anthropic"
-    llm_model="gpt-4o",               # Model for fact extraction
-    similarity_threshold=0.5,         # For memory deduplication (0.0-1.0)
-    fact_types=[...],                 # Custom fact types (see below)
-)
+# Custom storage path
+config = MemexConfig(storage_path="./my_data")
+memory = Memory(collection="user:alice", config=config)
+
+# Or set global default
+MemexConfig.set_default(storage_path="./my_data")
+alice = Memory(collection="user:alice")  # uses default
+bob = Memory(collection="user:bob")      # uses default
 ```
 
 ### YAML Configuration
@@ -134,7 +136,6 @@ config = MemexConfig(
 ```yaml
 # memex_config.yaml
 storage_path: ./memex_data
-llm_provider: openai
 similarity_threshold: 0.5
 
 fact_types:
@@ -142,8 +143,6 @@ fact_types:
     description: Likes, dislikes, preferences for food, products, activities
   - name: Professional Details
     description: Job titles, projects, skills, career goals
-  - name: Technical Stack
-    description: Programming languages, frameworks, tools
 ```
 
 ```python
@@ -178,7 +177,7 @@ config = MemexConfig(
 
 | Method | Description |
 |--------|-------------|
-| `add(text, speaker?, timestamp?)` | Add a single memory |
+| `add(text, timestamp?)` | Add a single memory |
 | `add_batch(items)` | Add multiple memories |
 | `add_conversation(messages)` | Store important info from conversation |
 | `query(question)` | Query this collection with natural language |
