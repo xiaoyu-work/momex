@@ -41,3 +41,7 @@ pytest.local.ini
 
 # Monty Python demo
 /examples/testdata/MP
+
+# Memex
+memex_data/
+test.py
