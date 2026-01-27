@@ -106,7 +106,21 @@ Controls how similar an existing memory must be to consider it for UPDATE/DELETE
 - Higher threshold: More strict matching, more ADD operations
 - Lower threshold: More lenient matching, more UPDATE operations
 
+## Soft Delete
+
+TypeAgent uses append-only storage by design. Memex implements soft delete:
+
+- Deleted message IDs stored in `deleted.json` alongside `memory.db`
+- Deleted memories filtered out in queries, searches, exports
+- Can restore deleted memories via `restore(memory_id)`
+
+```
+./memex_data/user/alice/
+├── memory.db      # TypeAgent data (append-only)
+└── deleted.json   # Soft delete records
+```
+
 ## Limitations
 
-- **DELETE not fully implemented**: TypeAgent doesn't support direct deletion by message ID. DELETE events are tracked but memories are not actually removed.
-- **No transactions**: Operations are not atomic.
+- **No hard delete**: Messages remain in database, only filtered out
+- **No transactions**: Operations are not atomic

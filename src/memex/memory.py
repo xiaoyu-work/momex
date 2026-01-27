@@ -116,6 +116,11 @@ class Memory:
         self._conversation = None
         self._initialized = False
 
+        # Soft delete support
+        self._deleted_file = self._db_path.parent / "deleted.json"
+        self._deleted_ids: set[int] = set()
+        self._load_deleted()
+
         # Auto-load dotenv
         self._load_dotenv()
 
@@ -130,6 +135,34 @@ class Memory:
                 load_dotenv()
             except ImportError:
                 pass
+
+    def _load_deleted(self) -> None:
+        """Load deleted IDs from file."""
+        if self._deleted_file.exists():
+            try:
+                with open(self._deleted_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self._deleted_ids = set(data.get("deleted_ids", []))
+            except (json.JSONDecodeError, IOError):
+                self._deleted_ids = set()
+
+    def _save_deleted(self) -> None:
+        """Save deleted IDs to file."""
+        data = {
+            "deleted_ids": list(self._deleted_ids),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with open(self._deleted_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def _mark_deleted(self, msg_id: int) -> None:
+        """Mark a message as deleted."""
+        self._deleted_ids.add(msg_id)
+        self._save_deleted()
+
+    def _is_deleted(self, msg_id: int) -> bool:
+        """Check if a message is deleted."""
+        return msg_id in self._deleted_ids
 
     async def _ensure_initialized(self) -> None:
         """Ensure the conversation is initialized."""
@@ -275,6 +308,10 @@ class Memory:
                 if len(results) >= limit:
                     break
 
+                # Skip deleted messages
+                if self._is_deleted(i):
+                    continue
+
                 text = " ".join(msg.text_chunks) if msg.text_chunks else ""
                 if query.lower() in text.lower():
                     results.append(
@@ -298,6 +335,11 @@ class Memory:
         if self._db_path.exists():
             self._db_path.unlink()
 
+        # Also clear deleted records
+        if self._deleted_file.exists():
+            self._deleted_file.unlink()
+        self._deleted_ids = set()
+
         self._conversation = None
         self._initialized = False
 
@@ -311,12 +353,15 @@ class Memory:
         """
         await self._ensure_initialized()
 
-        message_count = len(self._conversation.messages) if self._conversation.messages else 0
+        total_count = len(self._conversation.messages) if self._conversation.messages else 0
+        deleted_count = len(self._deleted_ids)
+        active_count = total_count - deleted_count
         semref_count = len(self._conversation.semantic_refs) if self._conversation.semantic_refs else 0
 
         return {
             "collection": self.collection,
-            "total_memories": message_count,
+            "total_memories": active_count,
+            "deleted_memories": deleted_count,
             "entities_extracted": semref_count,
             "db_path": str(self._db_path),
         }
@@ -336,6 +381,10 @@ class Memory:
 
         if self._conversation.messages:
             for i, msg in enumerate(self._conversation.messages):
+                # Skip deleted messages
+                if self._is_deleted(i):
+                    continue
+
                 data["memories"].append(
                     {
                         "id": str(i),
@@ -415,7 +464,7 @@ class Memory:
             # No facts to process
             return result
 
-        # Build existing memories index with embeddings
+        # Build existing memories index with embeddings (excluding deleted)
         existing_memories: list[dict] = []
         memory_embeddings: list = []
 
@@ -424,6 +473,10 @@ class Memory:
             texts_to_embed = []
 
             for i, msg in enumerate(self._conversation.messages):
+                # Skip deleted messages
+                if self._is_deleted(i):
+                    continue
+
                 text = " ".join(msg.text_chunks) if msg.text_chunks else ""
                 if text:
                     existing_memories.append({"id": str(i), "text": text})
@@ -491,9 +544,15 @@ class Memory:
                         await self.add_async(text)
                         result.memories_added += 1
                     elif event == MemoryEvent.UPDATE and text:
+                        # Mark old memory as deleted, add new one
+                        if action_id and action_id.isdigit():
+                            self._mark_deleted(int(action_id))
                         await self.add_async(text)
                         result.memories_updated += 1
                     elif event == MemoryEvent.DELETE:
+                        # Mark the memory as deleted
+                        if action_id and action_id.isdigit():
+                            self._mark_deleted(int(action_id))
                         result.memories_deleted += 1
         else:
             # No existing memories, add all facts directly
@@ -529,6 +588,72 @@ class Memory:
                     continue
 
         return {"facts": [], "memory": []}
+
+    async def delete_async(self, memory_id: int) -> bool:
+        """Delete a memory by ID (soft delete).
+
+        Args:
+            memory_id: The ID of the memory to delete.
+
+        Returns:
+            True if deleted, False if already deleted or not found.
+        """
+        await self._ensure_initialized()
+
+        # Check if memory exists
+        message_count = len(self._conversation.messages) if self._conversation.messages else 0
+        if memory_id < 0 or memory_id >= message_count:
+            return False
+
+        # Check if already deleted
+        if self._is_deleted(memory_id):
+            return False
+
+        self._mark_deleted(memory_id)
+        return True
+
+    async def restore_async(self, memory_id: int) -> bool:
+        """Restore a deleted memory.
+
+        Args:
+            memory_id: The ID of the memory to restore.
+
+        Returns:
+            True if restored, False if not deleted.
+        """
+        if memory_id not in self._deleted_ids:
+            return False
+
+        self._deleted_ids.remove(memory_id)
+        self._save_deleted()
+        return True
+
+    async def list_deleted_async(self) -> list[MemoryItem]:
+        """List all deleted memories.
+
+        Returns:
+            List of deleted MemoryItem objects.
+        """
+        await self._ensure_initialized()
+
+        results: list[MemoryItem] = []
+
+        if self._conversation.messages:
+            for i in self._deleted_ids:
+                if i < len(self._conversation.messages):
+                    msg = self._conversation.messages[i]
+                    text = " ".join(msg.text_chunks) if msg.text_chunks else ""
+                    results.append(
+                        MemoryItem(
+                            id=str(i),
+                            text=text,
+                            speaker=msg.metadata.speaker if msg.metadata else None,
+                            timestamp=msg.timestamp,
+                            collection=self.collection,
+                        )
+                    )
+
+        return results
 
     # =========================================================================
     # Sync API (default)
@@ -598,6 +723,18 @@ class Memory:
             ConversationResult with extracted facts and operations performed.
         """
         return run_sync(self.add_conversation_async(messages, similarity_limit))
+
+    def delete(self, memory_id: int) -> bool:
+        """Delete a memory by ID (soft delete)."""
+        return run_sync(self.delete_async(memory_id))
+
+    def restore(self, memory_id: int) -> bool:
+        """Restore a deleted memory."""
+        return run_sync(self.restore_async(memory_id))
+
+    def list_deleted(self) -> list[MemoryItem]:
+        """List all deleted memories."""
+        return run_sync(self.list_deleted_async())
 
     # =========================================================================
     # Properties

@@ -180,9 +180,12 @@ config = MemexConfig(
 |--------|-------------|
 | `add(text, speaker?, timestamp?)` | Add a single memory |
 | `add_batch(items)` | Add multiple memories |
-| `add_conversation(messages)` | Extract facts from conversation and add |
+| `add_conversation(messages)` | Store important info from conversation |
 | `query(question)` | Query this collection with natural language |
 | `search(keyword, limit=10)` | Search by keyword |
+| `delete(memory_id)` | Soft delete a memory |
+| `restore(memory_id)` | Restore a deleted memory |
+| `list_deleted()` | List all deleted memories |
 | `stats()` | Get memory statistics |
 | `export(path)` | Export to JSON file |
 | `clear()` | Delete all memories in this collection |
