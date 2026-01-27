@@ -3,42 +3,35 @@
 A high-level API for structured knowledge memory, built on TypeAgent's
 Structured RAG technology.
 
-Example - Single Collection:
+Example - Add memories:
     >>> from memex import Memory
     >>>
-    >>> # Create memory for a collection
-    >>> memory = Memory(collection="user:alice")
+    >>> # Create memory with hierarchical collection name
+    >>> memory = Memory(collection="company:engineering:alice")
     >>>
     >>> # Add memories
     >>> memory.add("Alice likes cats")
     >>> memory.add("The project deadline is Friday")
-    >>>
-    >>> # Query with natural language
-    >>> answer = memory.query("What does Alice like?")
-    >>> print(answer)  # "Alice likes cats"
 
-Example - Multiple Collections with MemoryPool:
-    >>> from memex import MemoryPool
+Example - Query with prefix (hierarchical):
+    >>> from memex import query
     >>>
-    >>> # Create a pool with multiple collections
-    >>> pool = MemoryPool(
-    ...     collections=["user:alice", "team:engineering", "project:x"],
-    ...     default_collection="user:alice"
-    ... )
+    >>> # Query single person
+    >>> answer = query("company:engineering:alice", "What does Alice like?")
     >>>
-    >>> # Add to specific collections
-    >>> pool.add("Personal note", collections=["user:alice"])
-    >>> pool.add("Team decision", collections=["team:engineering", "project:x"])
+    >>> # Query entire team (matches all under prefix)
+    >>> answer = query("company:engineering", "What are the deadlines?")
     >>>
-    >>> # Query across all collections
-    >>> answer = pool.query("What decisions were made?")
+    >>> # Query entire company
+    >>> answer = query("company", "Who likes cats?")
 
 Example - Managing Collections:
     >>> from memex import MemoryManager
     >>>
     >>> manager = MemoryManager()
-    >>> collections = manager.list_collections()
-    >>> manager.delete("user:old_user")
+    >>> collections = manager.list_collections()  # all
+    >>> collections = manager.list_collections(prefix="company:engineering")  # filtered
+    >>> manager.delete("company:engineering:old_user")
 
 Configuration:
     >>> from memex import Memory, MemexConfig
@@ -48,21 +41,27 @@ Configuration:
     ...     llm_provider="openai",
     ...     llm_model="gpt-4o",
     ... )
-    >>> memory = Memory(collection="user:alice", config=config)
+    >>> memory = Memory(collection="company:engineering:alice", config=config)
 """
 
 from .config import MemexConfig
 from .manager import MemoryManager
 from .memory import AddResult, Memory, MemoryItem
-from .pool import MemoryPool
+from .query import query, search, stats, query_async, search_async, stats_async
 
 __all__ = [
     "Memory",
-    "MemoryPool",
     "MemoryManager",
     "MemexConfig",
     "MemoryItem",
     "AddResult",
+    # Prefix query functions
+    "query",
+    "search",
+    "stats",
+    "query_async",
+    "search_async",
+    "stats_async",
 ]
 
 __version__ = "0.2.0"

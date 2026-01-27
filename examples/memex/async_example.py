@@ -6,34 +6,33 @@ when integrating with async frameworks like FastAPI, aiohttp, etc.
 
 import asyncio
 
-from memex import Memory
+from memex import Memory, query_async
 
 
 async def main():
-    # Create memory for a collection
-    memory = Memory(collection="user:async_demo")
+    # Create memory with hierarchical identity
+    memory = Memory(collection="company:engineering:alice")
 
     # Add memories asynchronously
     print("Adding memories asynchronously...")
 
     # Add multiple items concurrently
     tasks = [
-        memory.add_async("Python是一种编程语言", speaker="教程"),
-        memory.add_async("机器学习需要大量数据", speaker="课程"),
-        memory.add_async("深度学习是机器学习的子集", speaker="课程"),
+        memory.add_async("Python is my favorite language", speaker="Alice"),
+        memory.add_async("Currently learning machine learning", speaker="Alice"),
+        memory.add_async("The project uses FastAPI framework", speaker="Alice"),
     ]
 
     results = await asyncio.gather(*tasks)
     for i, result in enumerate(results):
-        print(f"  Added item {i + 1}: {result.messages_added} messages, {result.entities_extracted} entities")
+        print(f"  Added item {i + 1}: {result.messages_added} messages")
 
     # Or use batch add for better performance
     print("\nAdding batch memories...")
     batch_result = await memory.add_batch_async(
         [
-            {"text": "TensorFlow是Google的深度学习框架", "speaker": "文档"},
-            {"text": "PyTorch是Facebook的深度学习框架", "speaker": "文档"},
-            {"text": "Keras是高级神经网络API", "speaker": "文档"},
+            {"text": "TensorFlow is used for deep learning", "speaker": "Alice"},
+            {"text": "PyTorch is more flexible", "speaker": "Alice"},
         ]
     )
     print(f"  Batch added: {batch_result.messages_added} messages")
@@ -41,19 +40,13 @@ async def main():
     # Query asynchronously
     print("\n--- Async Queries ---")
 
-    questions = [
-        "什么是深度学习?",
-        "有哪些深度学习框架?",
-        "TensorFlow是谁开发的?",
-    ]
+    # Query single collection
+    answer = await memory.query_async("What programming language does Alice like?")
+    print(f"\nAlice's collection: {answer}")
 
-    # Query concurrently
-    query_tasks = [memory.query_async(q) for q in questions]
-    answers = await asyncio.gather(*query_tasks)
-
-    for q, a in zip(questions, answers):
-        print(f"\nQ: {q}")
-        print(f"A: {a}")
+    # Query with prefix (async version)
+    answer = await query_async("company:engineering", "What deep learning frameworks are there?")
+    print(f"\nEngineering team: {answer}")
 
     # Get stats
     stats = await memory.stats_async()

@@ -48,11 +48,15 @@ class MemoryManager:
         self.config = config or MemexConfig()
         self._storage_path = Path(self.config.storage_path)
 
-    def list_collections(self) -> list[str]:
-        """List all collections.
+    def list_collections(self, prefix: str | None = None) -> list[str]:
+        """List all collections, optionally filtered by prefix.
+
+        Args:
+            prefix: Optional prefix to filter collections.
+                    e.g., "company:engineering" matches "company:engineering:alice"
 
         Returns:
-            List of collection names (e.g., "user:alice", "team:engineering").
+            List of collection names.
         """
         collections = []
 
@@ -66,7 +70,11 @@ class MemoryManager:
             # Convert path to collection name
             collection_name = _path_to_collection(rel_path)
             if collection_name:
-                collections.append(collection_name)
+                # Filter by prefix if specified
+                if prefix is None:
+                    collections.append(collection_name)
+                elif collection_name == prefix or collection_name.startswith(prefix + ":"):
+                    collections.append(collection_name)
 
         return sorted(collections)
 

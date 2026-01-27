@@ -16,39 +16,29 @@ This fork adds **Memex** - a simplified, collection-based API wrapper for TypeAg
 | Feature | Description |
 |---------|-------------|
 | **Simplified API** | No `TranscriptMessage` or `async/await` needed |
-| **Collection-based** | Flexible data isolation with any naming scheme |
-| **MemoryPool** | Query across multiple collections |
+| **Hierarchical collections** | Use `:` to create nested structure (unlimited levels) |
+| **Prefix queries** | Query `company` to search all `company:*` |
 | **MemoryManager** | List, delete, rename collections |
 | **Sync API** | Synchronous methods by default |
-| **Auto-config** | Auto `.env` loading and path management |
 
 ## Quick Start
 
 ```python
-from memex import Memory
+from memex import Memory, query
 
-memory = Memory(collection="user:alice")
-memory.add("Alice is the project manager")
-answer = memory.query("Who is the project manager?")
-```
+# Add memories with hierarchical identity
+alice = Memory(collection="company:engineering:alice")
+alice.add("I like Python")
 
-## Collection Examples
+bob = Memory(collection="company:engineering:bob")
+bob.add("I prefer Java")
 
-```python
-from memex import Memory, MemoryPool
+# Query with prefix - searches all matching collections
+answer = query("company:engineering", "What languages do people like?")
+# Searches both alice and bob
 
-# Single collection
-alice = Memory(collection="user:alice")
-# Stored at: ./memex_data/user/alice/memory.db
-
-# Query across multiple collections
-pool = MemoryPool(
-    collections=["user:alice", "team:engineering"],
-    default_collection="user:alice"
-)
-pool.add("Personal note")
-pool.add("Team decision", collections=["team:engineering"])
-answer = pool.query("What decisions were made?")
+answer = query("company", "Who likes Python?")
+# Searches entire company
 ```
 
 See [docs/memex.md](docs/memex.md) for full documentation.

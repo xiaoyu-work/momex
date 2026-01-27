@@ -4,32 +4,27 @@
 
 ### 0.4.0 (Jan 26)
 
-#### New Feature: Memex - Simplified Collection-Based Memory API
+#### New Feature: Memex - Hierarchical Memory API
 
 Added `memex` package, a high-level wrapper around TypeAgent's Structured RAG:
 
 - **Simplified API**: No need to manage `TranscriptMessage` or async/await
-- **Collection-based isolation**: Flexible grouping with any naming scheme (e.g., `user:alice`, `team:engineering`)
-- **MemoryPool**: Query across multiple collections
-- **MemoryManager**: List, delete, rename, copy collections
+- **Hierarchical collections**: Use `:` to create nested organization (unlimited levels)
+- **Prefix queries**: Query `company` to search all under `company:*`
+- **MemoryManager**: List, delete, rename, copy collections (with prefix filter)
 - **Sync & Async APIs**: Both sync (default) and async methods available
-- **Auto-configuration**: Automatic `.env` loading and database path management
 - **Cross-platform**: Uses pathlib for Windows/Unix compatibility
 
 ```python
-from memex import Memory, MemoryPool
+from memex import Memory, query
 
-# Single collection
-memory = Memory(collection="user:alice")
-memory.add("Alice likes cats")
-answer = memory.query("What does Alice like?")
+# Add memories with hierarchical identity
+alice = Memory(collection="company:engineering:alice")
+alice.add("I like Python")
 
-# Multiple collections
-pool = MemoryPool(
-    collections=["user:alice", "team:engineering"],
-    default_collection="user:alice"
-)
-pool.query("What decisions were made?")  # Searches all
+# Query with prefix - searches all matching collections
+answer = query("company:engineering", "What languages?")  # Searches alice + bob
+answer = query("company", "Who likes Python?")            # Searches entire company
 ```
 
 See [Memex Documentation](docs/memex.md) for details.

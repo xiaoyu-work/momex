@@ -15,43 +15,37 @@ Run:
     python examples/memex/quickstart.py
 """
 
-from memex import Memory
+from memex import Memory, query
 
 
 def main():
-    # Create memory for a collection
-    print("Creating memory for user:demo...")
-    memory = Memory(collection="user:demo")
+    # Create memory with hierarchical identity
+    print("Creating memory for company:engineering:alice...")
+    memory = Memory(collection="company:engineering:alice")
 
     # Add some memories
     print("\nAdding memories...")
-    memory.add("今天和张三开会讨论了项目进度", speaker="我")
-    memory.add("张三说下周五之前能完成API开发", speaker="会议记录")
-    memory.add("李四负责前端开发，王五负责后端开发", speaker="会议记录")
-    memory.add("项目截止日期是下个月15号", speaker="经理")
+    memory.add("I like Python programming", speaker="Alice")
+    memory.add("Need to finish API development by Friday", speaker="Alice")
+    memory.add("Project deadline is the 15th of next month", speaker="Manager")
 
     # Get statistics
     stats = memory.stats()
     print(f"\nMemory stats: {stats}")
 
-    # Query with natural language
-    print("\n--- Querying memories ---")
+    # Query single collection
+    print("\n--- Querying Alice's memories only ---")
+    answer = memory.query("What programming language does Alice like?")
+    print(f"Answer: {answer}")
 
-    questions = [
-        "谁负责API开发?",
-        "项目截止日期是什么时候?",
-        "李四负责什么?",
-        "下周五有什么安排?",
-    ]
-
-    for q in questions:
-        print(f"\nQ: {q}")
-        answer = memory.query(q)
-        print(f"A: {answer}")
+    # Query with prefix (would search all engineering if others existed)
+    print("\n--- Querying with prefix ---")
+    answer = query("company:engineering:alice", "When is the project deadline?")
+    print(f"Answer: {answer}")
 
     # Search by keyword
-    print("\n--- Searching for '张三' ---")
-    results = memory.search("张三")
+    print("\n--- Searching for 'API' ---")
+    results = memory.search("API")
     for item in results:
         print(f"  - {item.text}")
 
