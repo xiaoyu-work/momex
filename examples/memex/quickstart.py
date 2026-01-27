@@ -15,45 +15,58 @@ Run:
     python examples/memex/quickstart.py
 """
 
-from memex import Memory, query
+from memex import Memory
 
 
 def main():
-    # Create memory with hierarchical identity
-    print("Creating memory for company:engineering:alice...")
-    memory = Memory(collection="company:engineering:alice")
+    # Create memory for a user
+    print("Creating memory for user:alice...")
+    memory = Memory(collection="user:alice")
 
-    # Add some memories
-    print("\nAdding memories...")
-    memory.add("I like Python programming", speaker="Alice")
-    memory.add("Need to finish API development by Friday", speaker="Alice")
-    memory.add("Project deadline is the 15th of next month", speaker="Manager")
+    # ===========================================
+    # Method 1: Add memories manually
+    # ===========================================
+    print("\n--- Adding memories manually ---")
+    memory.add("I like Python programming")
+    memory.add("Project deadline is Friday")
+    print("Added 2 memories")
 
-    # Get statistics
+    # ===========================================
+    # Method 2: Add from conversation
+    # ===========================================
+    print("\n--- Adding from conversation ---")
+    conversation = [
+        {"role": "user", "content": "I'm working on a FastAPI backend project."},
+        {"role": "assistant", "content": "That sounds interesting!"},
+        {"role": "user", "content": "Yes, and I enjoy hiking on weekends."},
+    ]
+
+    result = memory.add_conversation(conversation)
+    if result.success:
+        print("Conversation memories stored!")
+    else:
+        print(f"Error: {result.error}")
+
+    # ===========================================
+    # Query memories
+    # ===========================================
+    print("\n--- Querying memories ---")
+
+    answer = memory.query("What programming language does the user like?")
+    print(f"Q: What programming language?\nA: {answer}")
+
+    answer = memory.query("What project is the user working on?")
+    print(f"\nQ: What project?\nA: {answer}")
+
+    answer = memory.query("What does the user do on weekends?")
+    print(f"\nQ: Weekend activity?\nA: {answer}")
+
+    # ===========================================
+    # Stats
+    # ===========================================
+    print("\n--- Stats ---")
     stats = memory.stats()
-    print(f"\nMemory stats: {stats}")
-
-    # Query single collection
-    print("\n--- Querying Alice's memories only ---")
-    answer = memory.query("What programming language does Alice like?")
-    print(f"Answer: {answer}")
-
-    # Query with prefix (would search all engineering if others existed)
-    print("\n--- Querying with prefix ---")
-    answer = query("company:engineering:alice", "When is the project deadline?")
-    print(f"Answer: {answer}")
-
-    # Search by keyword
-    print("\n--- Searching for 'API' ---")
-    results = memory.search("API")
-    for item in results:
-        print(f"  - {item.text}")
-
-    # Export memories
-    export_path = "./memex_export.json"
-    print(f"\nExporting to {export_path}...")
-    memory.export(export_path)
-    print("Done!")
+    print(f"Total memories: {stats['total_memories']}")
 
 
 if __name__ == "__main__":
