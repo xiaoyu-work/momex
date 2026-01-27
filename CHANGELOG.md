@@ -2,6 +2,33 @@
 
 ## 2025
 
+### 0.4.0 (Jan 26)
+
+#### New Feature: Memex - Simplified Multi-Tenant API
+
+Added `memex` package, a high-level wrapper around TypeAgent's Structured RAG:
+
+- **Simplified API**: No need to manage `TranscriptMessage` or async/await
+- **Multi-tenant support**: Automatic data isolation via `user_id`, `org_id`, `agent_id`
+- **Sync & Async APIs**: Both sync (default) and async methods available
+- **Auto-configuration**: Automatic `.env` loading and database path management
+
+```python
+from memex import Memory
+
+memory = Memory(user_id="user_123")
+memory.add("Alice is the project manager")
+answer = memory.query("Who is the project manager?")
+```
+
+See [Memex Documentation](docs/memex.md) for details.
+
+#### Files Added
+- `src/memex/` - New memex package
+- `docs/memex.md` - Memex documentation
+- `tests/test_memex/` - Memex tests
+- `examples/memex/` - Usage examples
+
 ### 0.3.3 (Nov 25)
 
 General cleanup and fixes, and the following notable improvements:
