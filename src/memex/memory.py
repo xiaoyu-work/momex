@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from .config import MemexConfig
-from .sync import run_sync
 
 
 @dataclass
@@ -183,7 +182,7 @@ class Memory:
     # Async API
     # =========================================================================
 
-    async def add_async(
+    async def add(
         self,
         text: str,
         speaker: str | None = None,
@@ -211,7 +210,11 @@ class Memory:
         )
 
         if timestamp is None:
-            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%Sz")
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Use collection as speaker if not provided
+        if speaker is None:
+            speaker = self.collection
 
         msg = ConversationMessage(
             text_chunks=[text],
@@ -230,7 +233,7 @@ class Memory:
             collections=[self.collection],
         )
 
-    async def add_batch_async(
+    async def add_batch(
         self,
         items: list[dict[str, Any]],
     ) -> AddResult:
@@ -253,14 +256,17 @@ class Memory:
         for item in items:
             timestamp = item.get("timestamp")
             if timestamp is None:
-                timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%Sz")
+                timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            # Use collection as speaker if not provided
+            speaker = item.get("speaker") or self.collection
 
             msg = ConversationMessage(
                 text_chunks=[item["text"]],
                 tags=item.get("tags", []),
                 timestamp=timestamp,
                 metadata=ConversationMessageMeta(
-                    speaker=item.get("speaker"),
+                    speaker=speaker,
                 ),
             )
             messages.append(msg)
@@ -273,7 +279,7 @@ class Memory:
             collections=[self.collection],
         )
 
-    async def query_async(self, question: str) -> str:
+    async def query(self, question: str) -> str:
         """Query memories with natural language asynchronously.
 
         Args:
@@ -285,48 +291,87 @@ class Memory:
         await self._ensure_initialized()
         return await self._conversation.query(question)
 
-    async def search_async(
+    async def search(
         self,
         query: str,
         limit: int = 10,
+        threshold: float | None = None,
     ) -> list[MemoryItem]:
-        """Search memories by keyword/entity asynchronously.
+        """Search memories using vector similarity.
+
+        This method uses embedding-based semantic search to find memories
+        that are similar to the query. Results are sorted by similarity score.
 
         Args:
-            query: Search query (keyword, entity name, or topic).
+            query: Search query (natural language question or topic).
             limit: Maximum number of results to return.
+            threshold: Minimum similarity score (0.0-1.0). If None, uses config default.
 
         Returns:
-            List of MemoryItem objects.
+            List of MemoryItem objects sorted by relevance score.
         """
         await self._ensure_initialized()
 
+        from typeagent.aitools.embeddings import AsyncEmbeddingModel
+        import numpy as np
+
+        message_count = await self._conversation.messages.size()
+        if message_count == 0:
+            return []
+
+        # Collect all non-deleted memories and their texts
+        memories: list[tuple[int, str, Any]] = []  # (id, text, msg)
+        for i in range(message_count):
+            if self._is_deleted(i):
+                continue
+            msg = await self._conversation.messages.get_item(i)
+            text = " ".join(msg.text_chunks) if msg.text_chunks else ""
+            if text:
+                memories.append((i, text, msg))
+
+        if not memories:
+            return []
+
+        # Get embeddings
+        embedding_model = AsyncEmbeddingModel()
+        query_embedding = await embedding_model.get_embedding(query)
+        memory_texts = [m[1] for m in memories]
+        memory_embeddings = await embedding_model.get_embeddings(memory_texts)
+
+        # Calculate cosine similarity scores
+        # Embeddings are already normalized, so dot product = cosine similarity
+        scores = np.dot(memory_embeddings, query_embedding)
+
+        # Use threshold from config if not specified
+        min_threshold = threshold if threshold is not None else self.config.similarity_threshold
+
+        # Combine with memory data and filter by threshold
+        scored_memories = [
+            (memories[i], float(scores[i]))
+            for i in range(len(memories))
+            if scores[i] >= min_threshold
+        ]
+
+        # Sort by score descending
+        scored_memories.sort(key=lambda x: x[1], reverse=True)
+
+        # Return top results
         results: list[MemoryItem] = []
-
-        if self._conversation.messages:
-            for i, msg in enumerate(self._conversation.messages):
-                if len(results) >= limit:
-                    break
-
-                # Skip deleted messages
-                if self._is_deleted(i):
-                    continue
-
-                text = " ".join(msg.text_chunks) if msg.text_chunks else ""
-                if query.lower() in text.lower():
-                    results.append(
-                        MemoryItem(
-                            id=str(i),
-                            text=text,
-                            speaker=msg.metadata.speaker if msg.metadata else None,
-                            timestamp=msg.timestamp,
-                            collection=self.collection,
-                        )
-                    )
+        for (msg_id, text, msg), score in scored_memories[:limit]:
+            results.append(
+                MemoryItem(
+                    id=str(msg_id),
+                    text=text,
+                    speaker=msg.metadata.speaker if msg.metadata else None,
+                    timestamp=msg.timestamp,
+                    collection=self.collection,
+                    score=score,
+                )
+            )
 
         return results
 
-    async def clear_async(self) -> bool:
+    async def clear(self) -> bool:
         """Clear all memories for this collection asynchronously.
 
         Returns:
@@ -345,7 +390,7 @@ class Memory:
 
         return True
 
-    async def stats_async(self) -> dict[str, Any]:
+    async def stats(self) -> dict[str, Any]:
         """Get memory statistics asynchronously.
 
         Returns:
@@ -353,10 +398,10 @@ class Memory:
         """
         await self._ensure_initialized()
 
-        total_count = len(self._conversation.messages) if self._conversation.messages else 0
+        total_count = await self._conversation.messages.size()
         deleted_count = len(self._deleted_ids)
         active_count = total_count - deleted_count
-        semref_count = len(self._conversation.semantic_refs) if self._conversation.semantic_refs else 0
+        semref_count = await self._conversation.semantic_refs.size()
 
         return {
             "collection": self.collection,
@@ -366,7 +411,7 @@ class Memory:
             "db_path": str(self._db_path),
         }
 
-    async def export_async(self, path: str) -> None:
+    async def export(self, path: str) -> None:
         """Export all memories to a JSON file asynchronously.
 
         Args:
@@ -379,26 +424,27 @@ class Memory:
             "memories": [],
         }
 
-        if self._conversation.messages:
-            for i, msg in enumerate(self._conversation.messages):
-                # Skip deleted messages
-                if self._is_deleted(i):
-                    continue
+        message_count = await self._conversation.messages.size()
+        for i in range(message_count):
+            # Skip deleted messages
+            if self._is_deleted(i):
+                continue
 
-                data["memories"].append(
-                    {
-                        "id": str(i),
-                        "text": " ".join(msg.text_chunks) if msg.text_chunks else "",
-                        "speaker": msg.metadata.speaker if msg.metadata else None,
-                        "timestamp": msg.timestamp,
-                        "tags": msg.tags,
-                    }
-                )
+            msg = await self._conversation.messages.get_item(i)
+            data["memories"].append(
+                {
+                    "id": str(i),
+                    "text": " ".join(msg.text_chunks) if msg.text_chunks else "",
+                    "speaker": msg.metadata.speaker if msg.metadata else None,
+                    "timestamp": msg.timestamp,
+                    "tags": msg.tags,
+                }
+            )
 
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-    async def add_conversation_async(
+    async def add_conversation(
         self,
         messages: list[dict[str, str]],
         similarity_limit: int = 5,
@@ -421,7 +467,7 @@ class Memory:
             ConversationResult with extracted facts and operations performed.
 
         Example:
-            >>> result = await memory.add_conversation_async([
+            >>> result = await memory.add_conversation([
             ...     {"role": "user", "content": "My name is Alice and I love Python"},
             ...     {"role": "assistant", "content": "Nice to meet you, Alice!"},
             ... ])
@@ -468,15 +514,17 @@ class Memory:
         existing_memories: list[dict] = []
         memory_embeddings: list = []
 
-        if self._conversation.messages:
+        message_count = await self._conversation.messages.size()
+        if message_count > 0:
             embedding_model = AsyncEmbeddingModel()
             texts_to_embed = []
 
-            for i, msg in enumerate(self._conversation.messages):
+            for i in range(message_count):
                 # Skip deleted messages
                 if self._is_deleted(i):
                     continue
 
+                msg = await self._conversation.messages.get_item(i)
                 text = " ".join(msg.text_chunks) if msg.text_chunks else ""
                 if text:
                     existing_memories.append({"id": str(i), "text": text})
@@ -541,13 +589,13 @@ class Memory:
                     result.operations.append(op)
 
                     if event == MemoryEvent.ADD and text:
-                        await self.add_async(text)
+                        await self.add(text)
                         result.memories_added += 1
                     elif event == MemoryEvent.UPDATE and text:
                         # Mark old memory as deleted, add new one
                         if action_id and action_id.isdigit():
                             self._mark_deleted(int(action_id))
-                        await self.add_async(text)
+                        await self.add(text)
                         result.memories_updated += 1
                     elif event == MemoryEvent.DELETE:
                         # Mark the memory as deleted
@@ -559,7 +607,7 @@ class Memory:
             for fact in result.facts_extracted:
                 op = MemoryOperation(id="new", text=fact, event=MemoryEvent.ADD)
                 result.operations.append(op)
-                await self.add_async(fact)
+                await self.add(fact)
                 result.memories_added += 1
 
         return result
@@ -589,7 +637,7 @@ class Memory:
 
         return {"facts": [], "memory": []}
 
-    async def delete_async(self, memory_id: int) -> bool:
+    async def delete(self, memory_id: int) -> bool:
         """Delete a memory by ID (soft delete).
 
         Args:
@@ -601,7 +649,7 @@ class Memory:
         await self._ensure_initialized()
 
         # Check if memory exists
-        message_count = len(self._conversation.messages) if self._conversation.messages else 0
+        message_count = await self._conversation.messages.size()
         if memory_id < 0 or memory_id >= message_count:
             return False
 
@@ -612,7 +660,7 @@ class Memory:
         self._mark_deleted(memory_id)
         return True
 
-    async def restore_async(self, memory_id: int) -> bool:
+    async def restore(self, memory_id: int) -> bool:
         """Restore a deleted memory.
 
         Args:
@@ -628,7 +676,7 @@ class Memory:
         self._save_deleted()
         return True
 
-    async def list_deleted_async(self) -> list[MemoryItem]:
+    async def list_deleted(self) -> list[MemoryItem]:
         """List all deleted memories.
 
         Returns:
@@ -637,104 +685,23 @@ class Memory:
         await self._ensure_initialized()
 
         results: list[MemoryItem] = []
+        message_count = await self._conversation.messages.size()
 
-        if self._conversation.messages:
-            for i in self._deleted_ids:
-                if i < len(self._conversation.messages):
-                    msg = self._conversation.messages[i]
-                    text = " ".join(msg.text_chunks) if msg.text_chunks else ""
-                    results.append(
-                        MemoryItem(
-                            id=str(i),
-                            text=text,
-                            speaker=msg.metadata.speaker if msg.metadata else None,
-                            timestamp=msg.timestamp,
-                            collection=self.collection,
-                        )
+        for i in self._deleted_ids:
+            if i < message_count:
+                msg = await self._conversation.messages.get_item(i)
+                text = " ".join(msg.text_chunks) if msg.text_chunks else ""
+                results.append(
+                    MemoryItem(
+                        id=str(i),
+                        text=text,
+                        speaker=msg.metadata.speaker if msg.metadata else None,
+                        timestamp=msg.timestamp,
+                        collection=self.collection,
                     )
+                )
 
         return results
-
-    # =========================================================================
-    # Sync API (default)
-    # =========================================================================
-
-    def add(
-        self,
-        text: str,
-        speaker: str | None = None,
-        timestamp: str | None = None,
-        tags: list[str] | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> AddResult:
-        """Add a memory synchronously."""
-        return run_sync(
-            self.add_async(
-                text=text,
-                speaker=speaker,
-                timestamp=timestamp,
-                tags=tags,
-                metadata=metadata,
-            )
-        )
-
-    def add_batch(self, items: list[dict[str, Any]]) -> AddResult:
-        """Add multiple memories synchronously."""
-        return run_sync(self.add_batch_async(items))
-
-    def query(self, question: str) -> str:
-        """Query memories with natural language synchronously."""
-        return run_sync(self.query_async(question))
-
-    def search(self, query: str, limit: int = 10) -> list[MemoryItem]:
-        """Search memories by keyword/entity synchronously."""
-        return run_sync(self.search_async(query, limit))
-
-    def clear(self) -> bool:
-        """Clear all memories for this collection synchronously."""
-        return run_sync(self.clear_async())
-
-    def stats(self) -> dict[str, Any]:
-        """Get memory statistics synchronously."""
-        return run_sync(self.stats_async())
-
-    def export(self, path: str) -> None:
-        """Export all memories to a JSON file synchronously."""
-        return run_sync(self.export_async(path))
-
-    def add_conversation(
-        self,
-        messages: list[dict[str, str]],
-        similarity_limit: int = 5,
-    ) -> ConversationResult:
-        """Extract facts from a conversation and add to memory synchronously.
-
-        This method uses a multi-stage process:
-        1. Extract facts from the conversation
-        2. For each fact, vector search to find similar existing memories
-        3. LLM decides ADD/UPDATE/DELETE/NONE based on similar memories
-        4. Execute operations
-
-        Args:
-            messages: List of conversation messages, each with "role" and "content" keys.
-            similarity_limit: Max number of similar memories to retrieve per fact.
-
-        Returns:
-            ConversationResult with extracted facts and operations performed.
-        """
-        return run_sync(self.add_conversation_async(messages, similarity_limit))
-
-    def delete(self, memory_id: int) -> bool:
-        """Delete a memory by ID (soft delete)."""
-        return run_sync(self.delete_async(memory_id))
-
-    def restore(self, memory_id: int) -> bool:
-        """Restore a deleted memory."""
-        return run_sync(self.restore_async(memory_id))
-
-    def list_deleted(self) -> list[MemoryItem]:
-        """List all deleted memories."""
-        return run_sync(self.list_deleted_async())
 
     # =========================================================================
     # Properties

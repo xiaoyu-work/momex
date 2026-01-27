@@ -7,6 +7,7 @@ pip install -e .
 
 # LLM configuration (via TypeAgent)
 export OPENAI_API_KEY=your-key
+export OPENAI_MODEL=gpt-4o
 
 # Or for Azure:
 export AZURE_OPENAI_API_KEY=your-key
@@ -14,6 +15,23 @@ export AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
 ```
 
 ## Core Concepts
+
+### Async API
+
+Memex is fully async. All operations use `async/await`:
+
+```python
+import asyncio
+from memex import Memory
+
+async def main():
+    memory = Memory(collection="user:alice")
+    await memory.add("I like Python")
+    answer = await memory.query("What language?")
+    print(answer)
+
+asyncio.run(main())
+```
 
 ### Collection
 
@@ -34,31 +52,30 @@ company:marketing:charlie  →  ./memex_data/company/marketing/charlie/memory.db
 ```
 
 Query behavior:
-- `query("company:engineering:alice", ...)` → searches only alice
-- `query("company:engineering", ...)` → searches alice + bob
-- `query("company", ...)` → searches alice + bob + charlie
+- `await query("company:engineering:alice", ...)` → searches only alice
+- `await query("company:engineering", ...)` → searches alice + bob
+- `await query("company", ...)` → searches alice + bob + charlie
 
 ## Basic Usage
-
-### Create Memory
-
-```python
-from memex import Memory
-
-memory = Memory(collection="user:alice")
-```
 
 ### Add and Query
 
 ```python
-memory = Memory(collection="user:alice")
+import asyncio
+from memex import Memory
 
-# Add memories manually
-memory.add("I love Python programming")
-memory.add("Project deadline is Friday")
+async def main():
+    memory = Memory(collection="user:alice")
 
-# Query
-answer = memory.query("What programming language does the user like?")
+    # Add memories manually
+    await memory.add("I love Python programming")
+    await memory.add("Project deadline is Friday")
+
+    # Query
+    answer = await memory.query("What programming language does the user like?")
+    print(answer)
+
+asyncio.run(main())
 ```
 
 ### Add Conversation
@@ -66,15 +83,18 @@ answer = memory.query("What programming language does the user like?")
 Automatically store important information from conversation history:
 
 ```python
-memory.add_conversation([
-    {"role": "user", "content": "My name is Alice, I'm a Python developer"},
-    {"role": "assistant", "content": "Nice to meet you!"},
-    {"role": "user", "content": "I'm working on a FastAPI project"},
-])
+async def main():
+    memory = Memory(collection="user:alice")
 
-# Later, query the memories
-answer = memory.query("What is the user's name?")  # "Alice"
-answer = memory.query("What project is the user working on?")  # "FastAPI project"
+    result = await memory.add_conversation([
+        {"role": "user", "content": "My name is Alice, I'm a Python developer"},
+        {"role": "assistant", "content": "Nice to meet you!"},
+        {"role": "user", "content": "I'm working on a FastAPI project"},
+    ])
+
+    if result.success:
+        # Query the memories
+        answer = await memory.query("What is the user's name?")  # "Alice"
 ```
 
 ### Query Across Collections
@@ -82,20 +102,50 @@ answer = memory.query("What project is the user working on?")  # "FastAPI projec
 ```python
 from memex import Memory, query
 
-# Create memories for different users
-alice = Memory(collection="company:engineering:alice")
-alice.add("I like Python")
+async def main():
+    # Create memories for different users
+    alice = Memory(collection="company:engineering:alice")
+    await alice.add("I like Python")
 
-bob = Memory(collection="company:engineering:bob")
-bob.add("I prefer Java")
+    bob = Memory(collection="company:engineering:bob")
+    await bob.add("I prefer Java")
 
-# Query single collection
-answer = alice.query("What language?")
+    # Query single collection
+    answer = await alice.query("What language?")
 
-# Query by prefix - searches multiple collections
-answer = query("company:engineering", "What languages do people use?")
-answer = query("company", "Who works here?")
+    # Query by prefix - searches multiple collections
+    answer = await query("company:engineering", "What languages do people use?")
+    answer = await query("company", "Who works here?")
 ```
+
+### Search for Raw Results (for Chat Agent Context)
+
+Use `search()` to get raw vector search results without LLM summarization. This is useful when you want to provide context to a chat agent:
+
+```python
+from memex import Memory, search
+
+async def main():
+    alice = Memory(collection="company:engineering:alice")
+    await alice.add("I like Python and FastAPI")
+    await alice.add("Working on ML project")
+
+    # Search single collection - returns MemoryItem objects with similarity scores
+    results = await alice.search("programming")
+    for r in results:
+        print(f"[{r.score:.3f}] {r.text}")
+
+    # Search across collections with prefix
+    results = await search("company", "what are they working on", limit=5)
+
+    # Use as context for a chat agent (no LLM call, cheaper than query())
+    context = "\n".join([f"- {r.speaker}: {r.text}" for r in results])
+    # Pass context to your chat agent...
+```
+
+**query() vs search():**
+- `query()`: Uses LLM to summarize results into a natural language answer.
+- `search()`: Returns raw vector search results with similarity scores, good for providing context to chat agents.
 
 ### Manage Collections
 
@@ -175,34 +225,46 @@ config = MemexConfig(
 
 ### Memory
 
+All methods are async:
+
 | Method | Description |
 |--------|-------------|
-| `add(text, timestamp?)` | Add a single memory |
-| `add_batch(items)` | Add multiple memories |
-| `add_conversation(messages)` | Store important info from conversation |
-| `query(question)` | Query this collection with natural language |
-| `search(keyword, limit=10)` | Search by keyword |
-| `delete(memory_id)` | Soft delete a memory |
-| `restore(memory_id)` | Restore a deleted memory |
-| `list_deleted()` | List all deleted memories |
-| `stats()` | Get memory statistics |
-| `export(path)` | Export to JSON file |
-| `clear()` | Delete all memories in this collection |
+| `await add(text, timestamp?)` | Add a single memory |
+| `await add_batch(items)` | Add multiple memories |
+| `await add_conversation(messages)` | Store important info from conversation |
+| `await query(question)` | Query this collection with natural language |
+| `await search(query, limit=10, threshold=None)` | Vector similarity search |
+| `await delete(memory_id)` | Soft delete a memory |
+| `await restore(memory_id)` | Restore a deleted memory |
+| `await list_deleted()` | List all deleted memories |
+| `await stats()` | Get memory statistics |
+| `await export(path)` | Export to JSON file |
+| `await clear()` | Delete all memories in this collection |
 
 ### Prefix Query Functions
 
+All functions are async:
+
 | Function | Description |
 |----------|-------------|
-| `query(prefix, question)` | Query all collections matching prefix |
-| `search(prefix, keyword)` | Search all collections matching prefix |
-| `stats(prefix)` | Get combined stats for matching collections |
+| `await query(prefix, question)` | Query with LLM summarization (returns answer string) |
+| `await search(prefix, query, limit=10, threshold=None)` | Vector similarity search (returns MemoryItem list) |
+| `await stats(prefix)` | Get combined stats for matching collections |
+
+**MemoryItem fields:**
+- `id`: Memory identifier
+- `text`: The memory content
+- `speaker`: Who said this (collection name by default)
+- `timestamp`: When it was added
+- `score`: Similarity score (0.0-1.0, higher is more relevant)
+- `collection`: Which collection this came from
 
 ### ConversationResult
 
 Returned by `add_conversation()`:
 
 ```python
-result = memory.add_conversation(messages)
+result = await memory.add_conversation(messages)
 
 if result.success:
     print("Memories stored")

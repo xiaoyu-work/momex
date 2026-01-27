@@ -1,50 +1,39 @@
 """Memex - Structured RAG Memory for AI Agents.
 
-A high-level API for structured knowledge memory, built on TypeAgent's
+A high-level async API for structured knowledge memory, built on TypeAgent's
 Structured RAG technology.
 
-Example - Add memories:
-    >>> from memex import Memory
+Example:
+    >>> import asyncio
+    >>> from memex import Memory, query
     >>>
-    >>> # Create memory with hierarchical collection name
-    >>> memory = Memory(collection="company:engineering:alice")
-    >>>
-    >>> # Add memories
-    >>> memory.add("Alice likes cats")
-    >>> memory.add("The project deadline is Friday")
-
-Example - Query with prefix (hierarchical):
-    >>> from memex import query
-    >>>
-    >>> # Query single person
-    >>> answer = query("company:engineering:alice", "What does Alice like?")
-    >>>
-    >>> # Query entire team (matches all under prefix)
-    >>> answer = query("company:engineering", "What are the deadlines?")
-    >>>
-    >>> # Query entire company
-    >>> answer = query("company", "Who likes cats?")
-
-Example - Managing Collections:
-    >>> from memex import MemoryManager
-    >>>
-    >>> manager = MemoryManager()
-    >>> collections = manager.list_collections()  # all
-    >>> collections = manager.list_collections(prefix="company:engineering")  # filtered
-    >>> manager.delete("company:engineering:old_user")
+    >>> async def main():
+    ...     # Create memory with hierarchical collection name
+    ...     memory = Memory(collection="company:engineering:alice")
+    ...
+    ...     # Add memories
+    ...     await memory.add("Alice likes cats")
+    ...     await memory.add("The project deadline is Friday")
+    ...
+    ...     # Query single collection
+    ...     answer = await memory.query("What does Alice like?")
+    ...
+    ...     # Query with prefix (searches all matching collections)
+    ...     answer = await query("company:engineering", "What are the deadlines?")
+    ...
+    >>> asyncio.run(main())
 
 Configuration:
     LLM is configured via TypeAgent's environment variables:
         export OPENAI_API_KEY=sk-xxx
+        export OPENAI_MODEL=gpt-4o
         # or for Azure:
         export AZURE_OPENAI_API_KEY=xxx
         export AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
 
     Memex-specific config (storage path, fact types) can be set via MemexConfig:
-    >>> from memex import Memory, MemexConfig
-    >>>
+    >>> from memex import MemexConfig
     >>> MemexConfig.set_default(storage_path="./my_data")
-    >>> memory = Memory(collection="user:alice")
 """
 
 from .config import DEFAULT_FACT_TYPES, FactType, MemexConfig
@@ -57,7 +46,7 @@ from .memory import (
     MemoryItem,
     MemoryOperation,
 )
-from .query import query, search, stats, query_async, search_async, stats_async
+from .query import query, search, stats
 
 __all__ = [
     "Memory",
@@ -70,11 +59,8 @@ __all__ = [
     "MemoryOperation",
     "AddResult",
     "ConversationResult",
-    # Prefix query functions
+    # Prefix query functions (async)
     "query",
     "search",
     "stats",
-    "query_async",
-    "search_async",
-    "stats_async",
 ]

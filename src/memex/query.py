@@ -7,10 +7,9 @@ from typing import Any
 from .config import MemexConfig
 from .manager import MemoryManager
 from .memory import Memory, MemoryItem
-from .sync import run_sync
 
 
-async def query_async(
+async def query(
     prefix: str,
     question: str,
     config: MemexConfig | None = None,
@@ -26,7 +25,7 @@ async def query_async(
     Returns:
         Combined answer string based on stored memories.
     """
-    config = config or MemexConfig()
+    config = config or MemexConfig.get_default()
     manager = MemoryManager(config=config)
 
     # Find all collections matching prefix
@@ -40,9 +39,9 @@ async def query_async(
     for coll_name in collections:
         memory = Memory(collection=coll_name, config=config)
         try:
-            answer = await memory.query_async(question)
+            answer = await memory.query(question)
             if answer and not answer.startswith("No answer found"):
-                answers.append(f"[{coll_name}] {answer}")
+                answers.append(answer)
         except Exception:
             # Skip collections that fail
             pass
@@ -57,24 +56,32 @@ async def query_async(
         return "\n\n".join(answers)
 
 
-async def search_async(
+async def search(
     prefix: str,
     query_text: str,
     limit: int = 10,
+    threshold: float | None = None,
     config: MemexConfig | None = None,
 ) -> list[MemoryItem]:
-    """Search memories across all collections matching a prefix.
+    """Search memories across all collections matching a prefix using vector similarity.
+
+    This function performs semantic search using embeddings. Results are sorted
+    by similarity score, so the most relevant memories appear first.
+
+    Use this when you want raw search results as context for a chat agent,
+    without LLM summarization (cheaper than query()).
 
     Args:
         prefix: Collection prefix.
-        query_text: Search query (keyword, entity name, or topic).
+        query_text: Search query (natural language question or topic).
         limit: Maximum total results to return.
+        threshold: Minimum similarity score (0.0-1.0). If None, uses config default.
         config: Configuration object. If None, uses default config.
 
     Returns:
-        List of MemoryItem objects from all matching collections.
+        List of MemoryItem objects from all matching collections, sorted by score.
     """
-    config = config or MemexConfig()
+    config = config or MemexConfig.get_default()
     manager = MemoryManager(config=config)
 
     # Find all collections matching prefix
@@ -83,20 +90,23 @@ async def search_async(
     if not collections:
         return []
 
-    results: list[MemoryItem] = []
-    per_collection_limit = max(1, limit // len(collections))
+    all_results: list[MemoryItem] = []
+    per_collection_limit = max(1, limit // len(collections)) + 5  # Get extra for re-ranking
 
     for coll_name in collections:
-        if len(results) >= limit:
-            break
         memory = Memory(collection=coll_name, config=config)
-        coll_results = await memory.search_async(query_text, limit=per_collection_limit)
-        results.extend(coll_results)
+        coll_results = await memory.search(
+            query_text, limit=per_collection_limit, threshold=threshold
+        )
+        all_results.extend(coll_results)
 
-    return results[:limit]
+    # Re-sort all results by score across collections
+    all_results.sort(key=lambda x: x.score or 0.0, reverse=True)
+
+    return all_results[:limit]
 
 
-async def stats_async(
+async def stats(
     prefix: str,
     config: MemexConfig | None = None,
 ) -> dict[str, Any]:
@@ -109,7 +119,7 @@ async def stats_async(
     Returns:
         Dict with stats per collection and totals.
     """
-    config = config or MemexConfig()
+    config = config or MemexConfig.get_default()
     manager = MemoryManager(config=config)
 
     # Find all collections matching prefix
@@ -121,7 +131,7 @@ async def stats_async(
 
     for coll_name in collections:
         memory = Memory(collection=coll_name, config=config)
-        coll_stats = await memory.stats_async()
+        coll_stats = await memory.stats()
         stats_per_collection[coll_name] = coll_stats
         total_memories += coll_stats.get("total_memories", 0)
         total_entities += coll_stats.get("entities_extracted", 0)
@@ -133,24 +143,3 @@ async def stats_async(
         "total_entities": total_entities,
         "collection_count": len(collections),
     }
-
-
-# Sync wrappers
-def query(prefix: str, question: str, config: MemexConfig | None = None) -> str:
-    """Query memories across all collections matching a prefix (sync)."""
-    return run_sync(query_async(prefix, question, config))
-
-
-def search(
-    prefix: str,
-    query_text: str,
-    limit: int = 10,
-    config: MemexConfig | None = None,
-) -> list[MemoryItem]:
-    """Search memories across all collections matching a prefix (sync)."""
-    return run_sync(search_async(prefix, query_text, limit, config))
-
-
-def stats(prefix: str, config: MemexConfig | None = None) -> dict[str, Any]:
-    """Get statistics for all collections matching a prefix (sync)."""
-    return run_sync(stats_async(prefix, config))
