@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from .config import MemexConfig
 from .manager import MemoryManager
 from .memory import Memory, MemoryItem
+
+# Maximum concurrent queries to avoid rate limiting
+MAX_CONCURRENT_QUERIES = 5
 
 
 async def query(
@@ -34,17 +38,23 @@ async def query(
     if not collections:
         return f"No collections found matching prefix '{prefix}'."
 
-    # Query each collection
-    answers = []
-    for coll_name in collections:
-        memory = Memory(collection=coll_name, config=config)
-        try:
-            answer = await memory.query(question)
-            if answer and not answer.startswith("No answer found"):
-                answers.append(answer)
-        except Exception:
-            # Skip collections that fail
-            pass
+    # Query collections in parallel with concurrency limit
+    sem = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
+
+    async def query_one(coll_name: str) -> str | None:
+        async with sem:
+            try:
+                memory = Memory(collection=coll_name, config=config)
+                answer = await memory.query(question)
+                if answer and not answer.startswith("No answer found"):
+                    return answer
+            except Exception:
+                # Skip collections that fail
+                pass
+            return None
+
+    results = await asyncio.gather(*[query_one(c) for c in collections])
+    answers = [r for r in results if r is not None]
 
     if not answers:
         return "No answer found in any collection."
@@ -90,14 +100,26 @@ async def search(
     if not collections:
         return []
 
-    all_results: list[MemoryItem] = []
     per_collection_limit = max(1, limit // len(collections)) + 5  # Get extra for re-ranking
 
-    for coll_name in collections:
-        memory = Memory(collection=coll_name, config=config)
-        coll_results = await memory.search(
-            query_text, limit=per_collection_limit, threshold=threshold
-        )
+    # Search collections in parallel with concurrency limit
+    sem = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
+
+    async def search_one(coll_name: str) -> list[MemoryItem]:
+        async with sem:
+            try:
+                memory = Memory(collection=coll_name, config=config)
+                return await memory.search(
+                    query_text, limit=per_collection_limit, threshold=threshold
+                )
+            except Exception:
+                return []
+
+    results = await asyncio.gather(*[search_one(c) for c in collections])
+
+    # Flatten results
+    all_results: list[MemoryItem] = []
+    for coll_results in results:
         all_results.extend(coll_results)
 
     # Re-sort all results by score across collections
@@ -125,13 +147,34 @@ async def stats(
     # Find all collections matching prefix
     collections = manager.list_collections(prefix=prefix)
 
+    if not collections:
+        return {
+            "prefix": prefix,
+            "collections": {},
+            "total_memories": 0,
+            "total_entities": 0,
+            "collection_count": 0,
+        }
+
+    # Get stats in parallel with concurrency limit
+    sem = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
+
+    async def stats_one(coll_name: str) -> tuple[str, dict[str, Any]]:
+        async with sem:
+            try:
+                memory = Memory(collection=coll_name, config=config)
+                coll_stats = await memory.stats()
+                return (coll_name, coll_stats)
+            except Exception:
+                return (coll_name, {"total_memories": 0, "entities_extracted": 0})
+
+    results = await asyncio.gather(*[stats_one(c) for c in collections])
+
     stats_per_collection = {}
     total_memories = 0
     total_entities = 0
 
-    for coll_name in collections:
-        memory = Memory(collection=coll_name, config=config)
-        coll_stats = await memory.stats()
+    for coll_name, coll_stats in results:
         stats_per_collection[coll_name] = coll_stats
         total_memories += coll_stats.get("total_memories", 0)
         total_entities += coll_stats.get("entities_extracted", 0)
