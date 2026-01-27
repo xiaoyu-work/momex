@@ -23,7 +23,9 @@ class MemoryItem:
     speaker: str | None = None
     timestamp: str | None = None
     metadata: dict[str, Any] | None = None
-    score: float | None = None
+    score: float | None = None  # Final weighted score
+    similarity: float | None = None  # Raw similarity score
+    importance: float = 0.5  # 0.0-1.0, higher = more important
     collection: str | None = None
 
 
@@ -121,6 +123,11 @@ class Memory:
         self._deleted_ids: set[int] = set()
         self._load_deleted()
 
+        # Importance tracking
+        self._importance_file = self._db_path.parent / "importance.json"
+        self._importance_map: dict[int, float] = {}
+        self._load_importance()
+
         # Auto-load dotenv
         self._load_dotenv()
 
@@ -163,6 +170,37 @@ class Memory:
     def _is_deleted(self, msg_id: int) -> bool:
         """Check if a message is deleted."""
         return msg_id in self._deleted_ids
+
+    def _load_importance(self) -> None:
+        """Load importance scores from file."""
+        if self._importance_file.exists():
+            try:
+                with open(self._importance_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    # Convert string keys back to int
+                    self._importance_map = {
+                        int(k): v for k, v in data.get("importance", {}).items()
+                    }
+            except (json.JSONDecodeError, IOError):
+                self._importance_map = {}
+
+    def _save_importance(self) -> None:
+        """Save importance scores to file."""
+        data = {
+            "importance": {str(k): v for k, v in self._importance_map.items()},
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with open(self._importance_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def _set_importance(self, msg_id: int, importance: float) -> None:
+        """Set importance score for a message."""
+        self._importance_map[msg_id] = max(0.0, min(1.0, importance))
+        self._save_importance()
+
+    def _get_importance(self, msg_id: int) -> float:
+        """Get importance score for a message (default 0.5)."""
+        return self._importance_map.get(msg_id, 0.5)
 
     async def _ensure_initialized(self) -> None:
         """Ensure the conversation is initialized."""
@@ -257,6 +295,7 @@ class Memory:
         speaker: str | None = None,
         timestamp: str | None = None,
         tags: list[str] | None = None,
+        importance: float = 0.5,
     ) -> AddResult:
         """Add a memory directly without LLM processing (internal method).
 
@@ -265,6 +304,7 @@ class Memory:
             speaker: Who said this (optional, defaults to collection name).
             timestamp: ISO timestamp (optional, defaults to now).
             tags: Optional tags for indexing.
+            importance: Importance score 0.0-1.0 (default 0.5).
 
         Returns:
             AddResult with statistics.
@@ -283,6 +323,9 @@ class Memory:
         if speaker is None:
             speaker = self.collection
 
+        # Get current message count to determine new message ID
+        msg_id = await self._conversation.messages.size()
+
         msg = ConversationMessage(
             text_chunks=[text],
             tags=tags or [],
@@ -293,6 +336,10 @@ class Memory:
         )
 
         result = await self._conversation.add_messages_with_indexing([msg])
+
+        # Store importance for the new message
+        if result.messages_added > 0:
+            self._set_importance(msg_id, importance)
 
         return AddResult(
             messages_added=result.messages_added,
@@ -355,7 +402,7 @@ class Memory:
 
         # Get embeddings
         try:
-            embedding_model = AsyncEmbeddingModel()
+            embedding_model = AsyncEmbeddingModel(model_name=self.config.embedding_model)
             query_embedding = await embedding_model.get_embedding(query)
             memory_texts = [m[1] for m in memories]
             memory_embeddings = await embedding_model.get_embeddings(memory_texts)
@@ -366,24 +413,34 @@ class Memory:
 
         # Calculate cosine similarity scores
         # Embeddings are already normalized, so dot product = cosine similarity
-        scores = np.dot(memory_embeddings, query_embedding)
+        similarity_scores = np.dot(memory_embeddings, query_embedding)
 
         # Use threshold from config if not specified
         min_threshold = threshold if threshold is not None else self.config.similarity_threshold
 
-        # Combine with memory data and filter by threshold
-        scored_memories = [
-            (memories[i], float(scores[i]))
-            for i in range(len(memories))
-            if scores[i] >= min_threshold
-        ]
+        # Two-stage ranking:
+        # Stage 1: Filter by similarity threshold (relevance gate)
+        # Stage 2: Among filtered results, rank by weighted score
+        importance_weight = self.config.importance_weight
+        scored_memories: list[tuple[tuple[int, str, Any], float, float, float]] = []
+        for i in range(len(memories)):
+            similarity = float(similarity_scores[i])
+            # Stage 1: Filter out irrelevant memories
+            if similarity < min_threshold:
+                continue
+            # Stage 2: Calculate weighted score for relevant memories only
+            msg_id = memories[i][0]
+            importance = self._get_importance(msg_id)
+            # Weighted final score (only applied to already-relevant items)
+            final_score = similarity * (1 - importance_weight) + importance * importance_weight
+            scored_memories.append((memories[i], final_score, similarity, importance))
 
-        # Sort by score descending
+        # Sort by final score descending
         scored_memories.sort(key=lambda x: x[1], reverse=True)
 
         # Return top results
         results: list[MemoryItem] = []
-        for (msg_id, text, msg), score in scored_memories[:limit]:
+        for (msg_id, text, msg), final_score, similarity, importance in scored_memories[:limit]:
             results.append(
                 MemoryItem(
                     id=str(msg_id),
@@ -391,7 +448,9 @@ class Memory:
                     speaker=msg.metadata.speaker if msg.metadata else None,
                     timestamp=msg.timestamp,
                     collection=self.collection,
-                    score=score,
+                    score=final_score,
+                    similarity=similarity,
+                    importance=importance,
                 )
             )
 
@@ -410,6 +469,11 @@ class Memory:
         if self._deleted_file.exists():
             self._deleted_file.unlink()
         self._deleted_ids = set()
+
+        # Clear importance records
+        if self._importance_file.exists():
+            self._importance_file.unlink()
+        self._importance_map = {}
 
         self._conversation = None
         self._initialized = False
@@ -529,9 +593,26 @@ class Memory:
                 result.success = False
                 result.error = f"LLM call failed: {fact_result.message}"
                 return result
-            # Parse JSON response
+            # Parse JSON response - now expects [{"text": "...", "importance": 0.x}, ...]
             fact_json = self._extract_json(fact_response)
-            result.facts_extracted = fact_json.get("facts", [])
+            raw_facts = fact_json.get("facts", [])
+
+            # Parse facts and build importance mapping
+            fact_texts: list[str] = []
+            fact_importance: dict[str, float] = {}
+            for fact in raw_facts:
+                if isinstance(fact, dict):
+                    text = fact.get("text", "")
+                    importance = fact.get("importance", 0.5)
+                else:
+                    # Backward compatibility: plain string
+                    text = str(fact)
+                    importance = 0.5
+                if text:
+                    fact_texts.append(text)
+                    fact_importance[text] = importance
+
+            result.facts_extracted = fact_texts
         except Exception as e:
             result.success = False
             result.error = f"Failed to extract facts: {e}"
@@ -547,7 +628,7 @@ class Memory:
 
         message_count = await self._conversation.messages.size()
         if message_count > 0:
-            embedding_model = AsyncEmbeddingModel()
+            embedding_model = AsyncEmbeddingModel(model_name=self.config.embedding_model)
             texts_to_embed = []
 
             for i in range(message_count):
@@ -566,7 +647,7 @@ class Memory:
 
         # Stage 2 & 3: Batch process all facts - find similar memories and decide operations
         if existing_memories and len(memory_embeddings) > 0:
-            embedding_model = AsyncEmbeddingModel()
+            embedding_model = AsyncEmbeddingModel(model_name=self.config.embedding_model)
 
             # Batch get embeddings for all facts at once
             fact_embeddings = await embedding_model.get_embeddings(result.facts_extracted)
@@ -625,13 +706,19 @@ class Memory:
                 result.operations.append(op)
 
                 if event == MemoryEvent.ADD and text:
-                    await self._add_raw(text)
+                    importance = fact_importance.get(text, 0.5)
+                    await self._add_raw(text, importance=importance)
                     result.memories_added += 1
                 elif event == MemoryEvent.UPDATE and text:
                     # Mark old memory as deleted, add new one
                     if action_id and action_id.isdigit():
+                        old_importance = self._get_importance(int(action_id))
                         self._mark_deleted(int(action_id))
-                    await self._add_raw(text)
+                    else:
+                        old_importance = 0.5
+                    # Use higher of old importance or new fact importance
+                    new_importance = max(old_importance, fact_importance.get(text, 0.5))
+                    await self._add_raw(text, importance=new_importance)
                     result.memories_updated += 1
                 elif event == MemoryEvent.DELETE:
                     # Mark the memory as deleted
@@ -640,10 +727,11 @@ class Memory:
                     result.memories_deleted += 1
         else:
             # No existing memories, add all facts directly
-            for fact in result.facts_extracted:
-                op = MemoryOperation(id="new", text=fact, event=MemoryEvent.ADD)
+            for fact_text in result.facts_extracted:
+                importance = fact_importance.get(fact_text, 0.5)
+                op = MemoryOperation(id="new", text=fact_text, event=MemoryEvent.ADD)
                 result.operations.append(op)
-                await self._add_raw(fact)
+                await self._add_raw(fact_text, importance=importance)
                 result.memories_added += 1
 
         return result

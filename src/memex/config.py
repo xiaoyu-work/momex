@@ -63,6 +63,11 @@ class MemexConfig:
         db_name: Database filename.
         fact_types: List of fact types to extract from conversations.
         similarity_threshold: Minimum similarity score for memory matching (0.0-1.0).
+            Recommended: 0.5-0.7 for ada-002, 0.3-0.5 for embedding-3-small/large.
+        importance_weight: Weight for importance in search scoring (0.0-1.0).
+            Final score = similarity * (1 - importance_weight) + importance * importance_weight
+        embedding_model: OpenAI embedding model name.
+            Options: text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large.
     """
 
     # Class-level default config
@@ -71,7 +76,9 @@ class MemexConfig:
     storage_path: str = "./memex_data"
     db_name: str = "memory.db"
     fact_types: list[FactType] = field(default_factory=lambda: DEFAULT_FACT_TYPES.copy())
-    similarity_threshold: float = 0.5
+    similarity_threshold: float = 0.3  # Adjusted for text-embedding-3-small
+    importance_weight: float = 0.3  # 30% importance, 70% similarity
+    embedding_model: str = "text-embedding-3-small"  # Better than ada-002 for relevance
 
     def __post_init__(self) -> None:
         """Load defaults from environment variables if not set."""
@@ -85,7 +92,21 @@ class MemexConfig:
 
         YAML format:
             storage_path: ./memex_data
-            similarity_threshold: 0.5
+
+            # Embedding model configuration
+            embedding_model: text-embedding-3-small  # or text-embedding-ada-002, text-embedding-3-large
+
+            # Similarity threshold (depends on embedding model)
+            # Recommended values:
+            #   text-embedding-ada-002:  0.5-0.7 (scores tend to be high)
+            #   text-embedding-3-small:  0.3-0.5 (better discrimination)
+            #   text-embedding-3-large:  0.3-0.5 (best discrimination)
+            similarity_threshold: 0.3
+
+            # Weight for importance in search ranking (0.0-1.0)
+            importance_weight: 0.3
+
+            # Custom fact types to extract
             fact_types:
               - name: Personal Preferences
                 description: Keep track of likes and dislikes
@@ -132,7 +153,7 @@ class MemexConfig:
         cls,
         storage_path: str = "./memex_data",
         fact_types: list[FactType] | None = None,
-        similarity_threshold: float = 0.5,
+        similarity_threshold: float = 0.3,
     ) -> "MemexConfig":
         """Set the global default configuration.
 

@@ -204,8 +204,23 @@ bob = Memory(collection="user:bob")      # uses default
 ```yaml
 # memex_config.yaml
 storage_path: ./memex_data
-similarity_threshold: 0.5
 
+# Embedding model - affects search quality and similarity scores
+# Options: text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large
+embedding_model: text-embedding-3-small
+
+# Similarity threshold - depends on embedding model
+# Recommended:
+#   text-embedding-ada-002:  0.5-0.7 (scores tend to cluster in 0.6-0.9)
+#   text-embedding-3-small:  0.3-0.5 (better score distribution)
+#   text-embedding-3-large:  0.3-0.5 (best discrimination)
+similarity_threshold: 0.3
+
+# Importance weight for search ranking (0.0-1.0)
+# Higher = importance matters more in ranking
+importance_weight: 0.3
+
+# Custom fact types to extract
 fact_types:
   - name: Personal Preferences
     description: Likes, dislikes, preferences for food, products, activities
@@ -217,6 +232,14 @@ fact_types:
 config = MemexConfig.from_yaml("memex_config.yaml")
 memory = Memory(collection="user:alice", config=config)
 ```
+
+### Embedding Model Comparison
+
+| Model | Dimensions | Score Distribution | Recommended Threshold |
+|-------|------------|-------------------|----------------------|
+| `text-embedding-ada-002` | 1536 | 0.6-0.9 (clustered) | 0.5-0.7 |
+| `text-embedding-3-small` | 1536 | 0.1-0.6 (spread out) | 0.3-0.5 |
+| `text-embedding-3-large` | 3072 | 0.1-0.6 (best) | 0.3-0.5 |
 
 ### Custom Fact Types
 
@@ -278,8 +301,27 @@ All functions are async:
 - `text`: The memory content
 - `speaker`: Who said this (collection name by default)
 - `timestamp`: When it was added
-- `score`: Similarity score (0.0-1.0, higher is more relevant)
+- `score`: Weighted score combining similarity and importance (0.0-1.0)
+- `importance`: Importance score (0.0-1.0, auto-assigned by LLM)
 - `collection`: Which collection this came from
+
+### Importance Scoring
+
+Memex automatically assigns importance scores to memories based on content type:
+
+| Category | Importance | Examples |
+|----------|------------|----------|
+| Health/Safety | 0.9-1.0 | Allergies, medical conditions |
+| Identity | 0.7-0.8 | Name, family, job title |
+| Preferences | 0.5-0.6 | Likes, dislikes, hobbies |
+| Casual | 0.3-0.4 | Recent events, plans |
+
+Search results are ranked by weighted score:
+```
+final_score = similarity * 0.7 + importance * 0.3
+```
+
+This ensures critical information (like allergies) ranks higher even with moderate similarity.
 
 ### AddResult
 

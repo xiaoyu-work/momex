@@ -35,25 +35,31 @@ Input: There are branches in trees.
 Output: {{"facts": []}}
 
 Input: Hi, I am looking for a restaurant in San Francisco.
-Output: {{"facts": ["Looking for a restaurant in San Francisco"]}}
+Output: {{"facts": [{{"text": "Looking for a restaurant in San Francisco", "importance": 0.4}}]}}
 
-Input: Yesterday, I had a meeting with John at 3pm. We discussed the new project.
-Output: {{"facts": ["Had a meeting with John at 3pm", "Discussed the new project"]}}
+Input: I'm allergic to peanuts and I love Italian food.
+Output: {{"facts": [{{"text": "Allergic to peanuts", "importance": 0.95}}, {{"text": "Loves Italian food", "importance": 0.5}}]}}
 
 Input: Hi, my name is John. I am a software engineer.
-Output: {{"facts": ["Name is John", "Is a software engineer"]}}
+Output: {{"facts": [{{"text": "Name is John", "importance": 0.8}}, {{"text": "Is a software engineer", "importance": 0.7}}]}}
 
 Input: My favourite movies are Inception and Interstellar.
-Output: {{"facts": ["Favourite movies are Inception and Interstellar"]}}
+Output: {{"facts": [{{"text": "Favourite movies are Inception and Interstellar", "importance": 0.5}}]}}
 
-Return the facts and preferences in JSON format as shown above.
+Importance Guidelines (0.0 to 1.0):
+- 0.9-1.0: Health/safety critical (allergies, medical conditions, emergencies)
+- 0.7-0.8: Identity and relationships (name, family, job title, important contacts)
+- 0.5-0.6: Preferences and habits (likes, dislikes, hobbies)
+- 0.3-0.4: Temporary or casual information (plans, recent events)
+
+Return the facts in JSON format as shown above.
 
 Remember:
 - Today's date is {datetime.now().strftime("%Y-%m-%d")}.
 - Do not return anything from the example prompts provided above.
 - If you do not find anything relevant in the conversation, return an empty list for "facts".
 - Create facts based on the user messages only. Do not extract facts from assistant or system messages.
-- Make sure to return the response in JSON format with a key "facts" and a list of strings as value.
+- Each fact must have "text" (string) and "importance" (float 0.0-1.0).
 - Detect the language of the user input and record the facts in the same language.
 
 Following is a conversation between the user and the assistant. Extract the relevant facts and preferences about the user from the conversation:
