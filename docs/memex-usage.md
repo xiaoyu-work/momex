@@ -148,10 +148,11 @@ async def main():
     await alice.add("I like Python and FastAPI")
     await alice.add("Working on ML project")
 
-    # Search single collection - returns MemoryItem objects with similarity scores
+    # Search single collection - returns MemoryItem objects
+    # Results are filtered by similarity threshold, then ranked by weighted score
     results = await alice.search("programming")
     for r in results:
-        print(f"[{r.score:.3f}] {r.text}")
+        print(f"[sim={r.similarity:.3f}, imp={r.importance:.2f}, score={r.score:.3f}] {r.text}")
 
     # Search across collections with prefix
     results = await search("company", "what are they working on", limit=5)
@@ -302,6 +303,7 @@ All functions are async:
 - `speaker`: Who said this (collection name by default)
 - `timestamp`: When it was added
 - `score`: Weighted score combining similarity and importance (0.0-1.0)
+- `similarity`: Raw similarity score before importance weighting (0.0-1.0)
 - `importance`: Importance score (0.0-1.0, auto-assigned by LLM)
 - `collection`: Which collection this came from
 
@@ -316,12 +318,21 @@ Memex automatically assigns importance scores to memories based on content type:
 | Preferences | 0.5-0.6 | Likes, dislikes, hobbies |
 | Casual | 0.3-0.4 | Recent events, plans |
 
-Search results are ranked by weighted score:
-```
-final_score = similarity * 0.7 + importance * 0.3
-```
+**Two-stage search ranking:**
 
-This ensures critical information (like allergies) ranks higher even with moderate similarity.
+1. **Filter**: Only memories with `similarity > threshold` pass (default 0.3)
+2. **Rank**: Among filtered results, sort by weighted score:
+   ```
+   final_score = similarity * (1 - importance_weight) + importance * importance_weight
+   ```
+   With default `importance_weight=0.3`:
+   ```
+   final_score = similarity * 0.7 + importance * 0.3
+   ```
+
+This ensures:
+- Irrelevant content is filtered out regardless of importance
+- Among relevant results, important information ranks higher
 
 ### AddResult
 
