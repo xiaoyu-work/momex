@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +35,38 @@ class AddResult:
     entities_extracted: int
     success: bool = True
     collections: list[str] | None = None
+
+
+class MemoryEvent(StrEnum):
+    """Memory operation event types."""
+
+    ADD = "ADD"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
+    NONE = "NONE"
+
+
+@dataclass
+class MemoryOperation:
+    """A single memory operation result."""
+
+    id: str
+    text: str
+    event: MemoryEvent
+    old_memory: str | None = None
+
+
+@dataclass
+class ConversationResult:
+    """Result of processing a conversation."""
+
+    facts_extracted: list[str] = field(default_factory=list)
+    operations: list[MemoryOperation] = field(default_factory=list)
+    memories_added: int = 0
+    memories_updated: int = 0
+    memories_deleted: int = 0
+    success: bool = True
+    error: str | None = None
 
 
 def _collection_to_path(collection: str) -> Path:
@@ -293,8 +327,6 @@ class Memory:
         Args:
             path: Path to the output JSON file.
         """
-        import json
-
         await self._ensure_initialized()
 
         data = {
@@ -316,6 +348,187 @@ class Memory:
 
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+
+    async def add_conversation_async(
+        self,
+        messages: list[dict[str, str]],
+        similarity_limit: int = 5,
+    ) -> ConversationResult:
+        """Extract facts from a conversation and add to memory asynchronously.
+
+        This method uses a multi-stage LLM process similar to mem0:
+        1. Extract facts from the conversation
+        2. For each fact, vector search to find similar existing memories
+        3. LLM decides ADD/UPDATE/DELETE/NONE based on similar memories
+        4. Execute operations
+
+        Args:
+            messages: List of conversation messages, each with "role" and "content" keys.
+                     Example: [{"role": "user", "content": "I like Python"},
+                              {"role": "assistant", "content": "Great choice!"}]
+            similarity_limit: Max number of similar memories to retrieve per fact.
+
+        Returns:
+            ConversationResult with extracted facts and operations performed.
+
+        Example:
+            >>> result = await memory.add_conversation_async([
+            ...     {"role": "user", "content": "My name is Alice and I love Python"},
+            ...     {"role": "assistant", "content": "Nice to meet you, Alice!"},
+            ... ])
+            >>> print(result.facts_extracted)
+            ['Name is Alice', 'Loves Python']
+        """
+        await self._ensure_initialized()
+
+        from .prompts import get_fact_extraction_prompt, get_memory_update_prompt
+        from typeagent.knowpro import convknowledge
+        from typeagent.aitools.embeddings import AsyncEmbeddingModel
+        import numpy as np
+
+        result = ConversationResult()
+
+        # Format conversation for the prompt
+        conversation_text = "\n".join(
+            f"{msg.get('role', 'user').capitalize()}: {msg.get('content', '')}"
+            for msg in messages
+        )
+
+        # Stage 1: Extract facts from conversation (using configured fact_types)
+        model = convknowledge.create_typechat_model()
+        fact_prompt = get_fact_extraction_prompt(
+            conversation_text,
+            fact_types=self.config.fact_types,
+        )
+
+        try:
+            fact_response = await model.complete(fact_prompt)
+            # Parse JSON response
+            fact_json = self._extract_json(fact_response)
+            result.facts_extracted = fact_json.get("facts", [])
+        except Exception as e:
+            result.success = False
+            result.error = f"Failed to extract facts: {e}"
+            return result
+
+        if not result.facts_extracted:
+            # No facts to process
+            return result
+
+        # Build existing memories index with embeddings
+        existing_memories: list[dict] = []
+        memory_embeddings: list = []
+
+        if self._conversation.messages:
+            embedding_model = AsyncEmbeddingModel()
+            texts_to_embed = []
+
+            for i, msg in enumerate(self._conversation.messages):
+                text = " ".join(msg.text_chunks) if msg.text_chunks else ""
+                if text:
+                    existing_memories.append({"id": str(i), "text": text})
+                    texts_to_embed.append(text)
+
+            if texts_to_embed:
+                memory_embeddings = await embedding_model.get_embeddings(texts_to_embed)
+
+        # Stage 2 & 3: For each fact, find similar memories and decide operation
+        if existing_memories and len(memory_embeddings) > 0:
+            embedding_model = AsyncEmbeddingModel()
+
+            for fact in result.facts_extracted:
+                # Get embedding for this fact
+                fact_embedding = await embedding_model.get_embedding(fact)
+
+                # Calculate cosine similarity with all existing memories
+                similarities = []
+                for i, mem_emb in enumerate(memory_embeddings):
+                    similarity = float(np.dot(fact_embedding, mem_emb))
+                    similarities.append((i, similarity))
+
+                # Sort by similarity and get top-k
+                similarities.sort(key=lambda x: x[1], reverse=True)
+                top_similar = similarities[:similarity_limit]
+
+                # Get the similar memories for LLM decision
+                similar_memories = [
+                    existing_memories[idx]
+                    for idx, score in top_similar
+                    if score > self.config.similarity_threshold
+                ]
+
+                # LLM decides what to do with this fact
+                update_prompt = get_memory_update_prompt(similar_memories, [fact])
+
+                try:
+                    update_response = await model.complete(update_prompt)
+                    update_json = self._extract_json(update_response)
+                    memory_actions = update_json.get("memory", [])
+                except Exception as e:
+                    # If decision fails for this fact, skip it
+                    continue
+
+                # Execute operations for this fact
+                for action in memory_actions:
+                    event_str = action.get("event", "NONE").upper()
+                    try:
+                        event = MemoryEvent(event_str)
+                    except ValueError:
+                        event = MemoryEvent.NONE
+
+                    text = action.get("text", "")
+                    action_id = action.get("id", "")
+
+                    op = MemoryOperation(
+                        id=action_id,
+                        text=text,
+                        event=event,
+                        old_memory=action.get("old_memory"),
+                    )
+                    result.operations.append(op)
+
+                    if event == MemoryEvent.ADD and text:
+                        await self.add_async(text)
+                        result.memories_added += 1
+                    elif event == MemoryEvent.UPDATE and text:
+                        await self.add_async(text)
+                        result.memories_updated += 1
+                    elif event == MemoryEvent.DELETE:
+                        result.memories_deleted += 1
+        else:
+            # No existing memories, add all facts directly
+            for fact in result.facts_extracted:
+                op = MemoryOperation(id="new", text=fact, event=MemoryEvent.ADD)
+                result.operations.append(op)
+                await self.add_async(fact)
+                result.memories_added += 1
+
+        return result
+
+    def _extract_json(self, text: str) -> dict:
+        """Extract JSON from LLM response text."""
+        # Try to parse directly
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Try to find JSON in markdown code blocks
+        import re
+        patterns = [
+            r"```json\s*(.*?)\s*```",
+            r"```\s*(.*?)\s*```",
+            r"\{.*\}",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(1) if "```" in pattern else match.group(0))
+                except json.JSONDecodeError:
+                    continue
+
+        return {"facts": [], "memory": []}
 
     # =========================================================================
     # Sync API (default)
@@ -363,6 +576,28 @@ class Memory:
     def export(self, path: str) -> None:
         """Export all memories to a JSON file synchronously."""
         return run_sync(self.export_async(path))
+
+    def add_conversation(
+        self,
+        messages: list[dict[str, str]],
+        similarity_limit: int = 5,
+    ) -> ConversationResult:
+        """Extract facts from a conversation and add to memory synchronously.
+
+        This method uses a multi-stage process:
+        1. Extract facts from the conversation
+        2. For each fact, vector search to find similar existing memories
+        3. LLM decides ADD/UPDATE/DELETE/NONE based on similar memories
+        4. Execute operations
+
+        Args:
+            messages: List of conversation messages, each with "role" and "content" keys.
+            similarity_limit: Max number of similar memories to retrieve per fact.
+
+        Returns:
+            ConversationResult with extracted facts and operations performed.
+        """
+        return run_sync(self.add_conversation_async(messages, similarity_limit))
 
     # =========================================================================
     # Properties

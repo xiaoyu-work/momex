@@ -1,0 +1,32 @@
+# Memex Configuration Example
+# Use with: config = MemexConfig.from_yaml("memex_config.yaml")
+
+storage_path: ./memex_data
+llm_provider: openai
+# llm_model: gpt-4o
+# llm_api_key: your-api-key  # Or use OPENAI_API_KEY env var
+
+# Similarity threshold for memory matching (0.0 - 1.0)
+similarity_threshold: 0.5
+
+# Custom fact types to extract from conversations
+# If not specified, uses default types (preferences, personal details, plans, etc.)
+fact_types:
+  - name: Personal Preferences
+    description: Keep track of likes, dislikes, and specific preferences in various categories such as food, products, activities, and entertainment.
+
+  - name: Important Personal Details
+    description: Remember significant personal information like names, relationships, and important dates.
+
+  - name: Plans and Intentions
+    description: Note upcoming events, trips, goals, and any plans the user has shared.
+
+  - name: Professional Details
+    description: Remember job titles, work habits, career goals, projects, and other professional information.
+
+  - name: Technical Preferences
+    description: Programming languages, frameworks, tools, and technical stack preferences.
+
+  # Add your custom fact types here:
+  # - name: Custom Type
+  #   description: Description of what to extract

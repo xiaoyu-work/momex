@@ -2,39 +2,6 @@
 
 ## 2025
 
-### 0.4.0 (Jan 26)
-
-#### New Feature: Memex - Hierarchical Memory API
-
-Added `memex` package, a high-level wrapper around TypeAgent's Structured RAG:
-
-- **Simplified API**: No need to manage `TranscriptMessage` or async/await
-- **Hierarchical collections**: Use `:` to create nested organization (unlimited levels)
-- **Prefix queries**: Query `company` to search all under `company:*`
-- **MemoryManager**: List, delete, rename, copy collections (with prefix filter)
-- **Sync & Async APIs**: Both sync (default) and async methods available
-- **Cross-platform**: Uses pathlib for Windows/Unix compatibility
-
-```python
-from memex import Memory, query
-
-# Add memories with hierarchical identity
-alice = Memory(collection="company:engineering:alice")
-alice.add("I like Python")
-
-# Query with prefix - searches all matching collections
-answer = query("company:engineering", "What languages?")  # Searches alice + bob
-answer = query("company", "Who likes Python?")            # Searches entire company
-```
-
-See [Memex Documentation](docs/memex.md) for details.
-
-#### Files Added
-- `src/memex/` - New memex package
-- `docs/memex.md` - Memex documentation
-- `tests/test_memex/` - Memex tests
-- `examples/memex/` - Usage examples
-
 ### 0.3.3 (Nov 25)
 
 General cleanup and fixes, and the following notable improvements:

@@ -44,17 +44,29 @@ Configuration:
     >>> memory = Memory(collection="company:engineering:alice", config=config)
 """
 
-from .config import MemexConfig
+from .config import DEFAULT_FACT_TYPES, FactType, MemexConfig
 from .manager import MemoryManager
-from .memory import AddResult, Memory, MemoryItem
+from .memory import (
+    AddResult,
+    ConversationResult,
+    Memory,
+    MemoryEvent,
+    MemoryItem,
+    MemoryOperation,
+)
 from .query import query, search, stats, query_async, search_async, stats_async
 
 __all__ = [
     "Memory",
     "MemoryManager",
     "MemexConfig",
+    "FactType",
+    "DEFAULT_FACT_TYPES",
     "MemoryItem",
+    "MemoryEvent",
+    "MemoryOperation",
     "AddResult",
+    "ConversationResult",
     # Prefix query functions
     "query",
     "search",
@@ -63,5 +75,3 @@ __all__ = [
     "search_async",
     "stats_async",
 ]
-
-__version__ = "0.2.0"
