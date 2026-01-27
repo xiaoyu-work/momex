@@ -7,62 +7,144 @@ pip install -e .
 export OPENAI_API_KEY=your-key
 ```
 
-## Basic Usage
+## Core Concepts
 
-```python
-from memex import Memory
+### Collection
 
-memory = Memory(collection="user:alice")
+A **collection** is a named storage space for memories. Each collection has its own database file.
 
-# Add memory
-memory.add("I love Python")
+- Use collections to separate memories by user, team, or purpose
+- Collection names support hierarchical structure with `:` separator
+- Examples: `"alice"`, `"user:alice"`, `"company:engineering:alice"`
 
-# Query
-answer = memory.query("What does the user like?")
+### Hierarchical Collections
+
+The `:` separator creates a hierarchy that enables prefix queries:
+
+```
+company:engineering:alice  →  ./memex_data/company/engineering/alice/memory.db
+company:engineering:bob    →  ./memex_data/company/engineering/bob/memory.db
+company:marketing:charlie  →  ./memex_data/company/marketing/charlie/memory.db
 ```
 
-## Extract Facts from Conversation
+Query behavior:
+- `query("company:engineering:alice", ...)` → searches only alice
+- `query("company:engineering", ...)` → searches alice + bob
+- `query("company", ...)` → searches alice + bob + charlie
+
+## Basic Usage
+
+### Create Memory
+
+```python
+from memex import Memory, MemexConfig
+
+# Simple - uses default config
+memory = Memory(collection="user:alice")
+
+# With custom config
+config = MemexConfig(storage_path="./my_data")
+memory = Memory(collection="user:alice", config=config)
+```
+
+### Add and Query
+
+```python
+memory = Memory(collection="user:alice")
+
+# Add memories manually
+memory.add("I love Python programming")
+memory.add("Project deadline is Friday", speaker="Manager")
+
+# Query
+answer = memory.query("What programming language does the user like?")
+```
+
+### Extract Facts from Conversation
+
+Automatically extract and store facts from conversation history:
 
 ```python
 result = memory.add_conversation([
     {"role": "user", "content": "My name is Alice, I'm a Python developer"},
     {"role": "assistant", "content": "Nice to meet you!"},
+    {"role": "user", "content": "I'm working on a FastAPI project"},
 ])
 
-print(result.facts_extracted)  # ['Name is Alice', 'Is a Python developer']
+print(result.facts_extracted)
+# ['Name is Alice', 'Is a Python developer', 'Working on FastAPI project']
+
+print(result.memories_added)  # 3
 ```
 
-## Hierarchical Query
+### Query Across Collections
 
 ```python
 from memex import Memory, query
 
-# Different collections
+# Create memories for different users
 alice = Memory(collection="company:engineering:alice")
-bob = Memory(collection="company:engineering:bob")
-
 alice.add("I like Python")
-bob.add("I like Java")
 
-# Query by prefix
-query("company:engineering", "What languages?")  # searches alice + bob
-query("company", "What languages?")              # searches all
+bob = Memory(collection="company:engineering:bob")
+bob.add("I prefer Java")
+
+# Query single collection
+answer = alice.query("What language?")
+
+# Query by prefix - searches multiple collections
+answer = query("company:engineering", "What languages do people use?")
+answer = query("company", "Who works here?")
+```
+
+### Manage Collections
+
+```python
+from memex import MemoryManager
+
+manager = MemoryManager()
+
+# List collections
+all_collections = manager.list_collections()
+eng_only = manager.list_collections(prefix="company:engineering")
+
+# Other operations
+manager.exists("company:engineering:alice")
+manager.delete("company:engineering:alice")
+manager.rename("user:old", "user:new")
 ```
 
 ## Configuration
 
-### YAML
+### MemexConfig
+
+```python
+from memex import MemexConfig
+
+config = MemexConfig(
+    storage_path="./memex_data",      # Where to store databases
+    llm_provider="openai",            # "openai", "azure", "anthropic"
+    llm_model="gpt-4o",               # Model for fact extraction
+    similarity_threshold=0.5,         # For memory deduplication (0.0-1.0)
+    fact_types=[...],                 # Custom fact types (see below)
+)
+```
+
+### YAML Configuration
 
 ```yaml
 # memex_config.yaml
 storage_path: ./memex_data
+llm_provider: openai
 similarity_threshold: 0.5
 
 fact_types:
-  - name: Technical Skills
-    description: Programming languages, frameworks
-  - name: Project Info
-    description: Current projects, deadlines
+  - name: Personal Preferences
+    description: Likes, dislikes, preferences for food, products, activities
+  - name: Professional Details
+    description: Job titles, projects, skills, career goals
+  - name: Technical Stack
+    description: Programming languages, frameworks, tools
 ```
 
 ```python
@@ -70,47 +152,74 @@ config = MemexConfig.from_yaml("memex_config.yaml")
 memory = Memory(collection="user:alice", config=config)
 ```
 
-### Code
+### Custom Fact Types
+
+Control what types of information to extract from conversations:
 
 ```python
 from memex import FactType, MemexConfig
 
 config = MemexConfig(
-    storage_path="./data",
     fact_types=[
-        FactType(name="Skills", description="Technical skills"),
+        FactType(
+            name="Technical Skills",
+            description="Programming languages, frameworks, and tools the user knows"
+        ),
+        FactType(
+            name="Project Information",
+            description="Current projects, deadlines, and team members"
+        ),
     ],
 )
 ```
 
-## API
+## API Reference
 
 ### Memory
 
 | Method | Description |
 |--------|-------------|
-| `add(text)` | Add memory |
-| `add_conversation(messages)` | Extract facts and add |
-| `query(question)` | Query memories |
-| `search(keyword)` | Search by keyword |
-| `clear()` | Delete all |
+| `add(text, speaker?, timestamp?)` | Add a single memory |
+| `add_batch(items)` | Add multiple memories |
+| `add_conversation(messages)` | Extract facts from conversation and add |
+| `query(question)` | Query this collection with natural language |
+| `search(keyword, limit=10)` | Search by keyword |
+| `stats()` | Get memory statistics |
+| `export(path)` | Export to JSON file |
+| `clear()` | Delete all memories in this collection |
 
-### MemoryManager
+### Prefix Query Functions
+
+| Function | Description |
+|----------|-------------|
+| `query(prefix, question)` | Query all collections matching prefix |
+| `search(prefix, keyword)` | Search all collections matching prefix |
+| `stats(prefix)` | Get combined stats for matching collections |
+
+### ConversationResult
+
+Returned by `add_conversation()`:
+
+| Field | Description |
+|-------|-------------|
+| `facts_extracted` | List of facts found in conversation |
+| `memories_added` | Number of ADD operations |
+| `memories_updated` | Number of UPDATE operations |
+| `memories_deleted` | Number of DELETE operations |
+| `operations` | List of MemoryOperation details |
+| `success` | True if successful |
+| `error` | Error message if failed |
+
+### MemoryEvent
 
 ```python
-from memex import MemoryManager
+from memex import MemoryEvent
 
-manager = MemoryManager()
-manager.list_collections()
-manager.list_collections(prefix="company:engineering")
-manager.delete("user:old")
-```
-
-### Prefix Query
-
-```python
-from memex import query, search
-
-query("prefix", "question")
-search("prefix", "keyword")
+for op in result.operations:
+    if op.event == MemoryEvent.ADD:
+        print(f"Added: {op.text}")
+    elif op.event == MemoryEvent.UPDATE:
+        print(f"Updated: {op.text}")
+    elif op.event == MemoryEvent.DELETE:
+        print(f"Deleted: {op.text}")
 ```
