@@ -60,21 +60,20 @@ memory.add("Project deadline is Friday", speaker="Manager")
 answer = memory.query("What programming language does the user like?")
 ```
 
-### Extract Facts from Conversation
+### Add Conversation
 
-Automatically extract and store facts from conversation history:
+Automatically store important information from conversation history:
 
 ```python
-result = memory.add_conversation([
+memory.add_conversation([
     {"role": "user", "content": "My name is Alice, I'm a Python developer"},
     {"role": "assistant", "content": "Nice to meet you!"},
     {"role": "user", "content": "I'm working on a FastAPI project"},
 ])
 
-print(result.facts_extracted)
-# ['Name is Alice', 'Is a Python developer', 'Working on FastAPI project']
-
-print(result.memories_added)  # 3
+# Later, query the memories
+answer = memory.query("What is the user's name?")  # "Alice"
+answer = memory.query("What project is the user working on?")  # "FastAPI project"
 ```
 
 ### Query Across Collections
@@ -200,26 +199,11 @@ config = MemexConfig(
 
 Returned by `add_conversation()`:
 
-| Field | Description |
-|-------|-------------|
-| `facts_extracted` | List of facts found in conversation |
-| `memories_added` | Number of ADD operations |
-| `memories_updated` | Number of UPDATE operations |
-| `memories_deleted` | Number of DELETE operations |
-| `operations` | List of MemoryOperation details |
-| `success` | True if successful |
-| `error` | Error message if failed |
-
-### MemoryEvent
-
 ```python
-from memex import MemoryEvent
+result = memory.add_conversation(messages)
 
-for op in result.operations:
-    if op.event == MemoryEvent.ADD:
-        print(f"Added: {op.text}")
-    elif op.event == MemoryEvent.UPDATE:
-        print(f"Updated: {op.text}")
-    elif op.event == MemoryEvent.DELETE:
-        print(f"Deleted: {op.text}")
+if result.success:
+    print("Memories stored")
+else:
+    print(f"Error: {result.error}")
 ```
