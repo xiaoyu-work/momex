@@ -185,23 +185,89 @@ class Memory:
 
     async def add(
         self,
+        messages: str | list[dict[str, str]],
+        *,
+        infer: bool = True,
+        similarity_limit: int = 5,
+    ) -> AddResult:
+        """Add memories with optional LLM processing and deduplication.
+
+        This is the main API for adding memories. By default (infer=True), it uses
+        LLM to extract facts and intelligently decide whether to ADD, UPDATE, or
+        DELETE existing memories based on semantic similarity.
+
+        Args:
+            messages: Content to add. Can be:
+                - str: A single message (treated as user message)
+                - list[dict]: Conversation messages with "role" and "content" keys
+            infer: If True (default), use LLM to extract facts and deduplicate.
+                   If False, add the content directly without LLM processing.
+            similarity_limit: Max similar memories to consider per fact (when infer=True).
+
+        Returns:
+            AddResult with statistics about what was added/updated/deleted.
+
+        Examples:
+            # String input - LLM extracts facts and deduplicates
+            await memory.add("I like Python and FastAPI")
+
+            # Conversation input - LLM processes the full conversation
+            await memory.add([
+                {"role": "user", "content": "My name is Alice"},
+                {"role": "assistant", "content": "Nice to meet you!"},
+            ])
+
+            # Direct storage without LLM processing
+            await memory.add("Raw log entry: user logged in", infer=False)
+        """
+        # Normalize input to conversation format
+        if isinstance(messages, str):
+            conversation = [{"role": "user", "content": messages}]
+        else:
+            conversation = messages
+
+        if infer:
+            # Use LLM to extract facts and deduplicate
+            result = await self._add_with_inference(conversation, similarity_limit)
+            return AddResult(
+                messages_added=result.memories_added,
+                entities_extracted=len(result.facts_extracted),
+                success=result.success,
+                collections=[self.collection],
+            )
+        else:
+            # Direct storage without LLM processing
+            total_added = 0
+            total_entities = 0
+            for msg in conversation:
+                content = msg.get("content", "")
+                if content:
+                    raw_result = await self._add_raw(content)
+                    total_added += raw_result.messages_added
+                    total_entities += raw_result.entities_extracted
+            return AddResult(
+                messages_added=total_added,
+                entities_extracted=total_entities,
+                collections=[self.collection],
+            )
+
+    async def _add_raw(
+        self,
         text: str,
         speaker: str | None = None,
         timestamp: str | None = None,
         tags: list[str] | None = None,
-        metadata: dict[str, Any] | None = None,
     ) -> AddResult:
-        """Add a memory asynchronously.
+        """Add a memory directly without LLM processing (internal method).
 
         Args:
-            text: The text content to remember.
-            speaker: Who said this (optional).
+            text: The text content to store.
+            speaker: Who said this (optional, defaults to collection name).
             timestamp: ISO timestamp (optional, defaults to now).
             tags: Optional tags for indexing.
-            metadata: Optional additional metadata.
 
         Returns:
-            AddResult with statistics about what was added.
+            AddResult with statistics.
         """
         await self._ensure_initialized()
 
@@ -227,52 +293,6 @@ class Memory:
         )
 
         result = await self._conversation.add_messages_with_indexing([msg])
-
-        return AddResult(
-            messages_added=result.messages_added,
-            entities_extracted=result.semrefs_added,
-            collections=[self.collection],
-        )
-
-    async def add_batch(
-        self,
-        items: list[dict[str, Any]],
-    ) -> AddResult:
-        """Add multiple memories asynchronously.
-
-        Args:
-            items: List of dicts with keys: text, speaker, timestamp, tags, metadata.
-
-        Returns:
-            AddResult with statistics.
-        """
-        await self._ensure_initialized()
-
-        from typeagent.knowpro.universal_message import (
-            ConversationMessage,
-            ConversationMessageMeta,
-        )
-
-        messages = []
-        for item in items:
-            timestamp = item.get("timestamp")
-            if timestamp is None:
-                timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-            # Use collection as speaker if not provided
-            speaker = item.get("speaker") or self.collection
-
-            msg = ConversationMessage(
-                text_chunks=[item["text"]],
-                tags=item.get("tags", []),
-                timestamp=timestamp,
-                metadata=ConversationMessageMeta(
-                    speaker=speaker,
-                ),
-            )
-            messages.append(msg)
-
-        result = await self._conversation.add_messages_with_indexing(messages)
 
         return AddResult(
             messages_added=result.messages_added,
@@ -456,35 +476,25 @@ class Memory:
                 export_path=path,
             ) from e
 
-    async def add_conversation(
+    async def _add_with_inference(
         self,
         messages: list[dict[str, str]],
         similarity_limit: int = 5,
     ) -> ConversationResult:
-        """Extract facts from a conversation and add to memory asynchronously.
+        """Internal method: Extract facts and add with LLM-based deduplication.
 
-        This method uses a multi-stage LLM process similar to mem0:
+        Uses a multi-stage LLM process:
         1. Extract facts from the conversation
-        2. For each fact, vector search to find similar existing memories
-        3. LLM decides ADD/UPDATE/DELETE/NONE based on similar memories
+        2. Vector search to find similar existing memories
+        3. LLM decides ADD/UPDATE/DELETE/NONE based on similarity
         4. Execute operations
 
         Args:
-            messages: List of conversation messages, each with "role" and "content" keys.
-                     Example: [{"role": "user", "content": "I like Python"},
-                              {"role": "assistant", "content": "Great choice!"}]
-            similarity_limit: Max number of similar memories to retrieve per fact.
+            messages: List of conversation messages with "role" and "content" keys.
+            similarity_limit: Max similar memories to consider per fact.
 
         Returns:
             ConversationResult with extracted facts and operations performed.
-
-        Example:
-            >>> result = await memory.add_conversation([
-            ...     {"role": "user", "content": "My name is Alice and I love Python"},
-            ...     {"role": "assistant", "content": "Nice to meet you, Alice!"},
-            ... ])
-            >>> print(result.facts_extracted)
-            ['Name is Alice', 'Loves Python']
         """
         await self._ensure_initialized()
 
@@ -509,7 +519,16 @@ class Memory:
         )
 
         try:
-            fact_response = await model.complete(fact_prompt)
+            import typechat
+            fact_result = await model.complete(fact_prompt)
+            # Handle typechat.Result type
+            if isinstance(fact_result, typechat.Success):
+                fact_response = fact_result.value
+            else:
+                # Failure case
+                result.success = False
+                result.error = f"LLM call failed: {fact_result.message}"
+                return result
             # Parse JSON response
             fact_json = self._extract_json(fact_response)
             result.facts_extracted = fact_json.get("facts", [])
@@ -545,81 +564,86 @@ class Memory:
             if texts_to_embed:
                 memory_embeddings = await embedding_model.get_embeddings(texts_to_embed)
 
-        # Stage 2 & 3: For each fact, find similar memories and decide operation
+        # Stage 2 & 3: Batch process all facts - find similar memories and decide operations
         if existing_memories and len(memory_embeddings) > 0:
             embedding_model = AsyncEmbeddingModel()
 
-            for fact in result.facts_extracted:
-                # Get embedding for this fact
-                fact_embedding = await embedding_model.get_embedding(fact)
+            # Batch get embeddings for all facts at once
+            fact_embeddings = await embedding_model.get_embeddings(result.facts_extracted)
 
+            # Collect all similar memories across all facts (deduplicated)
+            similar_memory_ids: set[int] = set()
+            for fact_emb in fact_embeddings:
                 # Calculate cosine similarity with all existing memories
-                similarities = []
                 for i, mem_emb in enumerate(memory_embeddings):
-                    similarity = float(np.dot(fact_embedding, mem_emb))
-                    similarities.append((i, similarity))
+                    similarity = float(np.dot(fact_emb, mem_emb))
+                    if similarity > self.config.similarity_threshold:
+                        similar_memory_ids.add(i)
 
-                # Sort by similarity and get top-k
-                similarities.sort(key=lambda x: x[1], reverse=True)
-                top_similar = similarities[:similarity_limit]
+            # Get top similar memories (limit to avoid too large context)
+            similar_memories = [
+                existing_memories[idx]
+                for idx in sorted(similar_memory_ids)[:similarity_limit * len(result.facts_extracted)]
+            ]
 
-                # Get the similar memories for LLM decision
-                similar_memories = [
-                    existing_memories[idx]
-                    for idx, score in top_similar
-                    if score > self.config.similarity_threshold
-                ]
+            # Single LLM call to decide operations for ALL facts
+            update_prompt = get_memory_update_prompt(similar_memories, result.facts_extracted)
 
-                # LLM decides what to do with this fact
-                update_prompt = get_memory_update_prompt(similar_memories, [fact])
+            try:
+                update_result = await model.complete(update_prompt)
+                # Handle typechat.Result type
+                if isinstance(update_result, typechat.Success):
+                    update_response = update_result.value
+                else:
+                    result.success = False
+                    result.error = f"LLM call failed: {update_result.message}"
+                    return result
+                update_json = self._extract_json(update_response)
+                memory_actions = update_json.get("memory", [])
+            except Exception as e:
+                result.success = False
+                result.error = f"Failed to decide memory operations: {e}"
+                return result
 
+            # Execute all operations
+            for action in memory_actions:
+                event_str = action.get("event", "NONE").upper()
                 try:
-                    update_response = await model.complete(update_prompt)
-                    update_json = self._extract_json(update_response)
-                    memory_actions = update_json.get("memory", [])
-                except Exception as e:
-                    # If decision fails for this fact, skip it
-                    continue
+                    event = MemoryEvent(event_str)
+                except ValueError:
+                    event = MemoryEvent.NONE
 
-                # Execute operations for this fact
-                for action in memory_actions:
-                    event_str = action.get("event", "NONE").upper()
-                    try:
-                        event = MemoryEvent(event_str)
-                    except ValueError:
-                        event = MemoryEvent.NONE
+                text = action.get("text", "")
+                action_id = action.get("id", "")
 
-                    text = action.get("text", "")
-                    action_id = action.get("id", "")
+                op = MemoryOperation(
+                    id=action_id,
+                    text=text,
+                    event=event,
+                    old_memory=action.get("old_memory"),
+                )
+                result.operations.append(op)
 
-                    op = MemoryOperation(
-                        id=action_id,
-                        text=text,
-                        event=event,
-                        old_memory=action.get("old_memory"),
-                    )
-                    result.operations.append(op)
-
-                    if event == MemoryEvent.ADD and text:
-                        await self.add(text)
-                        result.memories_added += 1
-                    elif event == MemoryEvent.UPDATE and text:
-                        # Mark old memory as deleted, add new one
-                        if action_id and action_id.isdigit():
-                            self._mark_deleted(int(action_id))
-                        await self.add(text)
-                        result.memories_updated += 1
-                    elif event == MemoryEvent.DELETE:
-                        # Mark the memory as deleted
-                        if action_id and action_id.isdigit():
-                            self._mark_deleted(int(action_id))
-                        result.memories_deleted += 1
+                if event == MemoryEvent.ADD and text:
+                    await self._add_raw(text)
+                    result.memories_added += 1
+                elif event == MemoryEvent.UPDATE and text:
+                    # Mark old memory as deleted, add new one
+                    if action_id and action_id.isdigit():
+                        self._mark_deleted(int(action_id))
+                    await self._add_raw(text)
+                    result.memories_updated += 1
+                elif event == MemoryEvent.DELETE:
+                    # Mark the memory as deleted
+                    if action_id and action_id.isdigit():
+                        self._mark_deleted(int(action_id))
+                    result.memories_deleted += 1
         else:
             # No existing memories, add all facts directly
             for fact in result.facts_extracted:
                 op = MemoryOperation(id="new", text=fact, event=MemoryEvent.ADD)
                 result.operations.append(op)
-                await self.add(fact)
+                await self._add_raw(fact)
                 result.memories_added += 1
 
         return result

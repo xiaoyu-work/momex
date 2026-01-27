@@ -11,9 +11,18 @@ Example:
     ...     # Create memory with hierarchical collection name
     ...     memory = Memory(collection="company:engineering:alice")
     ...
-    ...     # Add memories
+    ...     # Add memories - LLM extracts facts and deduplicates automatically
     ...     await memory.add("Alice likes cats")
-    ...     await memory.add("The project deadline is Friday")
+    ...     await memory.add("I really love cats")  # Deduplicates with above
+    ...
+    ...     # Or pass conversation format
+    ...     await memory.add([
+    ...         {"role": "user", "content": "The deadline is Friday"},
+    ...         {"role": "assistant", "content": "Got it!"},
+    ...     ])
+    ...
+    ...     # Direct storage without LLM processing
+    ...     await memory.add("Raw log entry", infer=False)
     ...
     ...     # Query single collection
     ...     answer = await memory.query("What does Alice like?")
@@ -51,7 +60,6 @@ from .exceptions import (
 from .manager import MemoryManager
 from .memory import (
     AddResult,
-    ConversationResult,
     Memory,
     MemoryEvent,
     MemoryItem,
@@ -71,7 +79,6 @@ __all__ = [
     "MemoryEvent",
     "MemoryOperation",
     "AddResult",
-    "ConversationResult",
     # Prefix query functions (async)
     "query",
     "search",

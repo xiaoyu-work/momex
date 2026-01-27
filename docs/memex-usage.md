@@ -67,9 +67,12 @@ from memex import Memory
 async def main():
     memory = Memory(collection="user:alice")
 
-    # Add memories manually
+    # Add memories - LLM extracts facts and deduplicates automatically
     await memory.add("I love Python programming")
     await memory.add("Project deadline is Friday")
+
+    # Adding similar content will UPDATE existing memory, not create duplicates
+    await memory.add("I really enjoy Python coding")  # Updates existing
 
     # Query
     answer = await memory.query("What programming language does the user like?")
@@ -78,23 +81,38 @@ async def main():
 asyncio.run(main())
 ```
 
-### Add Conversation
+### Add with Conversation Format
 
-Automatically store important information from conversation history:
+You can also pass conversation messages:
 
 ```python
 async def main():
     memory = Memory(collection="user:alice")
 
-    result = await memory.add_conversation([
+    # Conversation format - LLM extracts facts from the dialogue
+    await memory.add([
         {"role": "user", "content": "My name is Alice, I'm a Python developer"},
         {"role": "assistant", "content": "Nice to meet you!"},
         {"role": "user", "content": "I'm working on a FastAPI project"},
     ])
 
-    if result.success:
-        # Query the memories
-        answer = await memory.query("What is the user's name?")  # "Alice"
+    # Query the memories
+    answer = await memory.query("What is the user's name?")  # "Alice"
+```
+
+### Direct Storage (No LLM Processing)
+
+Use `infer=False` to skip LLM processing and store content directly:
+
+```python
+async def main():
+    memory = Memory(collection="user:alice")
+
+    # Direct storage - no fact extraction or deduplication
+    await memory.add("Raw log: user logged in at 2024-01-01", infer=False)
+
+    # Useful for structured data that doesn't need LLM processing
+    await memory.add("Session ID: abc123", infer=False)
 ```
 
 ### Query Across Collections
@@ -229,10 +247,9 @@ All methods are async:
 
 | Method | Description |
 |--------|-------------|
-| `await add(text, timestamp?)` | Add a single memory |
-| `await add_batch(items)` | Add multiple memories |
-| `await add_conversation(messages)` | Store important info from conversation |
-| `await query(question)` | Query this collection with natural language |
+| `await add(messages, infer=True)` | Add memories with LLM deduplication (default) |
+| `await add(text, infer=False)` | Add directly without LLM processing |
+| `await query(question)` | Query with natural language (LLM summarized) |
 | `await search(query, limit=10, threshold=None)` | Vector similarity search |
 | `await delete(memory_id)` | Soft delete a memory |
 | `await restore(memory_id)` | Restore a deleted memory |
@@ -240,6 +257,11 @@ All methods are async:
 | `await stats()` | Get memory statistics |
 | `await export(path)` | Export to JSON file |
 | `await clear()` | Delete all memories in this collection |
+
+**add() parameters:**
+- `messages`: str or list[dict] - Content to add
+- `infer`: bool (default True) - Use LLM to extract facts and deduplicate
+- `similarity_limit`: int (default 5) - Max similar memories to consider
 
 ### Prefix Query Functions
 
@@ -259,15 +281,14 @@ All functions are async:
 - `score`: Similarity score (0.0-1.0, higher is more relevant)
 - `collection`: Which collection this came from
 
-### ConversationResult
+### AddResult
 
-Returned by `add_conversation()`:
+Returned by `add()`:
 
 ```python
-result = await memory.add_conversation(messages)
+result = await memory.add("I like Python")
 
-if result.success:
-    print("Memories stored")
-else:
-    print(f"Error: {result.error}")
+print(f"Added: {result.messages_added}")
+print(f"Entities extracted: {result.entities_extracted}")
+print(f"Success: {result.success}")
 ```

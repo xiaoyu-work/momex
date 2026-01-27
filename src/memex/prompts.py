@@ -63,30 +63,36 @@ MEMORY_UPDATE_PROMPT = """You are a smart memory manager which controls the memo
 You can perform four operations: (1) ADD into the memory, (2) UPDATE the memory, (3) DELETE from the memory, and (4) NONE (no change).
 
 Compare newly retrieved facts with the existing memory. For each new fact, decide whether to:
-- ADD: Add it to the memory as a new element
-- UPDATE: Update an existing memory element
+- ADD: Add it to the memory as a new element (ONLY if it's truly NEW information)
+- UPDATE: Update an existing memory element (when new fact is about the SAME TOPIC)
 - DELETE: Delete an existing memory element (when new fact contradicts existing)
 - NONE: Make no change (if the fact is already present or irrelevant)
 
 Guidelines:
 
-1. **ADD**: If the retrieved facts contain new information not present in the memory, add it with a new ID.
+1. **ADD**: ONLY if the new fact is about a completely different topic not covered by any existing memory.
+   - Example: Memory has "Likes Python" → New fact "Has a dog named Max" → ADD (different topic)
 
-2. **UPDATE**: If the retrieved facts contain information that is already present but the information is different or more detailed, update it.
-   - Example: If memory has "User likes to play cricket" and new fact is "Loves to play cricket with friends", update with the more detailed version.
-   - Keep the same ID when updating.
+2. **UPDATE**: If the new fact is about the SAME TOPIC as an existing memory, even if worded differently.
+   - Example: Memory has "Likes Python" → New fact "Really loves Python programming" → UPDATE (same topic: Python preference)
+   - Example: Memory has "Works at Google" → New fact "Senior engineer at Google" → UPDATE (same topic: job)
+   - The new text should be the more complete or more recent version.
+   - Use the existing memory's ID when updating.
 
-3. **DELETE**: If the retrieved facts contradict information in the memory, delete the old memory.
-   - Example: If memory has "Loves cheese pizza" and new fact is "Dislikes cheese pizza", delete the old memory.
+3. **DELETE**: If the new fact CONTRADICTS existing memory.
+   - Example: Memory has "Loves cheese pizza" → New fact "Dislikes cheese pizza" → DELETE
 
-4. **NONE**: If the retrieved facts contain information already present in the memory (same meaning), make no change.
+4. **NONE**: If the new fact expresses exactly the same meaning as existing memory.
+   - Example: Memory has "Likes Python" → New fact "Likes Python" → NONE
+
+IMPORTANT: Prefer UPDATE over ADD when facts are semantically related. Two facts about the same topic (e.g., both about Python preference, both about job, both about location) should result in UPDATE, not ADD.
 
 You must return your response in the following JSON structure only:
 
 {
     "memory": [
         {
-            "id": "<ID of the memory>",
+            "id": "<ID of the memory to update/delete, or new ID for ADD>",
             "text": "<Content of the memory>",
             "event": "<Operation: ADD, UPDATE, DELETE, or NONE>",
             "old_memory": "<Old memory content, only if event is UPDATE>"
