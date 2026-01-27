@@ -1,33 +1,83 @@
-# Memex - Simplified Multi-Tenant API
+# Memex - Simplified Collection-Based Memory API
 
 Memex is a high-level wrapper around TypeAgent's Structured RAG, providing:
 
 - **Simplified API** - No need to manage `TranscriptMessage` or async/await
-- **Multi-tenant support** - Automatic data isolation per user/org
+- **Collection-based isolation** - Flexible grouping with any naming scheme
 - **Sync & Async APIs** - Use whichever fits your application
 - **Auto-configuration** - Automatic `.env` loading and path management
 
 ## Installation
 
+This is a fork. Clone and install in editable mode:
+
 ```bash
-pip install typeagent
+git clone https://github.com/xiaoyu-work/typeagent-py.git
+cd typeagent-py
+pip install -e .
 ```
 
 ## Quick Start
 
+### Single Collection
+
 ```python
 from memex import Memory
 
-# Create memory instance
-memory = Memory(user_id="user_123")
+# Create memory for a collection
+memory = Memory(collection="user:alice")
 
 # Add memories
-memory.add("Alice is the project manager")
-memory.add("The deadline is January 30th")
+memory.add("Alice likes cats")
+memory.add("The project deadline is Friday")
 
 # Query with natural language
-answer = memory.query("Who is the project manager?")
-print(answer)  # "Alice is the project manager"
+answer = memory.query("What does Alice like?")
+print(answer)  # "Alice likes cats"
+```
+
+### Multiple Collections with MemoryPool
+
+```python
+from memex import MemoryPool
+
+# Create a pool with multiple collections
+pool = MemoryPool(
+    collections=["user:alice", "team:engineering", "project:x"],
+    default_collection="user:alice"
+)
+
+# Add to specific collections
+pool.add("Personal note")  # Goes to default collection
+pool.add("Team decision", collections=["team:engineering", "project:x"])
+
+# Query across all collections
+answer = pool.query("What decisions were made?")
+```
+
+### Managing Collections
+
+```python
+from memex import MemoryManager
+
+manager = MemoryManager()
+
+# List all collections
+collections = manager.list_collections()
+
+# Check if collection exists
+if manager.exists("user:alice"):
+    info = manager.info("user:alice")
+    print(f"Size: {info['size']}")
+
+# Delete a collection
+manager.delete("user:old_user")
+
+# Rename a collection
+manager.rename("user:alice", "user:alice_backup")
+
+# Copy a collection
+manager.copy("user:alice", "user:alice_copy")
 ```
 
 ## Configuration
@@ -44,6 +94,9 @@ OPENAI_MODEL=gpt-4o
 # Or Azure OpenAI
 AZURE_OPENAI_API_KEY=your-azure-key
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/...
+
+# Optional: Custom storage path
+MEMEX_STORAGE_PATH=/path/to/your/data
 ```
 
 ### MemexConfig
@@ -58,54 +111,52 @@ config = MemexConfig(
     auto_extract=True,               # Auto-extract knowledge (default: True)
 )
 
-memory = Memory(user_id="user_123", config=config)
+memory = Memory(collection="user:alice", config=config)
 ```
 
-## Multi-Tenant Support
+## Storage Structure
 
-Memex automatically isolates data by tenant:
+Collections are stored as subdirectories. The `:` separator in collection names is converted to directory separators for cross-platform compatibility:
 
-```python
-# Data stored at: ./memex_data/acme/alice/memory.db
-alice = Memory(user_id="alice", org_id="acme")
-
-# Data stored at: ./memex_data/acme/bob/memory.db
-bob = Memory(user_id="bob", org_id="acme")
-
-# Data stored at: ./memex_data/globex/charlie/memory.db
-charlie = Memory(user_id="charlie", org_id="globex")
+```
+./memex_data/
+├── user/
+│   ├── alice/
+│   │   └── memory.db          # collection="user:alice"
+│   └── bob/
+│       └── memory.db          # collection="user:bob"
+├── team/
+│   └── engineering/
+│       └── memory.db          # collection="team:engineering"
+└── project/
+    └── x/
+        └── memory.db          # collection="project:x"
 ```
 
-### Tenant Identifiers
-
-| Parameter | Description |
-|-----------|-------------|
-| `user_id` | User identifier |
-| `agent_id` | Agent/bot identifier |
-| `org_id` | Organization identifier |
-
-Storage path: `{storage_path}/{org_id}/{user_id}/{agent_id}/memory.db`
-
-### Custom Database Path
+### Custom Storage Path
 
 ```python
-# Override automatic path generation
-memory = Memory(db_path="/custom/path/to/memory.db")
+from memex import Memory, MemexConfig
+
+config = MemexConfig(storage_path="/var/data/memories")
+
+# Stored at: /var/data/memories/user/alice/memory.db
+memory = Memory(collection="user:alice", config=config)
+print(memory.db_path)  # Shows actual path
 ```
 
 ## API Reference
 
 ### Memory Class
 
+Single collection memory interface.
+
 #### Constructor
 
 ```python
 Memory(
-    user_id: str | None = None,
-    agent_id: str | None = None,
-    org_id: str | None = None,
-    config: MemexConfig | None = None,
-    db_path: str | None = None,
+    collection: str,                    # Collection name (e.g., "user:alice")
+    config: MemexConfig | None = None,  # Configuration
 )
 ```
 
@@ -130,6 +181,85 @@ await memory.add_async("content")
 answer = await memory.query_async("question")
 results = await memory.search_async("keyword")
 ```
+
+#### Properties
+
+| Property | Description |
+|----------|-------------|
+| `collection` | Collection name |
+| `db_path` | Database file path |
+| `is_initialized` | Whether memory is initialized |
+
+### MemoryPool Class
+
+Aggregate multiple collections for unified querying.
+
+#### Constructor
+
+```python
+MemoryPool(
+    collections: list[str],                    # List of collection names
+    default_collection: str | None = None,     # Default for add()
+    config: MemexConfig | None = None,         # Configuration
+)
+```
+
+#### Methods (Sync)
+
+| Method | Description |
+|--------|-------------|
+| `add(text, collections?, ...)` | Add to specified collections |
+| `add_batch(items, collections?)` | Add multiple memories |
+| `query(question, collections?)` | Query across collections |
+| `search(query, collections?, limit=10)` | Search across collections |
+| `stats(collections?)` | Get statistics |
+| `get_memory(collection)` | Get Memory instance |
+
+#### Properties
+
+| Property | Description |
+|----------|-------------|
+| `collections` | List of collection names |
+| `default_collection` | Default collection name |
+
+### MemoryManager Class
+
+Manage collections (list, delete, rename, etc.).
+
+#### Constructor
+
+```python
+MemoryManager(
+    config: MemexConfig | None = None,  # Configuration
+)
+```
+
+#### Methods
+
+| Method | Description |
+|--------|-------------|
+| `list_collections()` | List all collection names |
+| `exists(collection)` | Check if collection exists |
+| `delete(collection)` | Delete collection and data |
+| `rename(old, new)` | Rename a collection |
+| `copy(source, dest)` | Copy a collection |
+| `info(collection)` | Get collection info (size, path, etc.) |
+
+### MemexConfig Class
+
+```python
+MemexConfig(
+    storage_path: str = "./memex_data",  # Base directory
+    llm_provider: str = "openai",        # LLM provider
+    llm_model: str | None = None,        # Model name (default from env)
+    llm_api_key: str | None = None,      # API key (default from env)
+    llm_endpoint: str | None = None,     # Custom endpoint
+    auto_extract: bool = True,           # Auto-extract knowledge
+    db_name: str = "memory.db",          # Database filename
+)
+```
+
+## Examples
 
 ### Adding Memories
 
@@ -157,7 +287,6 @@ memory.add_batch([
 ```python
 # Natural language query
 answer = memory.query("What time is the meeting?")
-
 # Returns a natural language answer based on stored memories
 ```
 
@@ -179,41 +308,12 @@ for item in results:
 ```python
 stats = memory.stats()
 # {
+#     "collection": "user:alice",
 #     "total_memories": 42,
 #     "entities_extracted": 128,
-#     "db_path": "./memex_data/user_123/memory.db",
-#     "user_id": "user_123",
-#     "agent_id": None,
-#     "org_id": None,
+#     "db_path": "/var/data/memories/user/alice/memory.db",
 # }
 ```
-
-### Export & Import
-
-```python
-# Export to JSON
-memory.export("backup.json")
-
-# Output format:
-# {
-#     "user_id": "user_123",
-#     "agent_id": null,
-#     "org_id": null,
-#     "memories": [
-#         {"id": "0", "text": "...", "speaker": "...", "timestamp": "..."},
-#         ...
-#     ]
-# }
-```
-
-### Clear
-
-```python
-# Delete all memories for this tenant
-memory.clear()
-```
-
-## Examples
 
 ### Chat Application
 
@@ -222,7 +322,7 @@ from memex import Memory
 
 class ChatBot:
     def __init__(self, user_id: str):
-        self.memory = Memory(user_id=user_id)
+        self.memory = Memory(collection=f"user:{user_id}")
 
     def chat(self, user_message: str) -> str:
         # Store user message
@@ -244,86 +344,44 @@ class ChatBot:
 
 ```python
 from fastapi import FastAPI
-from memex import Memory
+from memex import Memory, MemexConfig
 
 app = FastAPI()
+config = MemexConfig(storage_path="/var/data/app_memories")
 
-@app.post("/memory/{user_id}")
-async def add_memory(user_id: str, text: str):
-    memory = Memory(user_id=user_id)
+@app.post("/memory/{collection}")
+async def add_memory(collection: str, text: str):
+    memory = Memory(collection=collection, config=config)
     result = await memory.add_async(text)
-    return {"added": result.messages_added}
+    return {"added": result.messages_added, "db_path": memory.db_path}
 
-@app.get("/memory/{user_id}/query")
-async def query_memory(user_id: str, question: str):
-    memory = Memory(user_id=user_id)
+@app.get("/memory/{collection}/query")
+async def query_memory(collection: str, question: str):
+    memory = Memory(collection=collection, config=config)
     answer = await memory.query_async(question)
     return {"answer": answer}
 ```
 
-### Multi-Agent System
+### Multi-Collection Query
 
 ```python
-from memex import Memory, MemexConfig
+from memex import MemoryPool, MemexConfig
 
-config = MemexConfig(storage_path="./agent_memories")
+config = MemexConfig(storage_path="./data")
 
-# Each agent has isolated memory
-research_agent = Memory(user_id="user_1", agent_id="researcher", config=config)
-writer_agent = Memory(user_id="user_1", agent_id="writer", config=config)
+# User belongs to personal and team collections
+pool = MemoryPool(
+    collections=["user:alice", "team:engineering"],
+    default_collection="user:alice",
+    config=config,
+)
 
-# Research agent stores findings
-research_agent.add("Found 3 relevant papers on RAG systems")
+# Add personal note
+pool.add("My TODO: review PR #123")
 
-# Writer agent has separate memory
-writer_agent.add("Draft outline completed")
+# Add team knowledge
+pool.add("Team uses PostgreSQL for production", collections=["team:engineering"])
 
-# Query specific agent's memory
-research_agent.query("What papers did I find?")
+# Query across both personal and team knowledge
+answer = pool.query("What database does the team use?")
 ```
-
-## Comparison: Memex vs Core TypeAgent API
-
-| Feature | Memex | Core TypeAgent |
-|---------|-------|----------------|
-| Async required | No (sync by default) | Yes |
-| Multi-tenant | Built-in | Manual |
-| Message creation | Simplified | Manual TranscriptMessage |
-| Auto dotenv | Yes | No |
-| Auto path management | Yes | No |
-| Full control | Limited | Full |
-
-**Use Memex when:** You want simplicity and multi-tenant support.
-
-**Use Core API when:** You need full control over message types and settings.
-
-## Structured RAG vs Traditional RAG
-
-Memex uses TypeAgent's Structured RAG under the hood:
-
-| Aspect | Traditional RAG | Structured RAG (Memex) |
-|--------|-----------------|------------------------|
-| Storage | Vector embeddings | Entities, relations, topics |
-| Query | Similarity search | Semantic parsing |
-| Result | Similar text chunks | Precise answers |
-| "Who did X?" | Returns text containing "who" | Returns the actual person |
-| Time queries | Weak | Strong (time indexing) |
-
-## Troubleshooting
-
-### "No module named 'memex'"
-
-Make sure you installed with `pip install typeagent` and the package is in your Python path.
-
-### API Key errors
-
-Ensure your `.env` file is in the current directory or parent, or set environment variables:
-
-```bash
-export OPENAI_API_KEY=your-key
-export OPENAI_MODEL=gpt-4o
-```
-
-### Database locked
-
-Each `Memory` instance should be used by one process. For multi-process scenarios, use separate database paths or implement connection pooling.

@@ -1,55 +1,40 @@
-"""Memex Multi-Tenant Example.
+"""Memex Collection-Based Isolation Example.
 
-This example demonstrates how to use Memex with multi-tenant isolation.
-
-Each user/organization gets their own isolated memory storage.
+This example demonstrates how to use Memex with collection-based isolation
+and MemoryPool for querying across multiple collections.
 """
 
-from memex import Memory, MemexConfig
+from memex import Memory, MemoryPool, MemoryManager, MemexConfig
 
 
 def main():
     # Configure storage location
     config = MemexConfig(
-        storage_path="./multi_tenant_data",
+        storage_path="./multi_collection_data",
     )
 
-    # Create memories for different users in different organizations
-    print("Creating memories for multiple tenants...\n")
+    # Create memories for different collections
+    print("Creating memories for multiple collections...\n")
 
-    # Organization: Acme Corp
-    # User: Alice
-    alice_memory = Memory(
-        user_id="alice",
-        org_id="acme",
-        config=config,
-    )
+    # Personal collection for Alice
+    alice_memory = Memory(collection="user:alice", config=config)
     print(f"Alice's DB: {alice_memory.db_path}")
     alice_memory.add("我喜欢Python编程", speaker="Alice")
     alice_memory.add("下周要去北京出差", speaker="Alice")
 
-    # Organization: Acme Corp
-    # User: Bob
-    bob_memory = Memory(
-        user_id="bob",
-        org_id="acme",
-        config=config,
-    )
+    # Personal collection for Bob
+    bob_memory = Memory(collection="user:bob", config=config)
     print(f"Bob's DB: {bob_memory.db_path}")
     bob_memory.add("我是Java开发者", speaker="Bob")
     bob_memory.add("正在学习机器学习", speaker="Bob")
 
-    # Organization: Globex
-    # User: Charlie
-    charlie_memory = Memory(
-        user_id="charlie",
-        org_id="globex",
-        config=config,
-    )
-    print(f"Charlie's DB: {charlie_memory.db_path}")
-    charlie_memory.add("我们公司使用TypeScript", speaker="Charlie")
+    # Team collection
+    team_memory = Memory(collection="team:engineering", config=config)
+    print(f"Team's DB: {team_memory.db_path}")
+    team_memory.add("团队使用PostgreSQL数据库", speaker="架构师")
+    team_memory.add("代码审查需要两人以上批准", speaker="规范")
 
-    # Query each user's memories - they are isolated
+    # Query individual collections - they are isolated
     print("\n--- Querying isolated memories ---\n")
 
     print("Alice's query: 'What programming language do I like?'")
@@ -58,14 +43,32 @@ def main():
     print("Bob's query: 'What am I learning?'")
     print(f"Answer: {bob_memory.query('What am I learning?')}\n")
 
-    print("Charlie's query: 'What language does my company use?'")
-    print(f"Answer: {charlie_memory.query('What language does my company use?')}\n")
+    # Use MemoryPool to query across collections
+    print("--- Using MemoryPool for cross-collection queries ---\n")
 
-    # Show stats for each
-    print("--- Memory Stats ---")
-    print(f"Alice: {alice_memory.stats()}")
-    print(f"Bob: {bob_memory.stats()}")
-    print(f"Charlie: {charlie_memory.stats()}")
+    pool = MemoryPool(
+        collections=["user:alice", "team:engineering"],
+        default_collection="user:alice",
+        config=config,
+    )
+
+    print("Pool query (alice + team): 'What database does the team use?'")
+    answer = pool.query("What database does the team use?")
+    print(f"Answer: {answer}\n")
+
+    # Add to multiple collections at once
+    pool.add("项目会议定在周三下午3点", collections=["user:alice", "team:engineering"])
+    print("Added meeting note to both alice and team collections")
+
+    # Use MemoryManager to list collections
+    print("\n--- Using MemoryManager ---")
+    manager = MemoryManager(config=config)
+    collections = manager.list_collections()
+    print(f"All collections: {collections}")
+
+    for coll in collections:
+        info = manager.info(coll)
+        print(f"  {coll}: {info['size']}")
 
 
 if __name__ == "__main__":

@@ -10,8 +10,8 @@ from memex import Memory
 
 
 async def main():
-    # Create memory
-    memory = Memory(user_id="async_user")
+    # Create memory for a collection
+    memory = Memory(collection="user:async_demo")
 
     # Add memories asynchronously
     print("Adding memories asynchronously...")

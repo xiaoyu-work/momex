@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Literal
 
 LLMProvider = Literal["openai", "azure", "ollama", "anthropic"]
@@ -17,9 +16,6 @@ class MemexConfig:
     Attributes:
         storage_path: Base directory for storing memory databases.
             Defaults to "./memex_data".
-        storage_path_template: Template for tenant-specific paths.
-            Supports {org_id}, {user_id}, {agent_id} placeholders.
-            Defaults to "{org_id}/{user_id}".
         llm_provider: LLM provider to use. One of "openai", "azure", "ollama", "anthropic".
             Defaults to "openai".
         llm_model: Model name to use. Defaults to environment variable or "gpt-4o".
@@ -31,7 +27,6 @@ class MemexConfig:
     """
 
     storage_path: str = "./memex_data"
-    storage_path_template: str = "{org_id}/{user_id}"
     llm_provider: LLMProvider = "openai"
     llm_model: str | None = None
     llm_api_key: str | None = None
@@ -58,49 +53,10 @@ class MemexConfig:
             elif self.llm_provider == "ollama":
                 self.llm_endpoint = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434")
 
-    def get_db_path(
-        self,
-        user_id: str | None = None,
-        agent_id: str | None = None,
-        org_id: str | None = None,
-    ) -> str:
-        """Get the full database path for a tenant.
-
-        Args:
-            user_id: User identifier.
-            agent_id: Agent identifier.
-            org_id: Organization identifier.
-
-        Returns:
-            Full path to the SQLite database file.
-        """
-        # Build the tenant-specific subdirectory
-        template_values = {
-            "user_id": user_id or "default",
-            "agent_id": agent_id or "default",
-            "org_id": org_id or "default",
-        }
-
-        # Only include non-default segments in path
-        path_parts = []
-        if org_id:
-            path_parts.append(org_id)
-        if user_id:
-            path_parts.append(user_id)
-        if agent_id:
-            path_parts.append(agent_id)
-
-        if path_parts:
-            tenant_path = os.path.join(*path_parts)
-        else:
-            tenant_path = "default"
-
-        full_path = os.path.join(self.storage_path, tenant_path, self.db_name)
-
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-
-        return full_path
+        # Handle environment variable for storage path
+        env_storage = os.getenv("MEMEX_STORAGE_PATH")
+        if env_storage and self.storage_path == "./memex_data":
+            self.storage_path = env_storage
 
     @classmethod
     def from_env(cls) -> MemexConfig:

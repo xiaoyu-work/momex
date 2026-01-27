@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .config import MemexConfig
@@ -21,6 +22,7 @@ class MemoryItem:
     timestamp: str | None = None
     metadata: dict[str, Any] | None = None
     score: float | None = None
+    collection: str | None = None
 
 
 @dataclass
@@ -30,52 +32,52 @@ class AddResult:
     messages_added: int
     entities_extracted: int
     success: bool = True
+    collections: list[str] | None = None
+
+
+def _collection_to_path(collection: str) -> Path:
+    """Convert collection name to path.
+
+    Converts "user:alice" to Path("user/alice") for cross-platform compatibility.
+    """
+    # Split by : and create path parts
+    parts = collection.split(":")
+    # Sanitize each part for invalid characters (Windows forbidden chars)
+    sanitized = [re.sub(r'[<>"|?*:\\]', '_', part) for part in parts]
+    return Path(*sanitized)
 
 
 class Memory:
-    """High-level API for Structured RAG memory.
+    """High-level API for Structured RAG memory with single collection.
 
     Example:
         >>> from memex import Memory
-        >>> memory = Memory(user_id="user_123")
-        >>> memory.add("张三说下周五完成API")
-        >>> answer = memory.query("谁负责API?")
-        >>> results = memory.search("张三")
+        >>> memory = Memory(collection="user:alice")
+        >>> memory.add("Alice likes cats")
+        >>> answer = memory.query("What does Alice like?")
     """
 
     def __init__(
         self,
-        user_id: str | None = None,
-        agent_id: str | None = None,
-        org_id: str | None = None,
+        collection: str,
         config: MemexConfig | None = None,
-        db_path: str | None = None,
     ) -> None:
-        """Initialize Memory instance.
+        """Initialize Memory instance for a single collection.
 
         Args:
-            user_id: User identifier for multi-tenant isolation.
-            agent_id: Agent identifier for multi-tenant isolation.
-            org_id: Organization identifier for multi-tenant isolation.
+            collection: Collection name (e.g., "user:alice", "team:engineering")
             config: Configuration object. If None, uses default config.
-            db_path: Direct path to database file. Overrides config-based path.
         """
-        self.user_id = user_id
-        self.agent_id = agent_id
-        self.org_id = org_id
+        self.collection = collection
         self.config = config or MemexConfig()
 
-        # Determine database path
-        if db_path:
-            self._db_path = db_path
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-        else:
-            self._db_path = self.config.get_db_path(
-                user_id=user_id,
-                agent_id=agent_id,
-                org_id=org_id,
-            )
+        # Generate database path from collection name using pathlib
+        storage_path = Path(self.config.storage_path)
+        collection_path = _collection_to_path(collection)
+        self._db_path = storage_path / collection_path / self.config.db_name
+
+        # Ensure directory exists
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._conversation = None
         self._initialized = False
@@ -87,13 +89,10 @@ class Memory:
         """Load environment variables from .env file."""
         try:
             from typeagent.aitools.utils import load_dotenv
-
             load_dotenv()
         except ImportError:
-            # Fallback to python-dotenv
             try:
                 from dotenv import load_dotenv
-
                 load_dotenv()
             except ImportError:
                 pass
@@ -107,9 +106,9 @@ class Memory:
         from typeagent.knowpro.universal_message import ConversationMessage
 
         self._conversation = await create_conversation(
-            self._db_path,
+            str(self._db_path),
             ConversationMessage,
-            name=f"memex:{self.user_id or 'default'}",
+            name=f"memex:{self.collection}",
         )
         self._initialized = True
 
@@ -144,7 +143,6 @@ class Memory:
             ConversationMessageMeta,
         )
 
-        # Build message
         if timestamp is None:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%Sz")
 
@@ -157,12 +155,12 @@ class Memory:
             ),
         )
 
-        # Add and index
         result = await self._conversation.add_messages_with_indexing([msg])
 
         return AddResult(
             messages_added=result.messages_added,
             entities_extracted=result.semrefs_added,
+            collections=[self.collection],
         )
 
     async def add_batch_async(
@@ -205,6 +203,7 @@ class Memory:
         return AddResult(
             messages_added=result.messages_added,
             entities_extracted=result.semrefs_added,
+            collections=[self.collection],
         )
 
     async def query_async(self, question: str) -> str:
@@ -235,13 +234,8 @@ class Memory:
         """
         await self._ensure_initialized()
 
-        # Use the conversation's search capabilities
-        # For now, we'll use query and parse results
-        # TODO: Implement proper search when knowpro exposes search API
-
         results: list[MemoryItem] = []
 
-        # Access messages directly for basic search
         if self._conversation.messages:
             for i, msg in enumerate(self._conversation.messages):
                 if len(results) >= limit:
@@ -255,35 +249,20 @@ class Memory:
                             text=text,
                             speaker=msg.metadata.speaker if msg.metadata else None,
                             timestamp=msg.timestamp,
+                            collection=self.collection,
                         )
                     )
 
         return results
 
-    async def delete_async(self, memory_id: str) -> bool:
-        """Delete a memory by ID asynchronously.
-
-        Args:
-            memory_id: The ID of the memory to delete.
-
-        Returns:
-            True if deleted, False if not found.
-        """
-        await self._ensure_initialized()
-        # TODO: Implement when knowpro supports deletion
-        raise NotImplementedError("Delete not yet supported by underlying storage")
-
     async def clear_async(self) -> bool:
-        """Clear all memories for this tenant asynchronously.
+        """Clear all memories for this collection asynchronously.
 
         Returns:
             True if successful.
         """
-        # Delete the database file and reinitialize
-        import os
-
-        if os.path.exists(self._db_path):
-            os.remove(self._db_path)
+        if self._db_path.exists():
+            self._db_path.unlink()
 
         self._conversation = None
         self._initialized = False
@@ -294,7 +273,7 @@ class Memory:
         """Get memory statistics asynchronously.
 
         Returns:
-            Dict with total count, entity count, topic count, etc.
+            Dict with total count, entity count, etc.
         """
         await self._ensure_initialized()
 
@@ -302,12 +281,10 @@ class Memory:
         semref_count = len(self._conversation.semantic_refs) if self._conversation.semantic_refs else 0
 
         return {
+            "collection": self.collection,
             "total_memories": message_count,
             "entities_extracted": semref_count,
-            "db_path": self._db_path,
-            "user_id": self.user_id,
-            "agent_id": self.agent_id,
-            "org_id": self.org_id,
+            "db_path": str(self._db_path),
         }
 
     async def export_async(self, path: str) -> None:
@@ -321,9 +298,7 @@ class Memory:
         await self._ensure_initialized()
 
         data = {
-            "user_id": self.user_id,
-            "agent_id": self.agent_id,
-            "org_id": self.org_id,
+            "collection": self.collection,
             "memories": [],
         }
 
@@ -354,18 +329,7 @@ class Memory:
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> AddResult:
-        """Add a memory synchronously.
-
-        Args:
-            text: The text content to remember.
-            speaker: Who said this (optional).
-            timestamp: ISO timestamp (optional, defaults to now).
-            tags: Optional tags for indexing.
-            metadata: Optional additional metadata.
-
-        Returns:
-            AddResult with statistics about what was added.
-        """
+        """Add a memory synchronously."""
         return run_sync(
             self.add_async(
                 text=text,
@@ -377,72 +341,27 @@ class Memory:
         )
 
     def add_batch(self, items: list[dict[str, Any]]) -> AddResult:
-        """Add multiple memories synchronously.
-
-        Args:
-            items: List of dicts with keys: text, speaker, timestamp, tags, metadata.
-
-        Returns:
-            AddResult with statistics.
-        """
+        """Add multiple memories synchronously."""
         return run_sync(self.add_batch_async(items))
 
     def query(self, question: str) -> str:
-        """Query memories with natural language synchronously.
-
-        Args:
-            question: Natural language question.
-
-        Returns:
-            Answer string based on stored memories.
-        """
+        """Query memories with natural language synchronously."""
         return run_sync(self.query_async(question))
 
     def search(self, query: str, limit: int = 10) -> list[MemoryItem]:
-        """Search memories by keyword/entity synchronously.
-
-        Args:
-            query: Search query (keyword, entity name, or topic).
-            limit: Maximum number of results to return.
-
-        Returns:
-            List of MemoryItem objects.
-        """
+        """Search memories by keyword/entity synchronously."""
         return run_sync(self.search_async(query, limit))
 
-    def delete(self, memory_id: str) -> bool:
-        """Delete a memory by ID synchronously.
-
-        Args:
-            memory_id: The ID of the memory to delete.
-
-        Returns:
-            True if deleted, False if not found.
-        """
-        return run_sync(self.delete_async(memory_id))
-
     def clear(self) -> bool:
-        """Clear all memories for this tenant synchronously.
-
-        Returns:
-            True if successful.
-        """
+        """Clear all memories for this collection synchronously."""
         return run_sync(self.clear_async())
 
     def stats(self) -> dict[str, Any]:
-        """Get memory statistics synchronously.
-
-        Returns:
-            Dict with total count, entity count, topic count, etc.
-        """
+        """Get memory statistics synchronously."""
         return run_sync(self.stats_async())
 
     def export(self, path: str) -> None:
-        """Export all memories to a JSON file synchronously.
-
-        Args:
-            path: Path to the output JSON file.
-        """
+        """Export all memories to a JSON file synchronously."""
         return run_sync(self.export_async(path))
 
     # =========================================================================
@@ -452,7 +371,7 @@ class Memory:
     @property
     def db_path(self) -> str:
         """Get the database file path."""
-        return self._db_path
+        return str(self._db_path)
 
     @property
     def is_initialized(self) -> bool:

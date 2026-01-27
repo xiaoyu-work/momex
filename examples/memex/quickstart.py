@@ -19,9 +19,9 @@ from memex import Memory
 
 
 def main():
-    # Create memory for a user
-    print("Creating memory for user_123...")
-    memory = Memory(user_id="user_123")
+    # Create memory for a collection
+    print("Creating memory for user:demo...")
+    memory = Memory(collection="user:demo")
 
     # Add some memories
     print("\nAdding memories...")

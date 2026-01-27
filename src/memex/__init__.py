@@ -3,31 +3,42 @@
 A high-level API for structured knowledge memory, built on TypeAgent's
 Structured RAG technology.
 
-Example:
+Example - Single Collection:
     >>> from memex import Memory
     >>>
-    >>> # Create memory for a user
-    >>> memory = Memory(user_id="user_123")
+    >>> # Create memory for a collection
+    >>> memory = Memory(collection="user:alice")
     >>>
     >>> # Add memories
-    >>> memory.add("张三说下周五完成API开发")
-    >>> memory.add("李四负责前端，王五负责后端")
+    >>> memory.add("Alice likes cats")
+    >>> memory.add("The project deadline is Friday")
     >>>
     >>> # Query with natural language
-    >>> answer = memory.query("谁负责API?")
-    >>> print(answer)  # "张三负责API开发"
-    >>>
-    >>> # Search by keyword
-    >>> results = memory.search("张三")
-    >>> for item in results:
-    ...     print(item.text)
+    >>> answer = memory.query("What does Alice like?")
+    >>> print(answer)  # "Alice likes cats"
 
-Multi-tenant support:
-    >>> # Isolated memory per user/org
-    >>> memory = Memory(
-    ...     user_id="user_123",
-    ...     org_id="company_abc",
+Example - Multiple Collections with MemoryPool:
+    >>> from memex import MemoryPool
+    >>>
+    >>> # Create a pool with multiple collections
+    >>> pool = MemoryPool(
+    ...     collections=["user:alice", "team:engineering", "project:x"],
+    ...     default_collection="user:alice"
     ... )
+    >>>
+    >>> # Add to specific collections
+    >>> pool.add("Personal note", collections=["user:alice"])
+    >>> pool.add("Team decision", collections=["team:engineering", "project:x"])
+    >>>
+    >>> # Query across all collections
+    >>> answer = pool.query("What decisions were made?")
+
+Example - Managing Collections:
+    >>> from memex import MemoryManager
+    >>>
+    >>> manager = MemoryManager()
+    >>> collections = manager.list_collections()
+    >>> manager.delete("user:old_user")
 
 Configuration:
     >>> from memex import Memory, MemexConfig
@@ -37,17 +48,21 @@ Configuration:
     ...     llm_provider="openai",
     ...     llm_model="gpt-4o",
     ... )
-    >>> memory = Memory(user_id="xxx", config=config)
+    >>> memory = Memory(collection="user:alice", config=config)
 """
 
 from .config import MemexConfig
+from .manager import MemoryManager
 from .memory import AddResult, Memory, MemoryItem
+from .pool import MemoryPool
 
 __all__ = [
     "Memory",
+    "MemoryPool",
+    "MemoryManager",
     "MemexConfig",
     "MemoryItem",
     "AddResult",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

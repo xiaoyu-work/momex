@@ -1,6 +1,8 @@
 # Fork Changes
 
-This fork adds **Memex** - a simplified, multi-tenant API wrapper for TypeAgent's Structured RAG.
+I've been keeping an eye on this repo for a while. I'm also personally interested in personal assistant agents, and I've been trying to find best practices for memory. Structured RAG is a great design, but since this is an experimental project, the feature set isn't complete yet. So I forked the original repo and added more features, aiming to make it work for more general use cases and projects.
+
+This fork adds **Memex** - a simplified, collection-based API wrapper for TypeAgent's Structured RAG.
 
 ## What's New
 
@@ -14,7 +16,9 @@ This fork adds **Memex** - a simplified, multi-tenant API wrapper for TypeAgent'
 | Feature | Description |
 |---------|-------------|
 | **Simplified API** | No `TranscriptMessage` or `async/await` needed |
-| **Multi-tenant** | Auto data isolation via `user_id`, `org_id`, `agent_id` |
+| **Collection-based** | Flexible data isolation with any naming scheme |
+| **MemoryPool** | Query across multiple collections |
+| **MemoryManager** | List, delete, rename collections |
 | **Sync API** | Synchronous methods by default |
 | **Auto-config** | Auto `.env` loading and path management |
 
@@ -23,19 +27,28 @@ This fork adds **Memex** - a simplified, multi-tenant API wrapper for TypeAgent'
 ```python
 from memex import Memory
 
-memory = Memory(user_id="user_123")
+memory = Memory(collection="user:alice")
 memory.add("Alice is the project manager")
 answer = memory.query("Who is the project manager?")
 ```
 
-## Multi-Tenant Example
+## Collection Examples
 
 ```python
-# Data isolated per user/org
-alice = Memory(user_id="alice", org_id="acme")
-bob = Memory(user_id="bob", org_id="acme")
-# Stored at: ./memex_data/acme/alice/memory.db
-#            ./memex_data/acme/bob/memory.db
+from memex import Memory, MemoryPool
+
+# Single collection
+alice = Memory(collection="user:alice")
+# Stored at: ./memex_data/user/alice/memory.db
+
+# Query across multiple collections
+pool = MemoryPool(
+    collections=["user:alice", "team:engineering"],
+    default_collection="user:alice"
+)
+pool.add("Personal note")
+pool.add("Team decision", collections=["team:engineering"])
+answer = pool.query("What decisions were made?")
 ```
 
 See [docs/memex.md](docs/memex.md) for full documentation.

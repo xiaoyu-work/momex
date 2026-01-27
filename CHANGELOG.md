@@ -4,21 +4,32 @@
 
 ### 0.4.0 (Jan 26)
 
-#### New Feature: Memex - Simplified Multi-Tenant API
+#### New Feature: Memex - Simplified Collection-Based Memory API
 
 Added `memex` package, a high-level wrapper around TypeAgent's Structured RAG:
 
 - **Simplified API**: No need to manage `TranscriptMessage` or async/await
-- **Multi-tenant support**: Automatic data isolation via `user_id`, `org_id`, `agent_id`
+- **Collection-based isolation**: Flexible grouping with any naming scheme (e.g., `user:alice`, `team:engineering`)
+- **MemoryPool**: Query across multiple collections
+- **MemoryManager**: List, delete, rename, copy collections
 - **Sync & Async APIs**: Both sync (default) and async methods available
 - **Auto-configuration**: Automatic `.env` loading and database path management
+- **Cross-platform**: Uses pathlib for Windows/Unix compatibility
 
 ```python
-from memex import Memory
+from memex import Memory, MemoryPool
 
-memory = Memory(user_id="user_123")
-memory.add("Alice is the project manager")
-answer = memory.query("Who is the project manager?")
+# Single collection
+memory = Memory(collection="user:alice")
+memory.add("Alice likes cats")
+answer = memory.query("What does Alice like?")
+
+# Multiple collections
+pool = MemoryPool(
+    collections=["user:alice", "team:engineering"],
+    default_collection="user:alice"
+)
+pool.query("What decisions were made?")  # Searches all
 ```
 
 See [Memex Documentation](docs/memex.md) for details.
