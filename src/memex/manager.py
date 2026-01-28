@@ -47,7 +47,7 @@ class MemoryManager:
             config: Configuration object. If None, uses default config.
         """
         self.config = config or MemexConfig()
-        self._storage_path = Path(self.config.storage_path)
+        self._storage_path = Path(self.config.storage.path)
 
     def list_collections(self, prefix: str | None = None) -> list[str]:
         """List all collections, optionally filtered by prefix.

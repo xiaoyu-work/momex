@@ -185,12 +185,72 @@ manager.rename("user:old", "user:new")
 
 ## Configuration
 
+### Storage Backends
+
+Memex supports two storage backends:
+
+| Backend | Use Case | Features |
+|---------|----------|----------|
+| **SQLite** (default) | Local development, single user | Zero config, file-based |
+| **PostgreSQL** | Production, multi-user, cloud | pgvector for fast search, scales |
+
+#### SQLite (Default)
+
+```python
+from memex import Memory, MemexConfig, StorageConfig
+
+# Default - uses SQLite
+memory = Memory(collection="user:alice")
+
+# Explicit SQLite config
+config = MemexConfig(
+    storage=StorageConfig(
+        backend="sqlite",
+        path="./my_data",
+    )
+)
+memory = Memory(collection="user:alice", config=config)
+```
+
+#### PostgreSQL
+
+Requires `asyncpg` and PostgreSQL with `pgvector` extension:
+
+```bash
+pip install asyncpg
+```
+
+```python
+from memex import Memory, MemexConfig, StorageConfig
+
+config = MemexConfig(
+    storage=StorageConfig(
+        backend="postgres",
+        connection_string="postgresql://user:pass@localhost/memex",
+        table_prefix="memex",  # optional, default "memex"
+    )
+)
+memory = Memory(collection="user:alice", config=config)
+```
+
+#### Cloud Database Support
+
+PostgreSQL backend works with all major cloud providers:
+
+| Provider | Connection String |
+|----------|------------------|
+| **AWS RDS** | `postgresql://user:pass@xxx.rds.amazonaws.com:5432/memex` |
+| **Azure** | `postgresql://user:pass@xxx.postgres.database.azure.com:5432/memex` |
+| **Supabase** | `postgresql://user:pass@db.xxx.supabase.co:5432/postgres` |
+| **Neon** | `postgresql://user:pass@xxx.neon.tech/memex` |
+| **Vercel Postgres** | `postgresql://user:pass@xxx.vercel-storage.com/memex` |
+
 ### MemexConfig
 
 ```python
-from memex import Memory, MemexConfig
+from memex import Memory, MemexConfig, StorageConfig
 
-# Custom storage path
+# Simple SQLite config (legacy style)
 config = MemexConfig(storage_path="./my_data")
 memory = Memory(collection="user:alice", config=config)
 
@@ -204,7 +264,13 @@ bob = Memory(collection="user:bob")      # uses default
 
 ```yaml
 # memex_config.yaml
-storage_path: ./memex_data
+
+# Storage backend configuration
+storage:
+  backend: sqlite  # or "postgres"
+  path: ./memex_data  # for sqlite
+  # connection_string: postgresql://...  # for postgres
+  # table_prefix: memex  # for postgres
 
 # Embedding model - affects search quality and similarity scores
 # Options: text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large

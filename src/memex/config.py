@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from .exceptions import ConfigurationError
 
@@ -51,6 +52,47 @@ DEFAULT_FACT_TYPES: list[FactType] = [
 
 
 @dataclass
+class StorageConfig:
+    """Storage backend configuration.
+
+    Attributes:
+        backend: Storage backend type ("sqlite" or "postgres").
+        path: Path for SQLite database (used when backend="sqlite").
+        connection_string: PostgreSQL connection string (used when backend="postgres").
+        table_prefix: Table name prefix for PostgreSQL (default "memex").
+
+    Example YAML:
+        # SQLite (default)
+        storage:
+          backend: sqlite
+          path: ./memex_data
+
+        # PostgreSQL
+        storage:
+          backend: postgres
+          connection_string: postgresql://user:pass@localhost/memex
+
+        # Supabase
+        storage:
+          backend: postgres
+          connection_string: postgresql://user:pass@db.xxx.supabase.co:5432/postgres
+    """
+
+    backend: Literal["sqlite", "postgres"] = "sqlite"
+    path: str = "./memex_data"
+    connection_string: str | None = None
+    table_prefix: str = "memex"
+
+    def __post_init__(self) -> None:
+        """Validate configuration."""
+        if self.backend == "postgres" and not self.connection_string:
+            raise ConfigurationError(
+                message="connection_string is required for PostgreSQL backend",
+                suggestion="Set storage.connection_string in your config.",
+            )
+
+
+@dataclass
 class MemexConfig:
     """Configuration for Memex memory system.
 
@@ -59,59 +101,104 @@ class MemexConfig:
         - AZURE_OPENAI_ENDPOINT (for Azure)
 
     Attributes:
-        storage_path: Base directory for storing memory databases.
-        db_name: Database filename.
+        storage: Storage backend configuration.
+        storage_path: (Deprecated) Use storage.path instead.
+        db_name: Database filename (for SQLite).
         fact_types: List of fact types to extract from conversations.
         similarity_threshold: Minimum similarity score for memory matching (0.0-1.0).
-            Recommended: 0.5-0.7 for ada-002, 0.3-0.5 for embedding-3-small/large.
         importance_weight: Weight for importance in search scoring (0.0-1.0).
-            Final score = similarity * (1 - importance_weight) + importance * importance_weight
         embedding_model: OpenAI embedding model name.
-            Options: text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large.
+        embedding_dim: Embedding vector dimension (auto-detected from model).
+
+    Example:
+        # Simple SQLite config
+        config = MemexConfig()
+
+        # PostgreSQL config
+        config = MemexConfig(
+            storage=StorageConfig(
+                backend="postgres",
+                connection_string="postgresql://user:pass@localhost/memex"
+            )
+        )
+
+        # From YAML
+        config = MemexConfig.from_yaml("memex_config.yaml")
     """
 
     # Class-level default config
     _default: "MemexConfig | None" = None
 
-    storage_path: str = "./memex_data"
+    # Storage configuration
+    storage: StorageConfig = field(default_factory=StorageConfig)
+
+    # Legacy field (deprecated, use storage.path)
+    storage_path: str | None = None
     db_name: str = "memory.db"
+
+    # LLM configuration
     fact_types: list[FactType] = field(default_factory=lambda: DEFAULT_FACT_TYPES.copy())
+
+    # Search configuration
     similarity_threshold: float = 0.3  # Adjusted for text-embedding-3-small
     importance_weight: float = 0.3  # 30% importance, 70% similarity
-    embedding_model: str = "text-embedding-3-small"  # Better than ada-002 for relevance
+
+    # Embedding configuration
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int | None = None  # Auto-detected from model
 
     def __post_init__(self) -> None:
-        """Load defaults from environment variables if not set."""
+        """Initialize configuration."""
+        # Handle legacy storage_path
+        if self.storage_path:
+            self.storage = StorageConfig(backend="sqlite", path=self.storage_path)
+
+        # Environment variable override
         env_storage = os.getenv("MEMEX_STORAGE_PATH")
-        if env_storage and self.storage_path == "./memex_data":
-            self.storage_path = env_storage
+        if env_storage and self.storage.path == "./memex_data":
+            self.storage = StorageConfig(backend="sqlite", path=env_storage)
+
+        # Auto-detect embedding dimension from model
+        if self.embedding_dim is None:
+            self.embedding_dim = self._get_embedding_dim(self.embedding_model)
+
+    @staticmethod
+    def _get_embedding_dim(model: str) -> int:
+        """Get embedding dimension for a model."""
+        dims = {
+            "text-embedding-ada-002": 1536,
+            "text-embedding-3-small": 1536,
+            "text-embedding-3-large": 3072,
+        }
+        return dims.get(model, 1536)
+
+    def get_storage_path(self) -> str:
+        """Get the storage path (for backward compatibility)."""
+        return self.storage.path
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> MemexConfig:
         """Create configuration from a YAML file.
 
         YAML format:
-            storage_path: ./memex_data
+            # Storage backend configuration
+            storage:
+              backend: sqlite  # or postgres
+              path: ./memex_data  # for sqlite
+              connection_string: postgresql://...  # for postgres
+              table_prefix: memex  # for postgres
 
             # Embedding model configuration
-            embedding_model: text-embedding-3-small  # or text-embedding-ada-002, text-embedding-3-large
+            embedding_model: text-embedding-3-small
 
-            # Similarity threshold (depends on embedding model)
-            # Recommended values:
-            #   text-embedding-ada-002:  0.5-0.7 (scores tend to be high)
-            #   text-embedding-3-small:  0.3-0.5 (better discrimination)
-            #   text-embedding-3-large:  0.3-0.5 (best discrimination)
+            # Search configuration
             similarity_threshold: 0.3
-
-            # Weight for importance in search ranking (0.0-1.0)
             importance_weight: 0.3
 
-            # Custom fact types to extract
+            # Custom fact types
             fact_types:
               - name: Personal Preferences
                 description: Keep track of likes and dislikes
-              - name: Work Information
-                description: Job titles, projects, colleagues
 
         Args:
             path: Path to the YAML configuration file.
@@ -132,7 +219,13 @@ class MemexConfig:
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
-        # Parse fact_types if provided
+        # Parse storage config
+        storage = None
+        if "storage" in data:
+            storage_data = data.pop("storage")
+            storage = StorageConfig(**storage_data)
+
+        # Parse fact_types
         fact_types = None
         if "fact_types" in data:
             fact_types = [
@@ -141,8 +234,13 @@ class MemexConfig:
             ]
             del data["fact_types"]
 
-        config = cls(**{k: v for k, v in data.items() if v is not None})
+        # Remove None values
+        data = {k: v for k, v in data.items() if v is not None}
 
+        config = cls(**data)
+
+        if storage:
+            config.storage = storage
         if fact_types:
             config.fact_types = fact_types
 
@@ -151,30 +249,35 @@ class MemexConfig:
     @classmethod
     def set_default(
         cls,
-        storage_path: str = "./memex_data",
+        storage_path: str | None = None,
+        storage: StorageConfig | None = None,
         fact_types: list[FactType] | None = None,
         similarity_threshold: float = 0.3,
+        embedding_model: str = "text-embedding-3-small",
     ) -> "MemexConfig":
         """Set the global default configuration.
 
-        This allows you to configure once and use everywhere:
-
-            MemexConfig.set_default(storage_path="./my_data")
-            alice = Memory(collection="user:alice")  # uses default config
-            bob = Memory(collection="user:bob")      # uses same default config
-
         Args:
-            storage_path: Base directory for storing memory databases.
+            storage_path: Base directory for SQLite (shorthand for storage config).
+            storage: Full storage configuration.
             fact_types: List of fact types to extract.
             similarity_threshold: Minimum similarity score for memory matching.
+            embedding_model: OpenAI embedding model name.
 
         Returns:
             The created default MemexConfig instance.
         """
+        if storage is None:
+            storage = StorageConfig(
+                backend="sqlite",
+                path=storage_path or "./memex_data",
+            )
+
         cls._default = cls(
-            storage_path=storage_path,
+            storage=storage,
             fact_types=fact_types or DEFAULT_FACT_TYPES.copy(),
             similarity_threshold=similarity_threshold,
+            embedding_model=embedding_model,
         )
         return cls._default
 

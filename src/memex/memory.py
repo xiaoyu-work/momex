@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from .config import MemexConfig
-from .exceptions import EmbeddingError, ExportError, LLMError, MemoryNotFoundError
+from .exceptions import EmbeddingError, ExportError, LLMError
+from .storage.base import StorageBackend
 
 
 @dataclass
@@ -83,14 +84,44 @@ def _collection_to_path(collection: str) -> Path:
     return Path(*sanitized)
 
 
+def _create_backend(collection: str, config: MemexConfig) -> StorageBackend:
+    """Create a storage backend based on configuration."""
+    storage_config = config.storage
+
+    if storage_config.backend == "sqlite":
+        from .storage.sqlite import SQLiteBackend
+
+        # Generate database path from collection name
+        storage_path = Path(storage_config.path)
+        collection_path = _collection_to_path(collection)
+        db_path = storage_path / collection_path / config.db_name
+
+        return SQLiteBackend(
+            db_path=db_path,
+            embedding_dim=config.embedding_dim,
+        )
+
+    elif storage_config.backend == "postgres":
+        from .storage.postgres import PostgresBackend
+
+        return PostgresBackend(
+            connection_string=storage_config.connection_string,
+            table_prefix=f"{storage_config.table_prefix}_{collection.replace(':', '_')}",
+            embedding_dim=config.embedding_dim,
+        )
+
+    else:
+        raise ValueError(f"Unknown storage backend: {storage_config.backend}")
+
+
 class Memory:
     """High-level API for Structured RAG memory with single collection.
 
     Example:
         >>> from memex import Memory
         >>> memory = Memory(collection="user:alice")
-        >>> memory.add("Alice likes cats")
-        >>> answer = memory.query("What does Alice like?")
+        >>> await memory.add("Alice likes cats")
+        >>> answer = await memory.query("What does Alice like?")
     """
 
     def __init__(
@@ -107,26 +138,12 @@ class Memory:
         self.collection = collection
         self.config = config or MemexConfig.get_default()
 
-        # Generate database path from collection name using pathlib
-        storage_path = Path(self.config.storage_path)
-        collection_path = _collection_to_path(collection)
-        self._db_path = storage_path / collection_path / self.config.db_name
-
-        # Ensure directory exists
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-
-        self._conversation = None
+        # Create storage backend
+        self._backend = _create_backend(collection, self.config)
         self._initialized = False
 
-        # Soft delete support
-        self._deleted_file = self._db_path.parent / "deleted.json"
-        self._deleted_ids: set[int] = set()
-        self._load_deleted()
-
-        # Importance tracking
-        self._importance_file = self._db_path.parent / "importance.json"
-        self._importance_map: dict[int, float] = {}
-        self._load_importance()
+        # TypeAgent conversation (for query functionality)
+        self._conversation = None
 
         # Auto-load dotenv
         self._load_dotenv()
@@ -143,79 +160,39 @@ class Memory:
             except ImportError:
                 pass
 
-    def _load_deleted(self) -> None:
-        """Load deleted IDs from file."""
-        if self._deleted_file.exists():
-            try:
-                with open(self._deleted_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    self._deleted_ids = set(data.get("deleted_ids", []))
-            except (json.JSONDecodeError, IOError):
-                self._deleted_ids = set()
-
-    def _save_deleted(self) -> None:
-        """Save deleted IDs to file."""
-        data = {
-            "deleted_ids": list(self._deleted_ids),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        with open(self._deleted_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-    def _mark_deleted(self, msg_id: int) -> None:
-        """Mark a message as deleted."""
-        self._deleted_ids.add(msg_id)
-        self._save_deleted()
-
-    def _is_deleted(self, msg_id: int) -> bool:
-        """Check if a message is deleted."""
-        return msg_id in self._deleted_ids
-
-    def _load_importance(self) -> None:
-        """Load importance scores from file."""
-        if self._importance_file.exists():
-            try:
-                with open(self._importance_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    # Convert string keys back to int
-                    self._importance_map = {
-                        int(k): v for k, v in data.get("importance", {}).items()
-                    }
-            except (json.JSONDecodeError, IOError):
-                self._importance_map = {}
-
-    def _save_importance(self) -> None:
-        """Save importance scores to file."""
-        data = {
-            "importance": {str(k): v for k, v in self._importance_map.items()},
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        with open(self._importance_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-    def _set_importance(self, msg_id: int, importance: float) -> None:
-        """Set importance score for a message."""
-        self._importance_map[msg_id] = max(0.0, min(1.0, importance))
-        self._save_importance()
-
-    def _get_importance(self, msg_id: int) -> float:
-        """Get importance score for a message (default 0.5)."""
-        return self._importance_map.get(msg_id, 0.5)
-
     async def _ensure_initialized(self) -> None:
-        """Ensure the conversation is initialized."""
+        """Ensure the storage backend is initialized."""
         if self._initialized:
             return
 
-        from typeagent import create_conversation
-        from typeagent.knowpro.universal_message import ConversationMessage
-
-        self._conversation = await create_conversation(
-            str(self._db_path),
-            ConversationMessage,
-            name=f"memex:{self.collection}",
-        )
+        await self._backend.initialize()
         self._initialized = True
+
+    async def _get_embedding(self, text: str) -> list[float]:
+        """Get embedding for text."""
+        from typeagent.aitools.embeddings import AsyncEmbeddingModel
+
+        try:
+            embedding_model = AsyncEmbeddingModel(model_name=self.config.embedding_model)
+            return await embedding_model.get_embedding(text)
+        except Exception as e:
+            raise EmbeddingError(
+                message=f"Failed to generate embedding: {e}",
+                model=self.config.embedding_model,
+            ) from e
+
+    async def _get_embeddings(self, texts: list[str]) -> list[list[float]]:
+        """Get embeddings for multiple texts."""
+        from typeagent.aitools.embeddings import AsyncEmbeddingModel
+
+        try:
+            embedding_model = AsyncEmbeddingModel(model_name=self.config.embedding_model)
+            return await embedding_model.get_embeddings(texts)
+        except Exception as e:
+            raise EmbeddingError(
+                message=f"Failed to generate embeddings: {e}",
+                model=self.config.embedding_model,
+            ) from e
 
     # =========================================================================
     # Async API
@@ -294,7 +271,6 @@ class Memory:
         text: str,
         speaker: str | None = None,
         timestamp: str | None = None,
-        tags: list[str] | None = None,
         importance: float = 0.5,
     ) -> AddResult:
         """Add a memory directly without LLM processing (internal method).
@@ -303,18 +279,12 @@ class Memory:
             text: The text content to store.
             speaker: Who said this (optional, defaults to collection name).
             timestamp: ISO timestamp (optional, defaults to now).
-            tags: Optional tags for indexing.
             importance: Importance score 0.0-1.0 (default 0.5).
 
         Returns:
             AddResult with statistics.
         """
         await self._ensure_initialized()
-
-        from typeagent.knowpro.universal_message import (
-            ConversationMessage,
-            ConversationMessageMeta,
-        )
 
         if timestamp is None:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -323,27 +293,21 @@ class Memory:
         if speaker is None:
             speaker = self.collection
 
-        # Get current message count to determine new message ID
-        msg_id = await self._conversation.messages.size()
+        # Get embedding for the text
+        embedding = await self._get_embedding(text)
 
-        msg = ConversationMessage(
-            text_chunks=[text],
-            tags=tags or [],
+        # Store in backend
+        await self._backend.add(
+            text=text,
+            embedding=embedding,
+            speaker=speaker,
             timestamp=timestamp,
-            metadata=ConversationMessageMeta(
-                speaker=speaker,
-            ),
+            importance=importance,
         )
 
-        result = await self._conversation.add_messages_with_indexing([msg])
-
-        # Store importance for the new message
-        if result.messages_added > 0:
-            self._set_importance(msg_id, importance)
-
         return AddResult(
-            messages_added=result.messages_added,
-            entities_extracted=result.semrefs_added,
+            messages_added=1,
+            entities_extracted=0,
             collections=[self.collection],
         )
 
@@ -357,7 +321,43 @@ class Memory:
             Answer string based on stored memories.
         """
         await self._ensure_initialized()
-        return await self._conversation.query(question)
+
+        # Search for relevant memories
+        results = await self.search(question, limit=10)
+
+        if not results:
+            return "No relevant memories found."
+
+        # Build context from search results
+        context = "\n".join([
+            f"- {r.text}" for r in results
+        ])
+
+        # Use LLM to answer the question
+        from typeagent.knowpro import convknowledge
+        import typechat
+
+        model = convknowledge.create_typechat_model()
+        prompt = f"""Based on the following memories, answer the question.
+
+Memories:
+{context}
+
+Question: {question}
+
+Answer concisely based only on the memories provided. If the memories don't contain relevant information, say so."""
+
+        try:
+            result = await model.complete(prompt)
+            if isinstance(result, typechat.Success):
+                return result.value
+            else:
+                return f"Failed to generate answer: {result.message}"
+        except Exception as e:
+            raise LLMError(
+                message=f"Failed to query memories: {e}",
+                operation="query",
+            ) from e
 
     async def search(
         self,
@@ -380,81 +380,53 @@ class Memory:
         """
         await self._ensure_initialized()
 
-        from typeagent.aitools.embeddings import AsyncEmbeddingModel
-        import numpy as np
-
-        message_count = await self._conversation.messages.size()
-        if message_count == 0:
-            return []
-
-        # Collect all non-deleted memories and their texts
-        memories: list[tuple[int, str, Any]] = []  # (id, text, msg)
-        for i in range(message_count):
-            if self._is_deleted(i):
-                continue
-            msg = await self._conversation.messages.get_item(i)
-            text = " ".join(msg.text_chunks) if msg.text_chunks else ""
-            if text:
-                memories.append((i, text, msg))
-
-        if not memories:
-            return []
-
-        # Get embeddings
-        try:
-            embedding_model = AsyncEmbeddingModel(model_name=self.config.embedding_model)
-            query_embedding = await embedding_model.get_embedding(query)
-            memory_texts = [m[1] for m in memories]
-            memory_embeddings = await embedding_model.get_embeddings(memory_texts)
-        except Exception as e:
-            raise EmbeddingError(
-                message=f"Failed to generate embeddings: {e}",
-            ) from e
-
-        # Calculate cosine similarity scores
-        # Embeddings are already normalized, so dot product = cosine similarity
-        similarity_scores = np.dot(memory_embeddings, query_embedding)
+        # Get query embedding
+        query_embedding = await self._get_embedding(query)
 
         # Use threshold from config if not specified
         min_threshold = threshold if threshold is not None else self.config.similarity_threshold
 
-        # Two-stage ranking:
-        # Stage 1: Filter by similarity threshold (relevance gate)
-        # Stage 2: Among filtered results, rank by weighted score
+        # Search in backend
+        search_results = await self._backend.search(
+            embedding=query_embedding,
+            limit=limit * 2,  # Get more results for importance weighting
+            threshold=min_threshold,
+        )
+
+        if not search_results:
+            return []
+
+        # Apply two-stage ranking:
+        # Stage 1: Already filtered by similarity threshold in backend
+        # Stage 2: Rank by weighted score
         importance_weight = self.config.importance_weight
-        scored_memories: list[tuple[tuple[int, str, Any], float, float, float]] = []
-        for i in range(len(memories)):
-            similarity = float(similarity_scores[i])
-            # Stage 1: Filter out irrelevant memories
-            if similarity < min_threshold:
-                continue
-            # Stage 2: Calculate weighted score for relevant memories only
-            msg_id = memories[i][0]
-            importance = self._get_importance(msg_id)
-            # Weighted final score (only applied to already-relevant items)
+
+        scored_results: list[tuple[MemoryItem, float]] = []
+        for sr in search_results:
+            record = sr.record
+            similarity = sr.similarity
+            importance = record.importance
+
+            # Weighted final score
             final_score = similarity * (1 - importance_weight) + importance * importance_weight
-            scored_memories.append((memories[i], final_score, similarity, importance))
+
+            item = MemoryItem(
+                id=str(record.id),
+                text=record.text,
+                speaker=record.speaker,
+                timestamp=record.timestamp,
+                collection=self.collection,
+                score=final_score,
+                similarity=similarity,
+                importance=importance,
+            )
+            scored_results.append((item, final_score))
 
         # Sort by final score descending
-        scored_memories.sort(key=lambda x: x[1], reverse=True)
+        scored_results.sort(key=lambda x: x[1], reverse=True)
 
         # Return top results
-        results: list[MemoryItem] = []
-        for (msg_id, text, msg), final_score, similarity, importance in scored_memories[:limit]:
-            results.append(
-                MemoryItem(
-                    id=str(msg_id),
-                    text=text,
-                    speaker=msg.metadata.speaker if msg.metadata else None,
-                    timestamp=msg.timestamp,
-                    collection=self.collection,
-                    score=final_score,
-                    similarity=similarity,
-                    importance=importance,
-                )
-            )
-
-        return results
+        return [item for item, _ in scored_results[:limit]]
 
     async def clear(self) -> bool:
         """Clear all memories for this collection asynchronously.
@@ -462,22 +434,8 @@ class Memory:
         Returns:
             True if successful.
         """
-        if self._db_path.exists():
-            self._db_path.unlink()
-
-        # Also clear deleted records
-        if self._deleted_file.exists():
-            self._deleted_file.unlink()
-        self._deleted_ids = set()
-
-        # Clear importance records
-        if self._importance_file.exists():
-            self._importance_file.unlink()
-        self._importance_map = {}
-
-        self._conversation = None
-        self._initialized = False
-
+        await self._ensure_initialized()
+        await self._backend.clear()
         return True
 
     async def stats(self) -> dict[str, Any]:
@@ -488,17 +446,14 @@ class Memory:
         """
         await self._ensure_initialized()
 
-        total_count = await self._conversation.messages.size()
-        deleted_count = len(self._deleted_ids)
-        active_count = total_count - deleted_count
-        semref_count = await self._conversation.semantic_refs.size()
+        active_count = await self._backend.count()
+        deleted_count = await self._backend.count_deleted()
 
         return {
             "collection": self.collection,
             "total_memories": active_count,
             "deleted_memories": deleted_count,
-            "entities_extracted": semref_count,
-            "db_path": str(self._db_path),
+            "backend": self.config.storage.backend,
         }
 
     async def export(self, path: str) -> None:
@@ -509,27 +464,21 @@ class Memory:
         """
         await self._ensure_initialized()
 
+        records = await self._backend.get_all_records(include_deleted=False)
+
         data = {
             "collection": self.collection,
-            "memories": [],
-        }
-
-        message_count = await self._conversation.messages.size()
-        for i in range(message_count):
-            # Skip deleted messages
-            if self._is_deleted(i):
-                continue
-
-            msg = await self._conversation.messages.get_item(i)
-            data["memories"].append(
+            "memories": [
                 {
-                    "id": str(i),
-                    "text": " ".join(msg.text_chunks) if msg.text_chunks else "",
-                    "speaker": msg.metadata.speaker if msg.metadata else None,
-                    "timestamp": msg.timestamp,
-                    "tags": msg.tags,
+                    "id": str(r.id),
+                    "text": r.text,
+                    "speaker": r.speaker,
+                    "timestamp": r.timestamp,
+                    "importance": r.importance,
                 }
-            )
+                for r in records
+            ],
+        }
 
         try:
             with open(path, "w", encoding="utf-8") as f:
@@ -564,7 +513,7 @@ class Memory:
 
         from .prompts import get_fact_extraction_prompt, get_memory_update_prompt
         from typeagent.knowpro import convknowledge
-        from typeagent.aitools.embeddings import AsyncEmbeddingModel
+        import typechat
         import numpy as np
 
         result = ConversationResult()
@@ -583,7 +532,6 @@ class Memory:
         )
 
         try:
-            import typechat
             fact_result = await model.complete(fact_prompt)
             # Handle typechat.Result type
             if isinstance(fact_result, typechat.Success):
@@ -622,41 +570,27 @@ class Memory:
             # No facts to process
             return result
 
-        # Build existing memories index with embeddings (excluding deleted)
-        existing_memories: list[dict] = []
-        memory_embeddings: list = []
+        # Get existing memories from backend
+        existing_records = await self._backend.get_all_records(include_deleted=False)
 
-        message_count = await self._conversation.messages.size()
-        if message_count > 0:
-            embedding_model = AsyncEmbeddingModel(model_name=self.config.embedding_model)
-            texts_to_embed = []
+        if existing_records:
+            # Build existing memories index with embeddings
+            existing_texts = [r.text for r in existing_records]
+            existing_embeddings = await self._get_embeddings(existing_texts)
 
-            for i in range(message_count):
-                # Skip deleted messages
-                if self._is_deleted(i):
-                    continue
-
-                msg = await self._conversation.messages.get_item(i)
-                text = " ".join(msg.text_chunks) if msg.text_chunks else ""
-                if text:
-                    existing_memories.append({"id": str(i), "text": text})
-                    texts_to_embed.append(text)
-
-            if texts_to_embed:
-                memory_embeddings = await embedding_model.get_embeddings(texts_to_embed)
-
-        # Stage 2 & 3: Batch process all facts - find similar memories and decide operations
-        if existing_memories and len(memory_embeddings) > 0:
-            embedding_model = AsyncEmbeddingModel(model_name=self.config.embedding_model)
+            existing_memories = [
+                {"id": str(r.id), "text": r.text}
+                for r in existing_records
+            ]
 
             # Batch get embeddings for all facts at once
-            fact_embeddings = await embedding_model.get_embeddings(result.facts_extracted)
+            fact_embeddings = await self._get_embeddings(result.facts_extracted)
 
             # Collect all similar memories across all facts (deduplicated)
             similar_memory_ids: set[int] = set()
             for fact_emb in fact_embeddings:
                 # Calculate cosine similarity with all existing memories
-                for i, mem_emb in enumerate(memory_embeddings):
+                for i, mem_emb in enumerate(existing_embeddings):
                     similarity = float(np.dot(fact_emb, mem_emb))
                     if similarity > self.config.similarity_threshold:
                         similar_memory_ids.add(i)
@@ -711,11 +645,12 @@ class Memory:
                     result.memories_added += 1
                 elif event == MemoryEvent.UPDATE and text:
                     # Mark old memory as deleted, add new one
+                    old_importance = 0.5
                     if action_id and action_id.isdigit():
-                        old_importance = self._get_importance(int(action_id))
-                        self._mark_deleted(int(action_id))
-                    else:
-                        old_importance = 0.5
+                        old_record = await self._backend.get(int(action_id))
+                        if old_record:
+                            old_importance = old_record.importance
+                        await self._backend.delete(int(action_id))
                     # Use higher of old importance or new fact importance
                     new_importance = max(old_importance, fact_importance.get(text, 0.5))
                     await self._add_raw(text, importance=new_importance)
@@ -723,7 +658,7 @@ class Memory:
                 elif event == MemoryEvent.DELETE:
                     # Mark the memory as deleted
                     if action_id and action_id.isdigit():
-                        self._mark_deleted(int(action_id))
+                        await self._backend.delete(int(action_id))
                     result.memories_deleted += 1
         else:
             # No existing memories, add all facts directly
@@ -771,18 +706,7 @@ class Memory:
             True if deleted, False if already deleted or not found.
         """
         await self._ensure_initialized()
-
-        # Check if memory exists
-        message_count = await self._conversation.messages.size()
-        if memory_id < 0 or memory_id >= message_count:
-            return False
-
-        # Check if already deleted
-        if self._is_deleted(memory_id):
-            return False
-
-        self._mark_deleted(memory_id)
-        return True
+        return await self._backend.delete(memory_id)
 
     async def restore(self, memory_id: int) -> bool:
         """Restore a deleted memory.
@@ -793,12 +717,8 @@ class Memory:
         Returns:
             True if restored, False if not deleted.
         """
-        if memory_id not in self._deleted_ids:
-            return False
-
-        self._deleted_ids.remove(memory_id)
-        self._save_deleted()
-        return True
+        await self._ensure_initialized()
+        return await self._backend.restore(memory_id)
 
     async def list_deleted(self) -> list[MemoryItem]:
         """List all deleted memories.
@@ -808,24 +728,19 @@ class Memory:
         """
         await self._ensure_initialized()
 
-        results: list[MemoryItem] = []
-        message_count = await self._conversation.messages.size()
+        records = await self._backend.list_deleted()
 
-        for i in self._deleted_ids:
-            if i < message_count:
-                msg = await self._conversation.messages.get_item(i)
-                text = " ".join(msg.text_chunks) if msg.text_chunks else ""
-                results.append(
-                    MemoryItem(
-                        id=str(i),
-                        text=text,
-                        speaker=msg.metadata.speaker if msg.metadata else None,
-                        timestamp=msg.timestamp,
-                        collection=self.collection,
-                    )
-                )
-
-        return results
+        return [
+            MemoryItem(
+                id=str(r.id),
+                text=r.text,
+                speaker=r.speaker,
+                timestamp=r.timestamp,
+                collection=self.collection,
+                importance=r.importance,
+            )
+            for r in records
+        ]
 
     # =========================================================================
     # Properties
@@ -833,8 +748,12 @@ class Memory:
 
     @property
     def db_path(self) -> str:
-        """Get the database file path."""
-        return str(self._db_path)
+        """Get the database file path (for SQLite backend)."""
+        if self.config.storage.backend == "sqlite":
+            from .storage.sqlite import SQLiteBackend
+            if isinstance(self._backend, SQLiteBackend):
+                return str(self._backend.db_path)
+        return ""
 
     @property
     def is_initialized(self) -> bool:

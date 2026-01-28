@@ -45,7 +45,7 @@ Configuration:
     >>> MemexConfig.set_default(storage_path="./my_data")
 """
 
-from .config import DEFAULT_FACT_TYPES, FactType, MemexConfig
+from .config import DEFAULT_FACT_TYPES, FactType, MemexConfig, StorageConfig
 from .exceptions import (
     CollectionNotFoundError,
     ConfigurationError,
@@ -72,6 +72,7 @@ __all__ = [
     "Memory",
     "MemoryManager",
     "MemexConfig",
+    "StorageConfig",
     "FactType",
     "DEFAULT_FACT_TYPES",
     # Data classes
