@@ -26,6 +26,7 @@ class AddResult:
 
     messages_added: int
     entities_extracted: int
+    contradictions_removed: int = 0
     success: bool = True
     collections: list[str] | None = None
 
@@ -175,8 +176,13 @@ class Memory:
         messages: str | list[dict[str, str]],
         *,
         infer: bool = True,
+        detect_contradictions: bool = True,
     ) -> AddResult:
         """Add memories with TypeAgent's knowledge extraction.
+
+        Automatically detects and removes contradicting memories before adding.
+        For example, if memory contains "I like sushi" and you add "I don't like sushi",
+        the old contradicting memory will be removed automatically.
 
         Args:
             messages: Content to add. Can be:
@@ -184,6 +190,8 @@ class Memory:
                 - list[dict]: Conversation messages with "role" and "content" keys
             infer: If True (default), use LLM to extract knowledge.
                    If False, add directly without LLM processing.
+            detect_contradictions: If True (default), use LLM to detect and remove
+                   contradicting memories before adding. Set False to skip this.
 
         Returns:
             AddResult with statistics about what was added.
@@ -192,6 +200,9 @@ class Memory:
             # String input - extracts entities, actions, topics
             await memory.add("I like Python and FastAPI")
 
+            # Automatically handles contradictions
+            await memory.add("I don't like Python anymore")  # Removes old "like Python"
+
             # Conversation input
             await memory.add([
                 {"role": "user", "content": "My name is Xiaoyu"},
@@ -199,6 +210,14 @@ class Memory:
             ])
         """
         await self._ensure_initialized()
+
+        # Detect and remove contradictions before adding
+        contradictions_removed = 0
+        if infer and detect_contradictions:
+            content_text = messages if isinstance(messages, str) else " ".join(
+                m.get("content", "") for m in messages
+            )
+            contradictions_removed = await self._detect_and_remove_contradictions(content_text)
 
         from typeagent.knowpro.universal_message import (
             ConversationMessage,
@@ -230,7 +249,12 @@ class Memory:
             ta_messages.append(ta_message)
 
         if not ta_messages:
-            return AddResult(messages_added=0, entities_extracted=0, collections=[self.collection])
+            return AddResult(
+                messages_added=0,
+                entities_extracted=0,
+                contradictions_removed=contradictions_removed,
+                collections=[self.collection],
+            )
 
         # Use TypeAgent's add_messages_with_indexing for full knowledge extraction
         if infer:
@@ -238,6 +262,7 @@ class Memory:
             return AddResult(
                 messages_added=result.messages_added,
                 entities_extracted=result.semrefs_added,
+                contradictions_removed=contradictions_removed,
                 success=True,
                 collections=[self.collection],
             )
@@ -254,6 +279,7 @@ class Memory:
             return AddResult(
                 messages_added=result.messages_added,
                 entities_extracted=0,
+                contradictions_removed=0,
                 success=True,
                 collections=[self.collection],
             )
@@ -395,6 +421,143 @@ class Memory:
         # Sort by score and limit
         items.sort(key=lambda x: x.score, reverse=True)
         return items[:limit]
+
+    async def delete(self, query: str, *, limit: int = 50) -> int:
+        """Delete memories matching a query.
+
+        For advanced users who want explicit control over deletion.
+        Normal users can rely on add() which automatically handles contradictions.
+
+        Args:
+            query: Search query to find memories to delete.
+            limit: Maximum number of items to delete (default 50).
+
+        Returns:
+            Number of items deleted.
+
+        Example:
+            # Delete memories about sushi preference
+            deleted = await memory.delete("likes sushi")
+            print(f"Deleted {deleted} memories")
+        """
+        await self._ensure_initialized()
+
+        # Search for matching memories
+        results = await self.search(query, limit=limit)
+
+        if not results:
+            return 0
+
+        # Collect IDs to delete
+        semref_ids = []
+        for item in results:
+            if item.type != "message" and hasattr(item.raw, 'semantic_ref_ordinal'):
+                semref_ids.append(item.raw.semantic_ref_ordinal)
+
+        if not semref_ids:
+            return 0
+
+        # Delete from indexes
+        deleted_count = await self._delete_by_ids(semref_ids)
+
+        return deleted_count
+
+    async def _delete_by_ids(self, semref_ids: list[int]) -> int:
+        """Internal: Delete semantic refs by IDs."""
+        storage = self._conversation.storage_provider
+        deleted_count = 0
+
+        for semref_id in semref_ids:
+            try:
+                # Remove from property index
+                prop_index = await storage.get_property_index()
+                await prop_index.remove_all_for_semref(semref_id)
+                deleted_count += 1
+            except (IndexError, KeyError):
+                continue
+
+        # Commit for SQLite
+        if self.config.is_sqlite:
+            storage.db.commit()
+
+        return deleted_count
+
+    async def _detect_and_remove_contradictions(self, new_content: str) -> int:
+        """Internal: Use LLM to detect and remove contradicting memories.
+
+        Args:
+            new_content: The new content being added.
+
+        Returns:
+            Number of contradicting memories removed.
+        """
+        from typeagent.aitools import chat
+
+        # Search for potentially related memories
+        results = await self.search(new_content, limit=20)
+
+        if not results:
+            return 0
+
+        # Build context of existing memories
+        existing_memories = []
+        for i, item in enumerate(results):
+            if item.type != "message":
+                existing_memories.append(f"{i}: [{item.type}] {item.text}")
+
+        if not existing_memories:
+            return 0
+
+        # Ask LLM to identify contradictions
+        prompt = f"""Given the new information and existing memories, identify which existing memories contradict the new information.
+
+New information: "{new_content}"
+
+Existing memories:
+{chr(10).join(existing_memories)}
+
+Return ONLY the indices (numbers) of memories that directly contradict the new information, separated by commas.
+If no contradictions, return "none".
+Only identify clear contradictions (e.g., "likes X" vs "doesn't like X"), not merely related information.
+
+Response:"""
+
+        try:
+            model = chat.ChatModel()
+            response = await model.get_completion(prompt)
+            response_text = response.strip().lower()
+
+            if response_text == "none" or not response_text:
+                return 0
+
+            # Parse indices
+            indices = []
+            for part in response_text.replace(" ", "").split(","):
+                try:
+                    idx = int(part)
+                    if 0 <= idx < len(results):
+                        indices.append(idx)
+                except ValueError:
+                    continue
+
+            if not indices:
+                return 0
+
+            # Delete contradicting memories
+            semref_ids = []
+            for idx in indices:
+                item = results[idx]
+                if item.type != "message" and hasattr(item.raw, 'semantic_ref_ordinal'):
+                    semref_ids.append(item.raw.semantic_ref_ordinal)
+
+            if semref_ids:
+                return await self._delete_by_ids(semref_ids)
+
+        except Exception:
+            # If contradiction detection fails, just proceed with add
+            pass
+
+        return 0
 
     async def clear(self) -> bool:
         """Clear all memories for this collection.

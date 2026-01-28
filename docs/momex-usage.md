@@ -109,6 +109,42 @@ async def main():
     await memory.add("Raw log: user logged in at 2024-01-01", infer=False)
 ```
 
+### Smart Updates (Automatic)
+
+When facts change, `add()` automatically detects and removes contradicting memories:
+
+```python
+async def main():
+    memory = Memory(collection="user:xiaoyuzhang")
+
+    # Initial preference
+    await memory.add("I like sushi")
+
+    # Later, preference changed - add() automatically removes contradicting memory
+    result = await memory.add("I don't like sushi anymore")
+    print(f"Added {result.messages_added}, removed {result.contradictions_removed} contradictions")
+```
+
+You can disable automatic contradiction detection:
+
+```python
+# Skip contradiction detection (faster, but may create inconsistent memories)
+await memory.add("I don't like sushi", detect_contradictions=False)
+```
+
+### Explicit Delete (Advanced Users)
+
+For manual control over deletion:
+
+```python
+async def main():
+    memory = Memory(collection="user:xiaoyuzhang")
+
+    # Delete memories matching a query
+    deleted = await memory.delete("likes sushi")
+    print(f"Deleted {deleted} memories")
+```
+
 ### Query Across Collections
 
 ```python
@@ -284,10 +320,10 @@ All methods are async:
 
 | Method | Description |
 |--------|-------------|
-| `await add(messages, infer=True)` | Add memories with knowledge extraction (default) |
-| `await add(text, infer=False)` | Add directly without LLM processing |
+| `await add(messages)` | Add memories (auto-detects contradictions) |
 | `await query(question)` | Query with natural language (LLM answer) |
 | `await search(query, limit=10)` | Search, returns `list[SearchItem]` |
+| `await delete(query)` | Delete memories matching query (advanced) |
 | `await stats()` | Get memory statistics |
 | `await export(path)` | Export to JSON file |
 | `await clear()` | Delete all memories in this collection |
@@ -295,6 +331,7 @@ All methods are async:
 **add() parameters:**
 - `messages`: str or list[dict] - Content to add
 - `infer`: bool (default True) - Use LLM to extract knowledge
+- `detect_contradictions`: bool (default True) - Auto-remove contradicting memories
 
 ### Prefix Query Functions
 
@@ -331,9 +368,10 @@ for item in results:
 Returned by `add()`:
 
 ```python
-result = await memory.add("I like Python")
+result = await memory.add("I don't like Python anymore")
 
 print(f"Messages added: {result.messages_added}")
-print(f"Semantic refs extracted: {result.entities_extracted}")
+print(f"Knowledge extracted: {result.entities_extracted}")
+print(f"Contradictions removed: {result.contradictions_removed}")
 print(f"Success: {result.success}")
 ```
