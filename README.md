@@ -9,6 +9,8 @@ This fork adds **Momex** - a high-level API wrapper for TypeAgent's Structured R
 - `src/momex/` - High-level memory API package
 - Multi-tenant support with hierarchical collections (`momex:engineering:xiaoyuzhang`)
 - Prefix queries across multiple collections
+- PostgreSQL backend with pgvector for production deployment
+- YAML configuration support
 - Export to JSON
 
 ## Installation

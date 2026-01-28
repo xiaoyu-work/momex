@@ -177,10 +177,17 @@ manager.rename("user:old", "user:new")
 
 ## Configuration
 
-### MomexConfig
+Momex supports two storage backends:
+- **SQLite** (default): Local file-based storage, one database per collection
+- **PostgreSQL**: Shared database for multi-instance deployment
+
+### SQLite Configuration (Default)
 
 ```python
 from momex import Memory, MomexConfig, StorageConfig
+
+# Simple - use defaults
+memory = Memory(collection="user:xiaoyuzhang")
 
 # Custom storage path
 config = MomexConfig(
@@ -188,24 +195,85 @@ config = MomexConfig(
 )
 memory = Memory(collection="user:xiaoyuzhang", config=config)
 
-# Or set global default
+# Set global default
 MomexConfig.set_default(storage_path="./my_data")
-xiaoyuzhang = Memory(collection="user:xiaoyuzhang")  # uses default
+```
+
+### PostgreSQL Configuration
+
+For production deployment with multi-instance support:
+
+```bash
+# Install PostgreSQL dependencies
+pip install momex[postgres]
+
+# PostgreSQL must have pgvector extension
+# In PostgreSQL: CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+```python
+from momex import Memory, MomexConfig, PostgresConfig
+
+# Code configuration
+config = MomexConfig(
+    backend="postgres",
+    postgres=PostgresConfig(
+        url="postgresql://user:password@localhost:5432/momex",
+        pool_min=2,
+        pool_max=10,
+    )
+)
+memory = Memory(collection="user:xiaoyuzhang", config=config)
 ```
 
 ### YAML Configuration
 
+**SQLite (config_sqlite.yaml):**
 ```yaml
-# momex_config.yaml
+backend: sqlite
+
 storage:
   path: ./momex_data
 
 db_name: memory.db
 ```
 
+**PostgreSQL (config_postgres.yaml):**
+```yaml
+backend: postgres
+
+postgres:
+  url: postgresql://user:password@localhost:5432/momex
+  pool_min: 2
+  pool_max: 10
+```
+
+**Load from YAML:**
 ```python
-config = MomexConfig.from_yaml("momex_config.yaml")
+config = MomexConfig.from_yaml("config_postgres.yaml")
 memory = Memory(collection="user:xiaoyuzhang", config=config)
+```
+
+**Save to YAML:**
+```python
+config.to_yaml("my_config.yaml")
+```
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `MOMEX_BACKEND` | `sqlite` or `postgres` |
+| `MOMEX_STORAGE_PATH` | SQLite storage directory |
+| `MOMEX_POSTGRES_URL` | PostgreSQL connection URL |
+
+```bash
+# SQLite
+export MOMEX_STORAGE_PATH=./my_data
+
+# PostgreSQL
+export MOMEX_BACKEND=postgres
+export MOMEX_POSTGRES_URL=postgresql://user:pass@localhost:5432/momex
 ```
 
 ## API Reference

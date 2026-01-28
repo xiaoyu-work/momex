@@ -17,11 +17,35 @@ Momex is a high-level memory API for AI agents, built on TypeAgent's Structured 
 ├─────────────────┤
 │   TypeAgent     │  ConversationBase, KnowledgeExtractor, SemanticRefIndex
 ├─────────────────┤
-│   SQLite        │  Per-collection database files (via SqliteStorageProvider)
+│ StorageProvider │  SQLite (default) or PostgreSQL
 └─────────────────┘
 ```
 
+## Storage Backends
+
+Momex supports two storage backends:
+
+| Backend | Use Case | Features |
+|---------|----------|----------|
+| **SQLite** | Development, single instance | One DB file per collection, no setup required |
+| **PostgreSQL** | Production, multi-instance | Shared database, connection pooling, pgvector |
+
+### SQLite (Default)
+
+- Each collection gets its own database file
+- No external dependencies
+- Great for development and single-instance deployment
+
+### PostgreSQL
+
+- Shared database for all collections
+- Connection pooling for high concurrency
+- Uses pgvector extension for embedding similarity search
+- Supports multi-instance deployment (multiple servers sharing data)
+
 ## Collection Storage
+
+### SQLite
 
 Collection names map to directory structure. The `:` separator creates subdirectories:
 
@@ -31,7 +55,13 @@ Collection names map to directory structure. The `:` separator creates subdirect
 | `user:xiaoyuzhang` | `./momex_data/user/xiaoyuzhang/memory.db` |
 | `momex:engineering:xiaoyuzhang` | `./momex_data/momex/engineering/xiaoyuzhang/memory.db` |
 
-This enables prefix-based queries:
+### PostgreSQL
+
+All collections share one database. Collection name is stored in conversation metadata.
+
+### Prefix Queries
+
+Both backends support prefix-based queries:
 - `query("momex:engineering:xiaoyuzhang", ...)` → searches only xiaoyuzhang
 - `query("momex:engineering", ...)` → searches all under engineering
 - `query("momex", ...)` → searches entire momex

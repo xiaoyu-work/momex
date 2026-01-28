@@ -36,7 +36,7 @@ Configuration:
     >>> MomexConfig.set_default(storage_path="./my_data")
 """
 
-from .config import MomexConfig, StorageConfig
+from .config import MomexConfig, StorageConfig, PostgresConfig, StorageBackend
 from .exceptions import (
     CollectionNotFoundError,
     ConfigurationError,
@@ -57,6 +57,8 @@ __all__ = [
     "MemoryManager",
     "MomexConfig",
     "StorageConfig",
+    "PostgresConfig",
+    "StorageBackend",
     # Data classes
     "AddResult",
     "SearchItem",

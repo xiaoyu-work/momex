@@ -109,6 +109,30 @@ class Memory:
         from typeagent.knowpro.conversation_base import ConversationBase
         from typeagent.knowpro.convsettings import ConversationSettings
         from typeagent.knowpro.universal_message import ConversationMessage
+
+        # Validate config before use
+        self.config.validate()
+
+        if self.config.is_postgres:
+            storage_provider = await self._create_postgres_provider()
+        else:
+            storage_provider = self._create_sqlite_provider()
+
+        # Create conversation settings with the storage provider
+        settings = ConversationSettings(storage_provider=storage_provider)
+
+        # Create conversation using factory method
+        self._conversation = await ConversationBase.create(
+            settings=settings,
+            name=self.collection,
+            tags=[self.collection],
+        )
+
+        self._initialized = True
+
+    def _create_sqlite_provider(self):
+        """Create SQLite storage provider."""
+        from typeagent.knowpro.universal_message import ConversationMessage
         from typeagent.storage.sqlite import SqliteStorageProvider
 
         # Create storage path from collection name
@@ -128,17 +152,23 @@ class Memory:
         # Commit any pending schema initialization transaction
         storage_provider.db.commit()
 
-        # Create conversation settings with the storage provider
-        settings = ConversationSettings(storage_provider=storage_provider)
+        return storage_provider
 
-        # Create conversation using factory method
-        self._conversation = await ConversationBase.create(
-            settings=settings,
-            name=self.collection,
-            tags=[self.collection],
+    async def _create_postgres_provider(self):
+        """Create PostgreSQL storage provider."""
+        from typeagent.knowpro.universal_message import ConversationMessage
+        from typeagent.storage.postgres import PostgresStorageProvider
+
+        # Use collection name as part of table prefix or schema
+        # For now, we'll use a single database with collection stored in metadata
+        storage_provider = await PostgresStorageProvider.create(
+            connection_string=self.config.postgres.url,
+            message_type=ConversationMessage,
+            min_pool_size=self.config.postgres.pool_min,
+            max_pool_size=self.config.postgres.pool_max,
         )
 
-        self._initialized = True
+        return storage_provider
 
     async def add(
         self,
@@ -374,8 +404,11 @@ class Memory:
         """
         await self._ensure_initialized()
         await self._conversation.storage_provider.clear()
-        # Commit the clear operation
-        self._conversation.storage_provider.db.commit()
+
+        # Commit for SQLite (PostgreSQL handles this automatically)
+        if self.config.is_sqlite:
+            self._conversation.storage_provider.db.commit()
+
         return True
 
     async def stats(self) -> dict[str, Any]:
@@ -389,11 +422,13 @@ class Memory:
         message_count = await self._conversation.messages.size()
         semref_count = await self._conversation.semantic_refs.size()
 
+        backend_name = "postgres" if self.config.is_postgres else "sqlite"
+
         return {
             "collection": self.collection,
             "total_messages": message_count,
             "total_semantic_refs": semref_count,
-            "backend": "typeagent-sqlite",
+            "backend": backend_name,
         }
 
     async def export(self, path: str) -> None:
@@ -463,7 +498,13 @@ class Memory:
 
     @property
     def db_path(self) -> str:
-        """Get the database file path."""
+        """Get the database path or connection URL.
+
+        For SQLite: returns the file path.
+        For PostgreSQL: returns the connection URL.
+        """
+        if self.config.is_postgres:
+            return self.config.postgres.url
         return str(_collection_to_db_path(
             self.collection,
             self.config.storage.path,

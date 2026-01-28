@@ -1,0 +1,9 @@
+# Momex Configuration - SQLite Backend
+# This is the default configuration for local development
+
+backend: sqlite
+
+storage:
+  path: ./momex_data
+
+db_name: memory.db

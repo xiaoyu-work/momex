@@ -1,0 +1,15 @@
+# Momex Configuration - PostgreSQL Backend
+# For production deployment with multi-instance support
+
+backend: postgres
+
+postgres:
+  # Connection URL (can also be set via MOMEX_POSTGRES_URL env var)
+  url: postgresql://user:password@localhost:5432/momex
+
+  # Connection pool settings
+  pool_min: 2
+  pool_max: 10
+
+  # Database schema (for multi-tenant isolation)
+  schema: public
