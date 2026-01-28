@@ -2,11 +2,14 @@
 # Licensed under the MIT License.
 
 from datetime import timedelta
+import logging
 import os
 import re
 import time
 
 from ..knowpro.convsettings import ConversationSettings
+
+logger = logging.getLogger(__name__)
 from ..knowpro.interfaces import Datetime
 from ..knowpro.universal_message import format_timestamp_utc, UNIX_EPOCH
 from ..storage.utils import create_storage_provider
@@ -129,9 +132,9 @@ async def ingest_podcast(
         await pod.add_messages_with_indexing(batch)
         t1 = time.time()
         if verbose:
-            print(
-                f"Indexed messages {i} to {i + len(batch) - 1} "
-                f"in {t1 - t0:.1f} seconds."
+            logger.info(
+                "Indexed messages %d to %d in %.1f seconds",
+                i, i + len(batch) - 1, t1 - t0,
             )
 
     return pod

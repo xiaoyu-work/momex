@@ -3,9 +3,12 @@
 
 from dataclasses import dataclass
 import json
+import logging
 from typing import Any, TypedDict
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from ..aitools.embeddings import NormalizedEmbeddings
 from ..knowpro import secindex, serialization
@@ -158,8 +161,8 @@ class Transcript(ConversationBase[TranscriptMessage]):
                 )
                 embeddings_list = [embeddings]
         else:
-            print(
-                "Warning: not reading embeddings file because size is {embedding_size}"
+            logger.warning(
+                "Not reading embeddings file because size is %d", embedding_size
             )
             embeddings_list = None
         file_data = serialization.ConversationFileData(

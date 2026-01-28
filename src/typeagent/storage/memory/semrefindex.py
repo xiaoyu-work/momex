@@ -3,9 +3,12 @@
 
 from __future__ import annotations  # TODO: Avoid
 
+import logging
 from collections.abc import AsyncIterable, Callable
 
 from typechat import Failure
+
+logger = logging.getLogger(__name__)
 
 from ...knowpro import convknowledge, kplib, secindex
 from ...knowpro.convsettings import ConversationSettings, SemanticRefIndexSettings
@@ -750,11 +753,11 @@ def verify_has_semantic_ref_index(conversation: IConversation) -> None:
 async def dump(
     semantic_ref_index: TermToSemanticRefIndex, semantic_refs: ISemanticRefCollection
 ) -> None:
-    print("semantic_ref_index = {")
+    logger.debug("semantic_ref_index = {")
     for k, v in semantic_ref_index._map.items():
-        print(f"    {k!r}: {v},")
-    print("}\n")
-    print("semantic_refs = []")
+        logger.debug("    %r: %s,", k, v)
+    logger.debug("}")
+    logger.debug("semantic_refs = []")
     async for semantic_ref in semantic_refs:
-        print(f"    {semantic_ref},")
-    print("]\n")
+        logger.debug("    %s,", semantic_ref)
+    logger.debug("]")

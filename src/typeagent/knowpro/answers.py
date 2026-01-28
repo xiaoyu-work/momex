@@ -1,6 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -8,6 +9,8 @@ from typing import Any
 import black
 
 import typechat
+
+logger = logging.getLogger(__name__)
 
 from .answer_context_schema import AnswerContext, RelevantKnowledge, RelevantMessage
 from .answer_response_schema import AnswerResponse
@@ -93,9 +96,7 @@ async def generate_answer[TMessage: IMessage, TIndex: ITermToSemanticRefIndex](
     context = await make_context(search_result, conversation, options)
     request = f"{create_question_prompt(search_result.raw_query_text)}\n\n{create_context_prompt(context)}"
     if options and options.debug:
-        print("Stage 4 input:")
-        print(request)
-        print("-" * 50)
+        logger.debug("Stage 4 input:\n%s\n%s", request, "-" * 50)
     result = await translator.translate(request)
     if isinstance(result, typechat.Failure):
         return AnswerResponse(

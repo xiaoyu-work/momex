@@ -3,10 +3,13 @@
 
 """SQLite-based message text index implementation."""
 
+import logging
 import sqlite3
 import typing
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from ...aitools.embeddings import NormalizedEmbedding
 from ...aitools.vectorbase import ScoredInt, VectorBase
@@ -133,7 +136,7 @@ class SqliteMessageTextIndex(IMessageTextEmbeddingIndex):
         if message_list:
             await self.add_messages_starting_at(0, message_list)
 
-        print(f"DEBUG: Rebuilt message text index with {await self.size()} entries")
+        logger.debug("Rebuilt message text index with %d entries", await self.size())
 
     async def lookup_text(
         self, text: str, max_matches: int | None = None, min_score: float | None = None

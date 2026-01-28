@@ -4,6 +4,16 @@ A high-level async API for structured knowledge memory, built on TypeAgent's
 Structured RAG technology. Uses TypeAgent's full indexing system (SemanticRefs,
 TermIndex) for entity/action/topic extraction and search.
 
+Logging:
+    This library uses Python's standard logging module. To see log messages,
+    configure logging in your application:
+
+        import logging
+        logging.basicConfig(level=logging.INFO)
+
+    For debug output:
+        logging.basicConfig(level=logging.DEBUG)
+
 Example:
     >>> import asyncio
     >>> from momex import Memory, MomexConfig
@@ -46,6 +56,8 @@ Configuration:
         export MOMEX_API_KEY=sk-xxx
 """
 
+import logging
+
 from .config import MomexConfig, PostgresConfig
 from .exceptions import (
     CollectionNotFoundError,
@@ -84,3 +96,8 @@ __all__ = [
     "LLMError",
     "ExportError",
 ]
+
+# Set up library-level logging with NullHandler to prevent
+# "No handler found" warnings when the library is used.
+# Users can configure logging in their application code.
+logging.getLogger(__name__).addHandler(logging.NullHandler())

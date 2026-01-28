@@ -5,10 +5,10 @@
 
 from contextlib import contextmanager
 import difflib
+import logging
 import os
 import re
 import shutil
-import sys
 import time
 
 import black
@@ -17,32 +17,23 @@ import dotenv
 
 import typechat
 
+logger = logging.getLogger(__name__)
+
 
 @contextmanager
 def timelog(label: str, verbose: bool = True):
     """Context manager to log the time taken by a block of code.
 
     With verbose=False it prints nothing."""
-    dim = colorama.Style.DIM
-    reset = colorama.Style.RESET_ALL
-    if verbose:
-        print(
-            f"{dim}{label}...{reset}",
-            end="",
-            flush=True,
-            file=sys.stderr,
-        )
     start_time = time.time()
+    if verbose:
+        logger.debug("%s...", label)
     try:
         yield
     finally:
         elapsed_time = time.time() - start_time
         if verbose:
-            print(
-                f"{dim} {elapsed_time:.3f}s{reset}",
-                file=sys.stderr,
-                flush=True,
-            )
+            logger.debug("%s completed in %.3fs", label, elapsed_time)
 
 
 def pretty_print(obj: object, prefix: str = "", suffix: str = "") -> None:
@@ -50,7 +41,7 @@ def pretty_print(obj: object, prefix: str = "", suffix: str = "") -> None:
 
     NOTE: Only works if its repr() is a valid Python expression.
     """
-    print(prefix + format_code(repr(obj)) + suffix)
+    logger.info("%s%s%s", prefix, format_code(repr(obj)), suffix)
 
 
 def format_code(text: str, line_width=None) -> str:
@@ -155,11 +146,11 @@ def list_diff(label_a, a, label_b, b, max_items):
     def fmt(row, seg_widths):
         return " ".join(f"{cell:>{w}}" for cell, w in zip(row, seg_widths))
 
-    # print each segment
+    # log each segment
     for start, end in segments:
         seg_widths = widths[start:end]
-        print(la, fmt(a_cols[start:end], seg_widths))
-        print(lb, fmt(b_cols[start:end], seg_widths))
+        logger.debug("%s %s", la, fmt(a_cols[start:end], seg_widths))
+        logger.debug("%s %s", lb, fmt(b_cols[start:end], seg_widths))
 
 
 def setup_logfire():
@@ -285,17 +276,17 @@ def make_agent[T](cls: type[T]):
     # Prefer straight OpenAI over Azure OpenAI.
     if os.getenv("OPENAI_API_KEY"):
         Wrapper = NativeOutput
-        print(f"## Using OpenAI with {Wrapper.__name__} ##")
+        logger.info("Using OpenAI with %s", Wrapper.__name__)
         model = OpenAIChatModel("gpt-4o")  # Retrieves OPENAI_API_KEY again.
 
     elif azure_api_key := os.getenv("AZURE_OPENAI_API_KEY"):
         azure_api_key = get_azure_api_key(azure_api_key)
         azure_endpoint, api_version = parse_azure_endpoint("AZURE_OPENAI_ENDPOINT")
 
-        print(f"## {azure_endpoint} ##")
+        logger.info("Azure endpoint: %s", azure_endpoint)
         Wrapper = ToolOutput
 
-        print(f"## Using Azure {api_version} with {Wrapper.__name__} ##")
+        logger.info("Using Azure %s with %s", api_version, Wrapper.__name__)
         model = OpenAIChatModel(
             "gpt-4o",
             provider=AzureProvider(
