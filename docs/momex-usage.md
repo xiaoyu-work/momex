@@ -67,14 +67,11 @@ from momex import Memory
 async def main():
     memory = Memory(collection="user:xiaoyuzhang")
 
-    # Add memories - LLM extracts facts and deduplicates automatically
+    # Add memories - TypeAgent extracts entities, actions, topics
     await memory.add("I love Python programming")
     await memory.add("Project deadline is Friday")
 
-    # Adding similar content will UPDATE existing memory, not create duplicates
-    await memory.add("I really enjoy Python coding")  # Updates existing
-
-    # Query
+    # Query - returns LLM-generated answer
     answer = await memory.query("What programming language does the user like?")
     print(answer)
 
@@ -89,30 +86,27 @@ You can also pass conversation messages:
 async def main():
     memory = Memory(collection="user:xiaoyuzhang")
 
-    # Conversation format - LLM extracts facts from the dialogue
+    # Conversation format - TypeAgent extracts knowledge from the dialogue
     await memory.add([
-        {"role": "user", "content": "My name is Alice, I'm a Python developer"},
+        {"role": "user", "content": "My name is Xiaoyu, I'm a Python developer"},
         {"role": "assistant", "content": "Nice to meet you!"},
         {"role": "user", "content": "I'm working on a FastAPI project"},
     ])
 
     # Query the memories
-    answer = await memory.query("What is the user's name?")  # "Alice"
+    answer = await memory.query("What is the user's name?")
 ```
 
 ### Direct Storage (No LLM Processing)
 
-Use `infer=False` to skip LLM processing and store content directly:
+Use `infer=False` to skip LLM knowledge extraction:
 
 ```python
 async def main():
     memory = Memory(collection="user:xiaoyuzhang")
 
-    # Direct storage - no fact extraction or deduplication
+    # Direct storage - no knowledge extraction
     await memory.add("Raw log: user logged in at 2024-01-01", infer=False)
-
-    # Useful for structured data that doesn't need LLM processing
-    await memory.add("Session ID: abc123", infer=False)
 ```
 
 ### Query Across Collections
@@ -136,35 +130,33 @@ async def main():
     answer = await query("momex", "Who works here?")
 ```
 
-### Search for Raw Results (for Chat Agent Context)
+### Search for Raw Results
 
-Use `search()` to get raw vector search results without LLM summarization. This is useful when you want to provide context to a chat agent:
+Use `search()` to get structured results without LLM answer generation. Useful when you want to provide context to your own LLM:
 
 ```python
 from momex import Memory, search
 
 async def main():
-    xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang")
-    await xiaoyuzhang.add("I like Python and FastAPI")
-    await xiaoyuzhang.add("Working on ML project")
+    memory = Memory(collection="momex:engineering:xiaoyuzhang")
+    await memory.add("I like Python and FastAPI")
 
-    # Search single collection - returns MemoryItem objects
-    # Results are filtered by similarity threshold, then ranked by weighted score
-    results = await xiaoyuzhang.search("programming")
-    for r in results:
-        print(f"[sim={r.similarity:.3f}, imp={r.importance:.2f}, score={r.score:.3f}] {r.text}")
+    # Search single collection - returns SearchItem objects
+    results = await memory.search("programming")
+    for item in results:
+        print(f"[{item.type}] {item.text} (score={item.score:.2f})")
+        # item.raw contains the original TypeAgent object
 
     # Search across collections with prefix
-    results = await search("momex", "what are they working on", limit=5)
+    results = await search("momex", "what languages", limit=5)
 
-    # Use as context for a chat agent (no LLM call, cheaper than query())
-    context = "\n".join([f"- {r.speaker}: {r.text}" for r in results])
-    # Pass context to your chat agent...
+    # Use as context for your own LLM
+    context = "\n".join([f"- [{coll}] {item.text}" for coll, items in results for item in items])
 ```
 
 **query() vs search():**
-- `query()`: Uses LLM to summarize results into a natural language answer.
-- `search()`: Returns raw vector search results with similarity scores, good for providing context to chat agents.
+- `query()`: Uses LLM to generate a natural language answer
+- `search()`: Returns structured `SearchItem` results for you to process
 
 ### Manage Collections
 
@@ -185,148 +177,35 @@ manager.rename("user:old", "user:new")
 
 ## Configuration
 
-### Storage Backends
-
-Momex supports two storage backends:
-
-| Backend | Use Case | Features |
-|---------|----------|----------|
-| **SQLite** (default) | Local development, single user | Zero config, file-based |
-| **PostgreSQL** | Production, multi-user, cloud | pgvector for fast search, scales |
-
-#### SQLite (Default)
-
-```python
-from momex import Memory, MomexConfig, StorageConfig
-
-# Default - uses SQLite
-memory = Memory(collection="user:xiaoyuzhang")
-
-# Explicit SQLite config
-config = MomexConfig(
-    storage=StorageConfig(
-        backend="sqlite",
-        path="./my_data",
-    )
-)
-memory = Memory(collection="user:xiaoyuzhang", config=config)
-```
-
-#### PostgreSQL
-
-Requires `asyncpg` and PostgreSQL with `pgvector` extension:
-
-```bash
-pip install asyncpg
-```
-
-```python
-from momex import Memory, MomexConfig, StorageConfig
-
-config = MomexConfig(
-    storage=StorageConfig(
-        backend="postgres",
-        connection_string="postgresql://user:pass@localhost/momex",
-        table_prefix="momex",  # optional, default "momex"
-    )
-)
-memory = Memory(collection="user:xiaoyuzhang", config=config)
-```
-
-#### Cloud Database Support
-
-PostgreSQL backend works with all major cloud providers:
-
-| Provider | Connection String |
-|----------|------------------|
-| **AWS RDS** | `postgresql://user:pass@xxx.rds.amazonaws.com:5432/momex` |
-| **Azure** | `postgresql://user:pass@xxx.postgres.database.azure.com:5432/momex` |
-| **Supabase** | `postgresql://user:pass@db.xxx.supabase.co:5432/postgres` |
-| **Neon** | `postgresql://user:pass@xxx.neon.tech/momex` |
-| **Vercel Postgres** | `postgresql://user:pass@xxx.vercel-storage.com/momex` |
-
 ### MomexConfig
 
 ```python
 from momex import Memory, MomexConfig, StorageConfig
 
-# Simple SQLite config (legacy style)
-config = MomexConfig(storage_path="./my_data")
+# Custom storage path
+config = MomexConfig(
+    storage=StorageConfig(path="./my_data")
+)
 memory = Memory(collection="user:xiaoyuzhang", config=config)
 
 # Or set global default
 MomexConfig.set_default(storage_path="./my_data")
 xiaoyuzhang = Memory(collection="user:xiaoyuzhang")  # uses default
-gvanrossum = Memory(collection="user:gvanrossum")    # uses default
 ```
 
 ### YAML Configuration
 
 ```yaml
 # momex_config.yaml
-
-# Storage backend configuration
 storage:
-  backend: sqlite  # or "postgres"
-  path: ./momex_data  # for sqlite
-  # connection_string: postgresql://...  # for postgres
-  # table_prefix: momex  # for postgres
+  path: ./momex_data
 
-# Embedding model - affects search quality and similarity scores
-# Options: text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large
-embedding_model: text-embedding-3-small
-
-# Similarity threshold - depends on embedding model
-# Recommended:
-#   text-embedding-ada-002:  0.5-0.7 (scores tend to cluster in 0.6-0.9)
-#   text-embedding-3-small:  0.3-0.5 (better score distribution)
-#   text-embedding-3-large:  0.3-0.5 (best discrimination)
-similarity_threshold: 0.3
-
-# Importance weight for search ranking (0.0-1.0)
-# Higher = importance matters more in ranking
-importance_weight: 0.3
-
-# Custom fact types to extract
-fact_types:
-  - name: Personal Preferences
-    description: Likes, dislikes, preferences for food, products, activities
-  - name: Professional Details
-    description: Job titles, projects, skills, career goals
+db_name: memory.db
 ```
 
 ```python
 config = MomexConfig.from_yaml("momex_config.yaml")
 memory = Memory(collection="user:xiaoyuzhang", config=config)
-```
-
-### Embedding Model Comparison
-
-| Model | Dimensions | Score Distribution | Recommended Threshold |
-|-------|------------|-------------------|----------------------|
-| `text-embedding-ada-002` | 1536 | 0.6-0.9 (clustered) | 0.5-0.7 |
-| `text-embedding-3-small` | 1536 | 0.1-0.6 (spread out) | 0.3-0.5 |
-| `text-embedding-3-large` | 3072 | 0.1-0.6 (best) | 0.3-0.5 |
-
-### Custom Fact Types
-
-Control what types of information to extract from conversations:
-
-```python
-from momex import FactType, MomexConfig
-
-config = MomexConfig(
-    fact_types=[
-        FactType(
-            name="Technical Skills",
-            description="Programming languages, frameworks, and tools the user knows"
-        ),
-        FactType(
-            name="Project Information",
-            description="Current projects, deadlines, and team members"
-        ),
-    ],
-)
 ```
 
 ## API Reference
@@ -337,21 +216,17 @@ All methods are async:
 
 | Method | Description |
 |--------|-------------|
-| `await add(messages, infer=True)` | Add memories with LLM deduplication (default) |
+| `await add(messages, infer=True)` | Add memories with knowledge extraction (default) |
 | `await add(text, infer=False)` | Add directly without LLM processing |
-| `await query(question)` | Query with natural language (LLM summarized) |
-| `await search(query, limit=10, threshold=None)` | Vector similarity search |
-| `await delete(memory_id)` | Soft delete a memory |
-| `await restore(memory_id)` | Restore a deleted memory |
-| `await list_deleted()` | List all deleted memories |
+| `await query(question)` | Query with natural language (LLM answer) |
+| `await search(query, limit=10)` | Search, returns `list[SearchItem]` |
 | `await stats()` | Get memory statistics |
 | `await export(path)` | Export to JSON file |
 | `await clear()` | Delete all memories in this collection |
 
 **add() parameters:**
 - `messages`: str or list[dict] - Content to add
-- `infer`: bool (default True) - Use LLM to extract facts and deduplicate
-- `similarity_limit`: int (default 5) - Max similar memories to consider
+- `infer`: bool (default True) - Use LLM to extract knowledge
 
 ### Prefix Query Functions
 
@@ -359,46 +234,29 @@ All functions are async:
 
 | Function | Description |
 |----------|-------------|
-| `await query(prefix, question)` | Query with LLM summarization (returns answer string) |
-| `await search(prefix, query, limit=10, threshold=None)` | Vector similarity search (returns MemoryItem list) |
+| `await query(prefix, question)` | Query with LLM answer (returns str) |
+| `await search(prefix, query, limit=10)` | Search (returns list of tuples) |
 | `await stats(prefix)` | Get combined stats for matching collections |
 
-**MemoryItem fields:**
-- `id`: Memory identifier
-- `text`: The memory content
-- `speaker`: Who said this (collection name by default)
-- `timestamp`: When it was added
-- `score`: Weighted score combining similarity and importance (0.0-1.0)
-- `similarity`: Raw similarity score before importance weighting (0.0-1.0)
-- `importance`: Importance score (0.0-1.0, auto-assigned by LLM)
-- `collection`: Which collection this came from
+### SearchItem
 
-### Importance Scoring
+Returned by `search()`:
 
-Momex automatically assigns importance scores to memories based on content type:
+```python
+results = await memory.search("programming")
 
-| Category | Importance | Examples |
-|----------|------------|----------|
-| Health/Safety | 0.9-1.0 | Allergies, medical conditions |
-| Identity | 0.7-0.8 | Name, family, job title |
-| Preferences | 0.5-0.6 | Likes, dislikes, hobbies |
-| Casual | 0.3-0.4 | Recent events, plans |
+for item in results:
+    print(item.type)   # "entity", "action", "topic", or "message"
+    print(item.text)   # Formatted text
+    print(item.score)  # Relevance score
+    print(item.raw)    # Original TypeAgent object (SemanticRef or Message)
+```
 
-**Two-stage search ranking:**
-
-1. **Filter**: Only memories with `similarity > threshold` pass (default 0.3)
-2. **Rank**: Among filtered results, sort by weighted score:
-   ```
-   final_score = similarity * (1 - importance_weight) + importance * importance_weight
-   ```
-   With default `importance_weight=0.3`:
-   ```
-   final_score = similarity * 0.7 + importance * 0.3
-   ```
-
-This ensures:
-- Irrelevant content is filtered out regardless of importance
-- Among relevant results, important information ranks higher
+**SearchItem.type values** (from TypeAgent's knowledge_type):
+- `"entity"` - Concrete entities (people, places, things)
+- `"action"` - Actions with verbs, subjects, objects
+- `"topic"` - Topic keywords
+- `"message"` - Original message text
 
 ### AddResult
 
@@ -407,7 +265,7 @@ Returned by `add()`:
 ```python
 result = await memory.add("I like Python")
 
-print(f"Added: {result.messages_added}")
-print(f"Entities extracted: {result.entities_extracted}")
+print(f"Messages added: {result.messages_added}")
+print(f"Semantic refs extracted: {result.entities_extracted}")
 print(f"Success: {result.success}")
 ```

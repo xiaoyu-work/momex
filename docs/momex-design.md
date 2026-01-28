@@ -7,17 +7,17 @@ Momex is a high-level memory API for AI agents, built on TypeAgent's Structured 
 - **Collections**: Named storage spaces for organizing memories by user, team, or purpose
 - **Hierarchical organization**: Use `:` separator to create nested collections
 - **Prefix queries**: Query parent prefix to search all child collections
-- **Conversation extraction**: Automatically extract and deduplicate facts from conversations
+- **Structured knowledge**: Uses TypeAgent's KnowledgeExtractor for entities, actions, topics
 
 ## Architecture
 
 ```
 ┌─────────────────┐
-│   Momex API     │  Memory, MemoryManager, query()
+│   Momex API     │  Memory, MemoryManager, query(), search()
 ├─────────────────┤
-│   TypeAgent     │  Structured RAG, Embeddings, Knowledge Extraction
+│   TypeAgent     │  ConversationBase, KnowledgeExtractor, SemanticRefIndex
 ├─────────────────┤
-│   SQLite        │  Per-collection database files
+│   SQLite        │  Per-collection database files (via SqliteStorageProvider)
 └─────────────────┘
 ```
 
@@ -36,91 +36,92 @@ This enables prefix-based queries:
 - `query("momex:engineering", ...)` → searches all under engineering
 - `query("momex", ...)` → searches entire momex
 
-## Conversation Fact Extraction
+## Knowledge Extraction
 
-The `add_conversation()` method processes conversations in 4 stages:
+When you call `add()`, TypeAgent's KnowledgeExtractor processes the text:
 
-### Stage 1: Fact Extraction
-
-LLM extracts facts from conversation using configured `FactType` definitions.
-
-Input:
+### Input
 ```
-User: My name is Alice and I love Python
-Assistant: Nice to meet you!
-User: I'm working on a FastAPI project
+"I like Python programming"
 ```
 
-Output:
-```json
-{"facts": ["Name is Alice", "Loves Python", "Working on FastAPI project"]}
+### Output (KnowledgeResponse)
+```python
+KnowledgeResponse(
+    entities=[
+        ConcreteEntity(name="Python", type=["programming language"])
+    ],
+    actions=[
+        Action(verbs=["like"], subject_entity_name="speaker", object_entity_name="Python")
+    ],
+    topics=[
+        Topic(text="programming"),
+        Topic(text="languages")
+    ]
+)
 ```
 
-### Stage 2: Vector Search
+## Data Flow
 
-For each extracted fact, find similar existing memories using cosine similarity:
-
-1. Generate embedding for the new fact
-2. Compare against embeddings of existing memories
-3. Return top-k most similar memories (above similarity threshold)
-
-This ensures efficient comparison - only relevant memories are considered, not the entire database.
-
-### Stage 3: Decision Making
-
-LLM compares each new fact against similar existing memories and decides:
-
-| Event | When |
-|-------|------|
-| `ADD` | New information not in memory |
-| `UPDATE` | Similar memory exists but new fact has more detail |
-| `DELETE` | New fact contradicts existing memory |
-| `NONE` | Same information already exists |
-
-### Stage 4: Execute Operations
-
-Execute the decided operations (add new memories, update existing ones).
-
-## Configuration
-
-### Fact Types
-
-Fact types define what information to extract from conversations. Default types (based on mem0):
-
-| Type | Description |
-|------|-------------|
-| Personal Preferences | Likes, dislikes, preferences for food, products, activities, entertainment |
-| Important Personal Details | Names, relationships, important dates |
-| Plans and Intentions | Upcoming events, trips, goals, plans |
-| Activity and Service Preferences | Dining, travel, hobbies, services |
-| Health and Wellness Preferences | Dietary restrictions, fitness routines |
-| Professional Details | Job titles, work habits, career goals |
-| Miscellaneous Information | Favorite books, movies, brands |
-
-Custom fact types can be defined via YAML config or code.
-
-### Similarity Threshold
-
-Controls how similar an existing memory must be to consider it for UPDATE/DELETE decisions. Default is 0.5 (range 0.0-1.0).
-
-- Higher threshold: More strict matching, more ADD operations
-- Lower threshold: More lenient matching, more UPDATE operations
-
-## Soft Delete
-
-TypeAgent uses append-only storage by design. Momex implements soft delete:
-
-- Deleted message IDs stored in `deleted.json` alongside `memory.db`
-- Deleted memories filtered out in queries, searches, exports
-- Can restore deleted memories via `restore(memory_id)`
+### add()
 
 ```
-./momex_data/user/xiaoyuzhang/
-├── memory.db      # TypeAgent data (append-only)
-└── deleted.json   # Soft delete records
+Input text
+    ↓
+ConversationMessage (with speaker metadata)
+    ↓
+add_messages_with_indexing()
+    ↓
+KnowledgeExtractor.extract()  [LLM call]
+    ↓
+SemanticRefs created for entities, actions, topics
+    ↓
+Terms indexed in SemanticRefIndex
 ```
 
-## Limitations
+### search()
 
-- **No hard delete**: Messages remain in database, only filtered out
-- **No transactions**: Operations are not atomic
+```
+Query text
+    ↓
+search_conversation_with_language()
+    ↓
+[LLM] Translate to structured SearchQuery
+    ↓
+Lookup in SemanticRefIndex
+    ↓
+Return ConversationSearchResult
+    ↓
+Wrap as list[SearchItem]
+```
+
+### query()
+
+```
+search() results
+    ↓
+Format as context
+    ↓
+[LLM] Generate answer
+    ↓
+Return string
+```
+
+## SearchItem
+
+Momex wraps TypeAgent's search results in a simple `SearchItem` dataclass:
+
+```python
+@dataclass
+class SearchItem:
+    type: str   # "entity", "action", "topic", "message"
+    text: str   # Formatted text
+    score: float
+    raw: Any    # Original TypeAgent object
+```
+
+This provides:
+- Friendly text formatting
+- Access to raw TypeAgent objects via `.raw`
+- Type information from TypeAgent's native `knowledge_type`
+

@@ -1,7 +1,8 @@
 """Momex - Structured RAG Memory for AI Agents.
 
 A high-level async API for structured knowledge memory, built on TypeAgent's
-Structured RAG technology.
+Structured RAG technology. Uses TypeAgent's full indexing system (SemanticRefs,
+TermIndex) for entity/action/topic extraction and search.
 
 Example:
     >>> import asyncio
@@ -11,24 +12,14 @@ Example:
     ...     # Create memory with hierarchical collection name
     ...     memory = Memory(collection="momex:engineering:xiaoyuzhang")
     ...
-    ...     # Add memories - LLM extracts facts and deduplicates automatically
-    ...     await memory.add("Xiaoyuzhang likes cats")
-    ...     await memory.add("I really love cats")  # Deduplicates with above
-    ...
-    ...     # Or pass conversation format
-    ...     await memory.add([
-    ...         {"role": "user", "content": "The deadline is Friday"},
-    ...         {"role": "assistant", "content": "Got it!"},
-    ...     ])
-    ...
-    ...     # Direct storage without LLM processing
-    ...     await memory.add("Raw log entry", infer=False)
+    ...     # Add memories - TypeAgent extracts entities, actions, topics
+    ...     await memory.add("I like Python programming")
     ...
     ...     # Query single collection
-    ...     answer = await memory.query("What does Xiaoyuzhang like?")
+    ...     answer = await memory.query("What does the user like?")
     ...
     ...     # Query with prefix (searches all matching collections)
-    ...     answer = await query("momex:engineering", "What are the deadlines?")
+    ...     answer = await query("momex:engineering", "What languages do people use?")
     ...
     >>> asyncio.run(main())
 
@@ -40,16 +31,15 @@ Configuration:
         export AZURE_OPENAI_API_KEY=xxx
         export AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
 
-    Momex-specific config (storage path, fact types) can be set via MomexConfig:
+    Momex-specific config (storage path) can be set via MomexConfig:
     >>> from momex import MomexConfig
     >>> MomexConfig.set_default(storage_path="./my_data")
 """
 
-from .config import DEFAULT_FACT_TYPES, FactType, MomexConfig, StorageConfig
+from .config import MomexConfig, StorageConfig
 from .exceptions import (
     CollectionNotFoundError,
     ConfigurationError,
-    EmbeddingError,
     ExportError,
     LLMError,
     MomexError,
@@ -58,13 +48,7 @@ from .exceptions import (
     ValidationError,
 )
 from .manager import MemoryManager
-from .memory import (
-    AddResult,
-    Memory,
-    MemoryEvent,
-    MemoryItem,
-    MemoryOperation,
-)
+from .memory import AddResult, Memory, SearchItem
 from .query import query, search, stats
 
 __all__ = [
@@ -73,13 +57,9 @@ __all__ = [
     "MemoryManager",
     "MomexConfig",
     "StorageConfig",
-    "FactType",
-    "DEFAULT_FACT_TYPES",
     # Data classes
-    "MemoryItem",
-    "MemoryEvent",
-    "MemoryOperation",
     "AddResult",
+    "SearchItem",
     # Prefix query functions (async)
     "query",
     "search",
@@ -91,7 +71,6 @@ __all__ = [
     "ConfigurationError",
     "ValidationError",
     "StorageError",
-    "EmbeddingError",
     "LLMError",
     "ExportError",
 ]

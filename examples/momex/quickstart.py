@@ -23,16 +23,21 @@ async def main():
     print("Creating memory for user:xiaoyuzhang...")
     memory = Memory(collection="user:xiaoyuzhang")
 
-    # ===========================================
-    # Method 1: Add memories manually
-    # ===========================================
-    print("\n--- Adding memories manually ---")
-    await memory.add("I like Python programming")
-    await memory.add("Project deadline is Friday")
-    print("Added 2 memories")
+    # Clear previous data
+    await memory.clear()
 
     # ===========================================
-    # Method 2: Add from conversation
+    # Add memories
+    # ===========================================
+    print("\n--- Adding memories ---")
+    result = await memory.add("I like Python programming")
+    print(f"Added: {result.messages_added} messages, {result.entities_extracted} semantic refs")
+
+    result = await memory.add("Project deadline is Friday")
+    print(f"Added: {result.messages_added} messages, {result.entities_extracted} semantic refs")
+
+    # ===========================================
+    # Add from conversation
     # ===========================================
     print("\n--- Adding from conversation ---")
     conversation = [
@@ -41,22 +46,24 @@ async def main():
         {"role": "user", "content": "Yes, and I enjoy hiking on weekends."},
     ]
 
-    result = await memory.add_conversation(conversation)
-    if result.success:
-        print("Conversation memories stored!")
-    else:
-        print(f"Error: {result.error}")
+    result = await memory.add(conversation)
+    print(f"Added: {result.messages_added} messages, {result.entities_extracted} semantic refs")
 
     # ===========================================
-    # Query memories
+    # Search - returns structured results
+    # ===========================================
+    print("\n--- Searching memories ---")
+    results = await memory.search("programming")
+    for item in results:
+        print(f"  [{item.type}] {item.text} (score={item.score:.2f})")
+
+    # ===========================================
+    # Query - returns LLM answer
     # ===========================================
     print("\n--- Querying memories ---")
 
     answer = await memory.query("What programming language does the user like?")
     print(f"Q: What programming language?\nA: {answer}")
-
-    answer = await memory.query("What project is the user working on?")
-    print(f"\nQ: What project?\nA: {answer}")
 
     answer = await memory.query("What does the user do on weekends?")
     print(f"\nQ: Weekend activity?\nA: {answer}")
@@ -66,7 +73,8 @@ async def main():
     # ===========================================
     print("\n--- Stats ---")
     stats = await memory.stats()
-    print(f"Total memories: {stats['total_memories']}")
+    print(f"Total messages: {stats['total_messages']}")
+    print(f"Total semantic refs: {stats['total_semantic_refs']}")
 
 
 if __name__ == "__main__":

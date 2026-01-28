@@ -199,34 +199,6 @@ class StorageError(MomexError):
         )
 
 
-class EmbeddingError(MomexError):
-    """Raised when embedding generation fails.
-
-    Example:
-        raise EmbeddingError(
-            message="Failed to generate embeddings",
-            model="text-embedding-ada-002"
-        )
-    """
-
-    def __init__(
-        self,
-        message: str,
-        model: str | None = None,
-        suggestion: str | None = None,
-    ) -> None:
-        details = {}
-        if model:
-            details["model"] = model
-
-        super().__init__(
-            message=message,
-            error_code="MOMEX_501",
-            details=details,
-            suggestion=suggestion or "Check your OPENAI_API_KEY or AZURE_OPENAI_API_KEY environment variable.",
-        )
-
-
 class LLMError(MomexError):
     """Raised when LLM operations fail (fact extraction, query, etc.).
 

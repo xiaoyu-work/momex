@@ -2,18 +2,13 @@
 
 I've been keeping an eye on this repo for a while. I'm also personally interested in personal assistant agents, and I've been trying to find best practices for memory. Structured RAG is a great design, but since this is an experimental project, the feature set isn't complete yet. So I forked the original repo and added more features, aiming to make it work for more general use cases and projects.
 
-This fork adds **Momex** - a simplified, collection-based API wrapper for TypeAgent's Structured RAG.
+This fork adds **Momex** - a high-level API wrapper for TypeAgent's Structured RAG.
 
 ## What's New
 
 - `src/momex/` - High-level memory API package
 - Multi-tenant support with hierarchical collections (`momex:engineering:xiaoyuzhang`)
 - Prefix queries across multiple collections
-- Auto fact extraction and deduplication via LLM
-- Importance scoring (health info ranks higher than casual info)
-- PostgreSQL backend support (via pgvector)
-- Soft delete and restore
-- YAML configuration support
 - Export to JSON
 
 ## Installation
@@ -36,12 +31,14 @@ async def main():
     gvanrossum = Memory(collection="momex:engineering:gvanrossum")
     await gvanrossum.add("I prefer Java")
 
-    # Query with prefix - searches all matching collections
-    answer = await query("momex:engineering", "What languages do people like?")
-    # Searches both xiaoyuzhang and gvanrossum
+    # Search - returns structured results (entities, actions, topics, messages)
+    results = await xiaoyuzhang.search("What languages?")
+    for item in results:
+        print(f"[{item.type}] {item.text} (score={item.score:.2f})")
 
-    answer = await query("momex", "Who likes Python?")
-    # Searches entire momex
+    # Query with prefix - searches all matching collections, returns LLM answer
+    answer = await query("momex:engineering", "What languages do people like?")
+    print(f"Q: What languages?\nA: {answer}")
 
 asyncio.run(main())
 ```
