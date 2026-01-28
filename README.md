@@ -23,9 +23,16 @@ pip install momex
 
 ```python
 import asyncio
-from momex import Memory, query
+from momex import Memory, MomexConfig, query
 
 async def main():
+    # Configure LLM once (required)
+    MomexConfig.set_default(
+        provider="openai",  # openai, azure, anthropic, deepseek, qwen
+        model="gpt-4o",
+        api_key="sk-xxx",  # or set MOMEX_API_KEY env var
+    )
+
     # Add memories with hierarchical identity
     xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang")
     await xiaoyuzhang.add("I like Python")

@@ -17,14 +17,14 @@ import asyncio
 from momex import Memory, MomexConfig
 
 async def main():
-    # Configure LLM (required)
-    config = MomexConfig(
+    # Configure LLM once (required)
+    MomexConfig.set_default(
         provider="openai",
         model="gpt-4o",
         api_key="sk-xxx",
     )
 
-    memory = Memory(collection="user:xiaoyuzhang", config=config)
+    memory = Memory(collection="user:xiaoyuzhang")
     await memory.add("I like Python")
     answer = await memory.query("What language?")
     print(answer)
@@ -221,25 +221,16 @@ Momex supports two storage backends:
 ```python
 from momex import Memory, MomexConfig
 
-# Simple - use defaults
-memory = Memory(collection="user:xiaoyuzhang")
-
-# Custom storage path
-config = MomexConfig(
-    provider="openai",
-    model="gpt-4o",
-    api_key="sk-xxx",
-    storage_path="./my_data",
-)
-memory = Memory(collection="user:xiaoyuzhang", config=config)
-
-# Set global default
+# Set global default once
 MomexConfig.set_default(
     provider="openai",
     model="gpt-4o",
     api_key="sk-xxx",
-    storage_path="./my_data",
+    storage_path="./my_data",  # Optional, default: "./momex_data"
 )
+
+# Then use Memory without passing config
+memory = Memory(collection="user:xiaoyuzhang")
 ```
 
 ### PostgreSQL Configuration
@@ -257,8 +248,10 @@ pip install momex[postgres]
 ```python
 from momex import Memory, MomexConfig, PostgresConfig
 
-# Code configuration
-config = MomexConfig(
+MomexConfig.set_default(
+    provider="openai",
+    model="gpt-4o",
+    api_key="sk-xxx",
     backend="postgres",
     postgres=PostgresConfig(
         url="postgresql://user:password@localhost:5432/momex",
@@ -266,7 +259,8 @@ config = MomexConfig(
         pool_max=10,
     )
 )
-memory = Memory(collection="user:xiaoyuzhang", config=config)
+
+memory = Memory(collection="user:xiaoyuzhang")
 ```
 
 ### YAML Configuration
@@ -294,7 +288,9 @@ postgres:
 **Load from YAML:**
 ```python
 config = MomexConfig.from_yaml("config_postgres.yaml")
-memory = Memory(collection="user:xiaoyuzhang", config=config)
+MomexConfig._default = config  # Set as global default
+
+memory = Memory(collection="user:xiaoyuzhang")
 ```
 
 **Save to YAML:**
@@ -307,45 +303,22 @@ config.to_yaml("my_config.yaml")
 LLM is required. Supports **OpenAI**, **Azure**, **Anthropic**, **DeepSeek**, **Qwen**.
 
 ```python
-from momex import Memory, MomexConfig
+from momex import MomexConfig
 
 # OpenAI
-config = MomexConfig(
-    provider="openai",
-    model="gpt-4o",
-    api_key="sk-xxx",
-)
+MomexConfig.set_default(provider="openai", model="gpt-4o", api_key="sk-xxx")
 
 # Azure OpenAI
-config = MomexConfig(
-    provider="azure",
-    model="gpt-4o",
-    api_key="xxx",
-    api_base="https://xxx.openai.azure.com",
-)
+MomexConfig.set_default(provider="azure", model="gpt-4o", api_key="xxx", api_base="https://xxx.openai.azure.com")
 
 # Anthropic
-config = MomexConfig(
-    provider="anthropic",
-    model="claude-sonnet-4-20250514",
-    api_key="sk-ant-xxx",
-)
+MomexConfig.set_default(provider="anthropic", model="claude-sonnet-4-20250514", api_key="sk-ant-xxx")
 
 # DeepSeek
-config = MomexConfig(
-    provider="deepseek",
-    model="deepseek-chat",
-    api_key="sk-xxx",
-)
+MomexConfig.set_default(provider="deepseek", model="deepseek-chat", api_key="sk-xxx")
 
 # Qwen (Alibaba Cloud)
-config = MomexConfig(
-    provider="qwen",
-    model="qwen-plus",
-    api_key="sk-xxx",
-)
-
-memory = Memory(collection="user:xiaoyuzhang", config=config)
+MomexConfig.set_default(provider="qwen", model="qwen-plus", api_key="sk-xxx")
 ```
 
 **YAML Configuration:**

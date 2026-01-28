@@ -5,18 +5,15 @@ from momex import Memory, MomexConfig
 
 
 async def main():
-    # Configure (code, YAML, or env vars)
-    config = MomexConfig(
+    # Configure once (or use MOMEX_PROVIDER, MOMEX_MODEL, MOMEX_API_KEY env vars)
+    MomexConfig.set_default(
         provider="openai",  # openai, azure, anthropic, deepseek, qwen
         model="gpt-4o",
         api_key="sk-xxx",
     )
 
-    # Or load from YAML
-    # config = MomexConfig.from_yaml("config.yaml")
-
     # Create memory
-    memory = Memory(collection="user:test", config=config)
+    memory = Memory(collection="user:test")
 
     # Use it
     await memory.add("I like Python")
