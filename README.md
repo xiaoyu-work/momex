@@ -6,20 +6,16 @@ This fork adds **Momex** - a simplified, collection-based API wrapper for TypeAg
 
 ## What's New
 
-- `src/momex/` - New high-level API package
-- `docs/momex.md` - Momex documentation
-- `tests/test_momex/` - Unit tests
-- `examples/momex/` - Usage examples
+- `src/momex/` - High-level memory API package
+- Hierarchical collections with `:` separator (`company:engineering:alice`)
+- Prefix queries across multiple collections
+- Auto fact extraction and deduplication via LLM
+- Importance scoring (health info ranks higher than casual info)
+- PostgreSQL backend support (via pgvector)
+- Soft delete and restore
+- YAML configuration support
+- Export to JSON
 
-## Momex Features
-
-| Feature | Description |
-|---------|-------------|
-| **Simplified API** | No `TranscriptMessage` or `async/await` needed |
-| **Hierarchical collections** | Use `:` to create nested structure (unlimited levels) |
-| **Prefix queries** | Query `company` to search all `company:*` |
-| **MemoryManager** | List, delete, rename collections |
-| **Sync API** | Synchronous methods by default |
 
 ## Quick Start
 
