@@ -7,7 +7,7 @@ This fork adds **Momex** - a simplified, collection-based API wrapper for TypeAg
 ## What's New
 
 - `src/momex/` - High-level memory API package
-- Hierarchical collections with `:` separator (`company:engineering:alice`)
+- Multi-tenant support with hierarchical collections (`momex:engineering:xiaoyuzhang`)
 - Prefix queries across multiple collections
 - Auto fact extraction and deduplication via LLM
 - Importance scoring (health info ranks higher than casual info)
@@ -16,6 +16,11 @@ This fork adds **Momex** - a simplified, collection-based API wrapper for TypeAg
 - YAML configuration support
 - Export to JSON
 
+## Installation
+
+```bash
+pip install momex
+```
 
 ## Quick Start
 
@@ -23,18 +28,18 @@ This fork adds **Momex** - a simplified, collection-based API wrapper for TypeAg
 from momex import Memory, query
 
 # Add memories with hierarchical identity
-alice = Memory(collection="company:engineering:alice")
-alice.add("I like Python")
+xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang")
+xiaoyuzhang.add("I like Python")
 
-bob = Memory(collection="company:engineering:bob")
-bob.add("I prefer Java")
+gvanrossum = Memory(collection="momex:engineering:gvanrossum")
+gvanrossum.add("I prefer Java")
 
 # Query with prefix - searches all matching collections
-answer = query("company:engineering", "What languages do people like?")
-# Searches both alice and bob
+answer = query("momex:engineering", "What languages do people like?")
+# Searches both xiaoyuzhang and gvanrossum
 
-answer = query("company", "Who likes Python?")
-# Searches entire company
+answer = query("momex", "Who likes Python?")
+# Searches entire momex
 ```
 
 See [docs/momex.md](docs/momex.md) for full documentation.

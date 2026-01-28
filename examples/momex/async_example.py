@@ -11,16 +11,16 @@ from momex import Memory, query_async
 
 async def main():
     # Create memory with hierarchical identity
-    memory = Memory(collection="company:engineering:alice")
+    memory = Memory(collection="momex:engineering:xiaoyuzhang")
 
     # Add memories asynchronously
     print("Adding memories asynchronously...")
 
     # Add multiple items concurrently
     tasks = [
-        memory.add_async("Python is my favorite language", speaker="Alice"),
-        memory.add_async("Currently learning machine learning", speaker="Alice"),
-        memory.add_async("The project uses FastAPI framework", speaker="Alice"),
+        memory.add_async("Python is my favorite language", speaker="Xiaoyuzhang"),
+        memory.add_async("Currently learning machine learning", speaker="Xiaoyuzhang"),
+        memory.add_async("The project uses FastAPI framework", speaker="Xiaoyuzhang"),
     ]
 
     results = await asyncio.gather(*tasks)
@@ -41,11 +41,11 @@ async def main():
     print("\n--- Async Queries ---")
 
     # Query single collection
-    answer = await memory.query_async("What programming language does Alice like?")
-    print(f"\nAlice's collection: {answer}")
+    answer = await memory.query_async("What programming language does Xiaoyuzhang like?")
+    print(f"\nXiaoyuzhang's collection: {answer}")
 
     # Query with prefix (async version)
-    answer = await query_async("company:engineering", "What deep learning frameworks are there?")
+    answer = await query_async("momex:engineering", "What deep learning frameworks are there?")
     print(f"\nEngineering team: {answer}")
 
     # Get stats

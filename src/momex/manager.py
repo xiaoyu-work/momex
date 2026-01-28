@@ -14,7 +14,7 @@ from .exceptions import CollectionNotFoundError, ValidationError
 def _collection_to_path(collection: str) -> Path:
     """Convert collection name to path.
 
-    Converts "user:alice" to Path("user/alice") for cross-platform compatibility.
+    Converts "user:xiaoyuzhang" to Path("user/xiaoyuzhang") for cross-platform compatibility.
     """
     parts = collection.split(":")
     sanitized = [re.sub(r'[<>"|?*:\\]', '_', part) for part in parts]
@@ -24,7 +24,7 @@ def _collection_to_path(collection: str) -> Path:
 def _path_to_collection(path: Path) -> str:
     """Convert path back to collection name.
 
-    Converts Path("user/alice") to "user:alice".
+    Converts Path("user/xiaoyuzhang") to "user:xiaoyuzhang".
     """
     return ":".join(path.parts)
 
@@ -37,7 +37,7 @@ class MemoryManager:
         >>> manager = MemoryManager()
         >>> collections = manager.list_collections()
         >>> manager.delete("user:old_user")
-        >>> manager.rename("user:alice", "user:alice_backup")
+        >>> manager.rename("user:xiaoyuzhang", "user:xiaoyuzhang_backup")
     """
 
     def __init__(self, config: MomexConfig | None = None) -> None:
@@ -54,7 +54,7 @@ class MemoryManager:
 
         Args:
             prefix: Optional prefix to filter collections.
-                    e.g., "company:engineering" matches "company:engineering:alice"
+                    e.g., "momex:engineering" matches "momex:engineering:xiaoyuzhang"
 
         Returns:
             List of collection names.

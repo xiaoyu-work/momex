@@ -21,8 +21,8 @@ async def query(
     """Query memories across all collections matching a prefix.
 
     Args:
-        prefix: Collection prefix (e.g., "company:engineering" matches
-                "company:engineering:alice", "company:engineering:bob", etc.)
+        prefix: Collection prefix (e.g., "momex:engineering" matches
+                "momex:engineering:xiaoyuzhang", "momex:engineering:gvanrossum", etc.)
         question: Natural language question.
         config: Configuration object. If None, uses default config.
 

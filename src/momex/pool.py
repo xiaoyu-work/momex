@@ -15,8 +15,8 @@ class MemoryPool:
     Example:
         >>> from momex import MemoryPool
         >>> pool = MemoryPool(
-        ...     collections=["user:alice", "team:engineering", "project:x"],
-        ...     default_collection="user:alice"
+        ...     collections=["user:xiaoyuzhang", "team:engineering", "project:x"],
+        ...     default_collection="user:xiaoyuzhang"
         ... )
         >>> pool.add("Personal note")  # Goes to default collection
         >>> pool.add("Team decision", collections=["team:engineering"])

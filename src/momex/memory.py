@@ -75,7 +75,7 @@ class ConversationResult:
 def _collection_to_path(collection: str) -> Path:
     """Convert collection name to path.
 
-    Converts "user:alice" to Path("user/alice") for cross-platform compatibility.
+    Converts "user:xiaoyuzhang" to Path("user/xiaoyuzhang") for cross-platform compatibility.
     """
     # Split by : and create path parts
     parts = collection.split(":")
@@ -119,7 +119,7 @@ class Memory:
 
     Example:
         >>> from momex import Memory
-        >>> memory = Memory(collection="user:alice")
+        >>> memory = Memory(collection="user:xiaoyuzhang")
         >>> await memory.add("Alice likes cats")
         >>> answer = await memory.query("What does Alice like?")
     """
@@ -132,7 +132,7 @@ class Memory:
         """Initialize Memory instance for a single collection.
 
         Args:
-            collection: Collection name (e.g., "user:alice", "team:engineering")
+            collection: Collection name (e.g., "user:xiaoyuzhang", "team:engineering")
             config: Configuration object. If None, uses default config.
         """
         self.collection = collection

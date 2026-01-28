@@ -27,14 +27,14 @@ Collection names map to directory structure. The `:` separator creates subdirect
 
 | Collection Name | Storage Path |
 |-----------------|--------------|
-| `alice` | `./momex_data/alice/memory.db` |
-| `user:alice` | `./momex_data/user/alice/memory.db` |
-| `company:engineering:alice` | `./momex_data/company/engineering/alice/memory.db` |
+| `xiaoyuzhang` | `./momex_data/xiaoyuzhang/memory.db` |
+| `user:xiaoyuzhang` | `./momex_data/user/xiaoyuzhang/memory.db` |
+| `momex:engineering:xiaoyuzhang` | `./momex_data/momex/engineering/xiaoyuzhang/memory.db` |
 
 This enables prefix-based queries:
-- `query("company:engineering:alice", ...)` → searches only alice
-- `query("company:engineering", ...)` → searches all under engineering
-- `query("company", ...)` → searches entire company
+- `query("momex:engineering:xiaoyuzhang", ...)` → searches only xiaoyuzhang
+- `query("momex:engineering", ...)` → searches all under engineering
+- `query("momex", ...)` → searches entire momex
 
 ## Conversation Fact Extraction
 
@@ -115,7 +115,7 @@ TypeAgent uses append-only storage by design. Momex implements soft delete:
 - Can restore deleted memories via `restore(memory_id)`
 
 ```
-./momex_data/user/alice/
+./momex_data/user/xiaoyuzhang/
 ├── memory.db      # TypeAgent data (append-only)
 └── deleted.json   # Soft delete records
 ```

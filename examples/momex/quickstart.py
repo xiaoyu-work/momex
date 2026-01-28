@@ -20,8 +20,8 @@ from momex import Memory
 
 async def main():
     # Create memory for a user
-    print("Creating memory for user:alice...")
-    memory = Memory(collection="user:alice")
+    print("Creating memory for user:xiaoyuzhang...")
+    memory = Memory(collection="user:xiaoyuzhang")
 
     # ===========================================
     # Method 1: Add memories manually

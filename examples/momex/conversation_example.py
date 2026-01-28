@@ -17,7 +17,7 @@ async def main():
     config = MomexConfig(storage_path="./conversation_data")
 
     # Create memory for a user
-    memory = Memory(collection="user:alice", config=config)
+    memory = Memory(collection="user:xiaoyuzhang", config=config)
 
     # Simulate a conversation
     conversation = [

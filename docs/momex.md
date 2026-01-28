@@ -5,8 +5,8 @@ Momex is a high-level memory API for AI agents, built on TypeAgent's Structured 
 ## Features
 
 - **Collections**: Organize memories by user, team, or purpose
-- **Hierarchical structure**: Use `:` separator for nested organization (e.g., `company:engineering:alice`)
-- **Prefix queries**: Query `company` to search all collections under `company:*`
+- **Hierarchical structure**: Use `:` separator for nested organization (e.g., `momex:engineering:xiaoyuzhang`)
+- **Prefix queries**: Query `momex` to search all collections under `momex:*`
 - **Conversation support**: Add memories directly from chat history
 - **Configurable**: Define what information to remember via YAML or code
 
@@ -21,7 +21,7 @@ Momex is a high-level memory API for AI agents, built on TypeAgent's Structured 
 from momex import Memory, query
 
 # Create memory for a user
-memory = Memory(collection="company:engineering:alice")
+memory = Memory(collection="momex:engineering:xiaoyuzhang")
 
 # Add memories from conversation
 memory.add_conversation([
@@ -33,5 +33,5 @@ memory.add_conversation([
 answer = memory.query("What does the user do?")
 
 # Query across collections (prefix query)
-answer = query("company:engineering", "What languages do people use?")
+answer = query("momex:engineering", "What languages do people use?")
 ```

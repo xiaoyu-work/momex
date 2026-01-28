@@ -5,7 +5,7 @@ for better error handling in commercial applications.
 
 Example:
     try:
-        memory = Memory(collection="user:alice")
+        memory = Memory(collection="user:xiaoyuzhang")
         await memory.query("What do I like?")
     except CollectionNotFoundError as e:
         print(f"Error {e.error_code}: {e.message}")
@@ -63,7 +63,7 @@ class CollectionNotFoundError(MomexError):
 
     Example:
         raise CollectionNotFoundError(
-            collection="user:alice",
+            collection="user:xiaoyuzhang",
             suggestion="Check the collection name or create it first."
         )
     """
@@ -86,7 +86,7 @@ class MemoryNotFoundError(MomexError):
     """Raised when a memory item does not exist.
 
     Example:
-        raise MemoryNotFoundError(memory_id=123, collection="user:alice")
+        raise MemoryNotFoundError(memory_id=123, collection="user:xiaoyuzhang")
     """
 
     def __init__(
@@ -174,7 +174,7 @@ class StorageError(MomexError):
         raise StorageError(
             message="Failed to write to database",
             operation="add",
-            db_path="momex_data/user/alice/memory.db"
+            db_path="momex_data/user/xiaoyuzhang/memory.db"
         )
     """
 

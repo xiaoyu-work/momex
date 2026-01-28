@@ -25,7 +25,7 @@ import asyncio
 from momex import Memory
 
 async def main():
-    memory = Memory(collection="user:alice")
+    memory = Memory(collection="user:xiaoyuzhang")
     await memory.add("I like Python")
     answer = await memory.query("What language?")
     print(answer)
@@ -39,22 +39,22 @@ A **collection** is a named storage space for memories. Each collection has its 
 
 - Use collections to separate memories by user, team, or purpose
 - Collection names support hierarchical structure with `:` separator
-- Examples: `"alice"`, `"user:alice"`, `"company:engineering:alice"`
+- Examples: `"xiaoyuzhang"`, `"user:xiaoyuzhang"`, `"momex:engineering:xiaoyuzhang"`
 
 ### Hierarchical Collections
 
 The `:` separator creates a hierarchy that enables prefix queries:
 
 ```
-company:engineering:alice  →  ./momex_data/company/engineering/alice/memory.db
-company:engineering:bob    →  ./momex_data/company/engineering/bob/memory.db
-company:marketing:charlie  →  ./momex_data/company/marketing/charlie/memory.db
+momex:engineering:xiaoyuzhang  →  ./momex_data/momex/engineering/xiaoyuzhang/memory.db
+momex:engineering:gvanrossum   →  ./momex_data/momex/engineering/gvanrossum/memory.db
+momex:marketing:charlie        →  ./momex_data/momex/marketing/charlie/memory.db
 ```
 
 Query behavior:
-- `await query("company:engineering:alice", ...)` → searches only alice
-- `await query("company:engineering", ...)` → searches alice + bob
-- `await query("company", ...)` → searches alice + bob + charlie
+- `await query("momex:engineering:xiaoyuzhang", ...)` → searches only xiaoyuzhang
+- `await query("momex:engineering", ...)` → searches xiaoyuzhang + gvanrossum
+- `await query("momex", ...)` → searches xiaoyuzhang + gvanrossum + charlie
 
 ## Basic Usage
 
@@ -65,7 +65,7 @@ import asyncio
 from momex import Memory
 
 async def main():
-    memory = Memory(collection="user:alice")
+    memory = Memory(collection="user:xiaoyuzhang")
 
     # Add memories - LLM extracts facts and deduplicates automatically
     await memory.add("I love Python programming")
@@ -87,7 +87,7 @@ You can also pass conversation messages:
 
 ```python
 async def main():
-    memory = Memory(collection="user:alice")
+    memory = Memory(collection="user:xiaoyuzhang")
 
     # Conversation format - LLM extracts facts from the dialogue
     await memory.add([
@@ -106,7 +106,7 @@ Use `infer=False` to skip LLM processing and store content directly:
 
 ```python
 async def main():
-    memory = Memory(collection="user:alice")
+    memory = Memory(collection="user:xiaoyuzhang")
 
     # Direct storage - no fact extraction or deduplication
     await memory.add("Raw log: user logged in at 2024-01-01", infer=False)
@@ -122,18 +122,18 @@ from momex import Memory, query
 
 async def main():
     # Create memories for different users
-    alice = Memory(collection="company:engineering:alice")
-    await alice.add("I like Python")
+    xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang")
+    await xiaoyuzhang.add("I like Python")
 
-    bob = Memory(collection="company:engineering:bob")
-    await bob.add("I prefer Java")
+    gvanrossum = Memory(collection="momex:engineering:gvanrossum")
+    await gvanrossum.add("I prefer Java")
 
     # Query single collection
-    answer = await alice.query("What language?")
+    answer = await xiaoyuzhang.query("What language?")
 
     # Query by prefix - searches multiple collections
-    answer = await query("company:engineering", "What languages do people use?")
-    answer = await query("company", "Who works here?")
+    answer = await query("momex:engineering", "What languages do people use?")
+    answer = await query("momex", "Who works here?")
 ```
 
 ### Search for Raw Results (for Chat Agent Context)
@@ -144,18 +144,18 @@ Use `search()` to get raw vector search results without LLM summarization. This 
 from momex import Memory, search
 
 async def main():
-    alice = Memory(collection="company:engineering:alice")
-    await alice.add("I like Python and FastAPI")
-    await alice.add("Working on ML project")
+    xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang")
+    await xiaoyuzhang.add("I like Python and FastAPI")
+    await xiaoyuzhang.add("Working on ML project")
 
     # Search single collection - returns MemoryItem objects
     # Results are filtered by similarity threshold, then ranked by weighted score
-    results = await alice.search("programming")
+    results = await xiaoyuzhang.search("programming")
     for r in results:
         print(f"[sim={r.similarity:.3f}, imp={r.importance:.2f}, score={r.score:.3f}] {r.text}")
 
     # Search across collections with prefix
-    results = await search("company", "what are they working on", limit=5)
+    results = await search("momex", "what are they working on", limit=5)
 
     # Use as context for a chat agent (no LLM call, cheaper than query())
     context = "\n".join([f"- {r.speaker}: {r.text}" for r in results])
@@ -175,11 +175,11 @@ manager = MemoryManager()
 
 # List collections
 all_collections = manager.list_collections()
-eng_only = manager.list_collections(prefix="company:engineering")
+eng_only = manager.list_collections(prefix="momex:engineering")
 
 # Other operations
-manager.exists("company:engineering:alice")
-manager.delete("company:engineering:alice")
+manager.exists("momex:engineering:xiaoyuzhang")
+manager.delete("momex:engineering:xiaoyuzhang")
 manager.rename("user:old", "user:new")
 ```
 
@@ -200,7 +200,7 @@ Momex supports two storage backends:
 from momex import Memory, MomexConfig, StorageConfig
 
 # Default - uses SQLite
-memory = Memory(collection="user:alice")
+memory = Memory(collection="user:xiaoyuzhang")
 
 # Explicit SQLite config
 config = MomexConfig(
@@ -209,7 +209,7 @@ config = MomexConfig(
         path="./my_data",
     )
 )
-memory = Memory(collection="user:alice", config=config)
+memory = Memory(collection="user:xiaoyuzhang", config=config)
 ```
 
 #### PostgreSQL
@@ -230,7 +230,7 @@ config = MomexConfig(
         table_prefix="momex",  # optional, default "momex"
     )
 )
-memory = Memory(collection="user:alice", config=config)
+memory = Memory(collection="user:xiaoyuzhang", config=config)
 ```
 
 #### Cloud Database Support
@@ -252,12 +252,12 @@ from momex import Memory, MomexConfig, StorageConfig
 
 # Simple SQLite config (legacy style)
 config = MomexConfig(storage_path="./my_data")
-memory = Memory(collection="user:alice", config=config)
+memory = Memory(collection="user:xiaoyuzhang", config=config)
 
 # Or set global default
 MomexConfig.set_default(storage_path="./my_data")
-alice = Memory(collection="user:alice")  # uses default
-bob = Memory(collection="user:bob")      # uses default
+xiaoyuzhang = Memory(collection="user:xiaoyuzhang")  # uses default
+gvanrossum = Memory(collection="user:gvanrossum")    # uses default
 ```
 
 ### YAML Configuration
@@ -297,7 +297,7 @@ fact_types:
 
 ```python
 config = MomexConfig.from_yaml("momex_config.yaml")
-memory = Memory(collection="user:alice", config=config)
+memory = Memory(collection="user:xiaoyuzhang", config=config)
 ```
 
 ### Embedding Model Comparison

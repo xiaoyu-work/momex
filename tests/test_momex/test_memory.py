@@ -40,20 +40,20 @@ class TestMemory:
         """Test Memory initialization."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = MomexConfig(storage_path=tmpdir)
-            memory = Memory(collection="company:engineering:alice", config=config)
-            assert memory.collection == "company:engineering:alice"
-            assert "company" in memory.db_path
+            memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
+            assert memory.collection == "momex:engineering:xiaoyuzhang"
+            assert "momex" in memory.db_path
             assert "engineering" in memory.db_path
-            assert "alice" in memory.db_path
+            assert "xiaoyuzhang" in memory.db_path
             assert not memory.is_initialized
 
     def test_memory_db_path_simple(self):
         """Test Memory with simple collection name (no hierarchy)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = MomexConfig(storage_path=tmpdir)
-            memory = Memory(collection="alice", config=config)
+            memory = Memory(collection="xiaoyuzhang", config=config)
             assert memory.db_path.endswith("memory.db")
-            assert "alice" in memory.db_path
+            assert "xiaoyuzhang" in memory.db_path
 
     def test_memory_db_path_hierarchical(self):
         """Test Memory with hierarchical collection name."""
@@ -61,14 +61,14 @@ class TestMemory:
             config = MomexConfig(storage_path=tmpdir)
 
             # Two levels
-            m1 = Memory(collection="company:alice", config=config)
-            assert "company" in m1.db_path and "alice" in m1.db_path
+            m1 = Memory(collection="momex:xiaoyuzhang", config=config)
+            assert "momex" in m1.db_path and "xiaoyuzhang" in m1.db_path
 
             # Three levels
-            m2 = Memory(collection="company:engineering:bob", config=config)
-            assert "company" in m2.db_path
+            m2 = Memory(collection="momex:engineering:gvanrossum", config=config)
+            assert "momex" in m2.db_path
             assert "engineering" in m2.db_path
-            assert "bob" in m2.db_path
+            assert "gvanrossum" in m2.db_path
 
             # Four levels
             m3 = Memory(collection="org:team:project:user", config=config)
@@ -97,14 +97,14 @@ class TestMemoryManager:
             manager = MemoryManager(config=config)
 
             # Manually create collection
-            db_dir = os.path.join(tmpdir, "company", "engineering", "alice")
+            db_dir = os.path.join(tmpdir, "momex", "engineering", "xiaoyuzhang")
             os.makedirs(db_dir, exist_ok=True)
             db_path = os.path.join(db_dir, "memory.db")
             with open(db_path, "w") as f:
                 f.write("")
 
-            assert manager.exists("company:engineering:alice") is True
-            assert manager.exists("company:engineering:bob") is False
+            assert manager.exists("momex:engineering:xiaoyuzhang") is True
+            assert manager.exists("momex:engineering:gvanrossum") is False
 
     def test_manager_delete(self):
         """Test deleting a collection."""
@@ -113,21 +113,21 @@ class TestMemoryManager:
             manager = MemoryManager(config=config)
 
             # Create collection
-            db_dir = os.path.join(tmpdir, "company", "alice")
+            db_dir = os.path.join(tmpdir, "momex", "xiaoyuzhang")
             os.makedirs(db_dir, exist_ok=True)
             db_path = os.path.join(db_dir, "memory.db")
             with open(db_path, "w") as f:
                 f.write("")
 
-            assert manager.exists("company:alice") is True
+            assert manager.exists("momex:xiaoyuzhang") is True
 
             # Delete
-            result = manager.delete("company:alice")
+            result = manager.delete("momex:xiaoyuzhang")
             assert result is True
-            assert manager.exists("company:alice") is False
+            assert manager.exists("momex:xiaoyuzhang") is False
 
             # Delete non-existent
-            result = manager.delete("company:bob")
+            result = manager.delete("momex:gvanrossum")
             assert result is False
 
     def test_manager_rename(self):
@@ -137,17 +137,17 @@ class TestMemoryManager:
             manager = MemoryManager(config=config)
 
             # Create collection
-            db_dir = os.path.join(tmpdir, "company", "alice")
+            db_dir = os.path.join(tmpdir, "momex", "xiaoyuzhang")
             os.makedirs(db_dir, exist_ok=True)
             db_path = os.path.join(db_dir, "memory.db")
             with open(db_path, "w") as f:
                 f.write("")
 
             # Rename
-            result = manager.rename("company:alice", "company:alice_backup")
+            result = manager.rename("momex:xiaoyuzhang", "momex:xiaoyuzhang_backup")
             assert result is True
-            assert manager.exists("company:alice") is False
-            assert manager.exists("company:alice_backup") is True
+            assert manager.exists("momex:xiaoyuzhang") is False
+            assert manager.exists("momex:xiaoyuzhang_backup") is True
 
     def test_manager_info(self):
         """Test getting collection info."""
@@ -156,14 +156,14 @@ class TestMemoryManager:
             manager = MemoryManager(config=config)
 
             # Create collection
-            db_dir = os.path.join(tmpdir, "company", "alice")
+            db_dir = os.path.join(tmpdir, "momex", "xiaoyuzhang")
             os.makedirs(db_dir, exist_ok=True)
             db_path = os.path.join(db_dir, "memory.db")
             with open(db_path, "w") as f:
                 f.write("test data")
 
-            info = manager.info("company:alice")
-            assert info["collection"] == "company:alice"
+            info = manager.info("momex:xiaoyuzhang")
+            assert info["collection"] == "momex:xiaoyuzhang"
             assert "size" in info
             assert "db_path" in info
 
@@ -175,9 +175,9 @@ class TestMemoryManager:
 
             # Create hierarchical collections
             for parts in [
-                ("company", "engineering", "alice"),
-                ("company", "engineering", "bob"),
-                ("company", "marketing", "charlie"),
+                ("momex", "engineering", "xiaoyuzhang"),
+                ("momex", "engineering", "gvanrossum"),
+                ("momex", "marketing", "charlie"),
             ]:
                 db_dir = os.path.join(tmpdir, *parts)
                 os.makedirs(db_dir, exist_ok=True)
@@ -187,9 +187,9 @@ class TestMemoryManager:
 
             collections = manager.list_collections()
             assert len(collections) == 3
-            assert "company:engineering:alice" in collections
-            assert "company:engineering:bob" in collections
-            assert "company:marketing:charlie" in collections
+            assert "momex:engineering:xiaoyuzhang" in collections
+            assert "momex:engineering:gvanrossum" in collections
+            assert "momex:marketing:charlie" in collections
 
     def test_manager_list_collections_with_prefix(self):
         """Test listing collections with prefix filter."""
@@ -199,9 +199,9 @@ class TestMemoryManager:
 
             # Create hierarchical collections
             for parts in [
-                ("company", "engineering", "alice"),
-                ("company", "engineering", "bob"),
-                ("company", "marketing", "charlie"),
+                ("momex", "engineering", "xiaoyuzhang"),
+                ("momex", "engineering", "gvanrossum"),
+                ("momex", "marketing", "charlie"),
                 ("other", "team", "dave"),
             ]:
                 db_dir = os.path.join(tmpdir, *parts)
@@ -214,25 +214,25 @@ class TestMemoryManager:
             all_collections = manager.list_collections()
             assert len(all_collections) == 4
 
-            # Filter by company
-            company_collections = manager.list_collections(prefix="company")
-            assert len(company_collections) == 3
-            assert "company:engineering:alice" in company_collections
-            assert "company:engineering:bob" in company_collections
-            assert "company:marketing:charlie" in company_collections
-            assert "other:team:dave" not in company_collections
+            # Filter by momex
+            momex_collections = manager.list_collections(prefix="momex")
+            assert len(momex_collections) == 3
+            assert "momex:engineering:xiaoyuzhang" in momex_collections
+            assert "momex:engineering:gvanrossum" in momex_collections
+            assert "momex:marketing:charlie" in momex_collections
+            assert "other:team:dave" not in momex_collections
 
-            # Filter by company:engineering
-            eng_collections = manager.list_collections(prefix="company:engineering")
+            # Filter by momex:engineering
+            eng_collections = manager.list_collections(prefix="momex:engineering")
             assert len(eng_collections) == 2
-            assert "company:engineering:alice" in eng_collections
-            assert "company:engineering:bob" in eng_collections
-            assert "company:marketing:charlie" not in eng_collections
+            assert "momex:engineering:xiaoyuzhang" in eng_collections
+            assert "momex:engineering:gvanrossum" in eng_collections
+            assert "momex:marketing:charlie" not in eng_collections
 
             # Filter by exact match
-            exact_collections = manager.list_collections(prefix="company:engineering:alice")
+            exact_collections = manager.list_collections(prefix="momex:engineering:xiaoyuzhang")
             assert len(exact_collections) == 1
-            assert "company:engineering:alice" in exact_collections
+            assert "momex:engineering:xiaoyuzhang" in exact_collections
 
             # Filter with no matches
             no_match = manager.list_collections(prefix="nonexistent")
@@ -248,10 +248,10 @@ class TestMemoryAsync:
         """Test adding and querying memories."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = MomexConfig(storage_path=tmpdir)
-            memory = Memory(collection="company:engineering:alice", config=config)
+            memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
 
             result = await memory.add_async(
-                "Alice likes cats",
+                "Xiaoyuzhang likes cats",
                 speaker="narrator",
             )
             assert result.success
@@ -265,7 +265,7 @@ class TestMemoryAsync:
         """Test searching memories."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = MomexConfig(storage_path=tmpdir)
-            memory = Memory(collection="company:engineering:alice", config=config)
+            memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
 
             await memory.add_async("Alice is a software engineer")
             await memory.add_async("Bob is a data scientist")
@@ -279,13 +279,13 @@ class TestMemoryAsync:
         """Test memory statistics."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = MomexConfig(storage_path=tmpdir)
-            memory = Memory(collection="company:engineering:alice", config=config)
+            memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
 
             await memory.add_async("Test content")
             stats = await memory.stats_async()
 
             assert "total_memories" in stats
-            assert stats["collection"] == "company:engineering:alice"
+            assert stats["collection"] == "momex:engineering:xiaoyuzhang"
 
 
 @pytest.mark.asyncio
@@ -301,11 +301,11 @@ class TestPrefixQueryAsync:
             config = MomexConfig(storage_path=tmpdir)
 
             # Add memory
-            memory = Memory(collection="company:engineering:alice", config=config)
-            await memory.add_async("Alice likes Python")
+            memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
+            await memory.add_async("Xiaoyuzhang likes Python")
 
             # Query exact collection
-            answer = await query_async("company:engineering:alice", "What does Alice like?", config=config)
+            answer = await query_async("momex:engineering:xiaoyuzhang", "What does Alice like?", config=config)
             assert "Python" in answer
 
     @pytest.mark.skip(reason="Requires LLM API key")
@@ -317,12 +317,12 @@ class TestPrefixQueryAsync:
             config = MomexConfig(storage_path=tmpdir)
 
             # Add memories to different collections
-            alice = Memory(collection="company:engineering:alice", config=config)
-            await alice.add_async("Alice likes Python")
+            xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
+            await xiaoyuzhang.add_async("Xiaoyuzhang likes Python")
 
-            bob = Memory(collection="company:engineering:bob", config=config)
-            await bob.add_async("Bob likes Java")
+            gvanrossum = Memory(collection="momex:engineering:gvanrossum", config=config)
+            await gvanrossum.add_async("Bob likes Java")
 
             # Query by prefix - should find both
-            answer = await query_async("company:engineering", "What programming languages?", config=config)
+            answer = await query_async("momex:engineering", "What programming languages?", config=config)
             assert "Python" in answer or "Java" in answer

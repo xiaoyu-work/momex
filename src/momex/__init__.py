@@ -9,10 +9,10 @@ Example:
     >>>
     >>> async def main():
     ...     # Create memory with hierarchical collection name
-    ...     memory = Memory(collection="company:engineering:alice")
+    ...     memory = Memory(collection="momex:engineering:xiaoyuzhang")
     ...
     ...     # Add memories - LLM extracts facts and deduplicates automatically
-    ...     await memory.add("Alice likes cats")
+    ...     await memory.add("Xiaoyuzhang likes cats")
     ...     await memory.add("I really love cats")  # Deduplicates with above
     ...
     ...     # Or pass conversation format
@@ -25,10 +25,10 @@ Example:
     ...     await memory.add("Raw log entry", infer=False)
     ...
     ...     # Query single collection
-    ...     answer = await memory.query("What does Alice like?")
+    ...     answer = await memory.query("What does Xiaoyuzhang like?")
     ...
     ...     # Query with prefix (searches all matching collections)
-    ...     answer = await query("company:engineering", "What are the deadlines?")
+    ...     answer = await query("momex:engineering", "What are the deadlines?")
     ...
     >>> asyncio.run(main())
 

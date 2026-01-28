@@ -5,6 +5,7 @@
 # Python
 __pycache__
 .venv/
+dist/
 
 # Build
 /typeagent.egg-info
