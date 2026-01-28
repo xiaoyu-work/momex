@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .config import MemexConfig
+from .config import MomexConfig
 from .memory import AddResult, Memory, MemoryItem
 from .sync import run_sync
 
@@ -13,7 +13,7 @@ class MemoryPool:
     """Aggregate multiple collections for unified querying and adding.
 
     Example:
-        >>> from memex import MemoryPool
+        >>> from momex import MemoryPool
         >>> pool = MemoryPool(
         ...     collections=["user:alice", "team:engineering", "project:x"],
         ...     default_collection="user:alice"
@@ -27,7 +27,7 @@ class MemoryPool:
         self,
         collections: list[str],
         default_collection: str | None = None,
-        config: MemexConfig | None = None,
+        config: MomexConfig | None = None,
     ) -> None:
         """Initialize MemoryPool with multiple collections.
 
@@ -41,7 +41,7 @@ class MemoryPool:
             raise ValueError("At least one collection is required")
 
         self.collection_names = collections
-        self.config = config or MemexConfig()
+        self.config = config or MomexConfig()
 
         if default_collection and default_collection not in collections:
             raise ValueError(

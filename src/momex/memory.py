@@ -1,4 +1,4 @@
-"""Memex Memory - Simplified high-level API for Structured RAG memory."""
+"""Momex Memory - Simplified high-level API for Structured RAG memory."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from .config import MemexConfig
+from .config import MomexConfig
 from .exceptions import EmbeddingError, ExportError, LLMError
 from .storage.base import StorageBackend
 
@@ -84,7 +84,7 @@ def _collection_to_path(collection: str) -> Path:
     return Path(*sanitized)
 
 
-def _create_backend(collection: str, config: MemexConfig) -> StorageBackend:
+def _create_backend(collection: str, config: MomexConfig) -> StorageBackend:
     """Create a storage backend based on configuration."""
     storage_config = config.storage
 
@@ -118,7 +118,7 @@ class Memory:
     """High-level API for Structured RAG memory with single collection.
 
     Example:
-        >>> from memex import Memory
+        >>> from momex import Memory
         >>> memory = Memory(collection="user:alice")
         >>> await memory.add("Alice likes cats")
         >>> answer = await memory.query("What does Alice like?")
@@ -127,7 +127,7 @@ class Memory:
     def __init__(
         self,
         collection: str,
-        config: MemexConfig | None = None,
+        config: MomexConfig | None = None,
     ) -> None:
         """Initialize Memory instance for a single collection.
 
@@ -136,7 +136,7 @@ class Memory:
             config: Configuration object. If None, uses default config.
         """
         self.collection = collection
-        self.config = config or MemexConfig.get_default()
+        self.config = config or MomexConfig.get_default()
 
         # Create storage backend
         self._backend = _create_backend(collection, self.config)

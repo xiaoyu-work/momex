@@ -1,4 +1,4 @@
-"""Storage backend protocol for Memex.
+"""Storage backend protocol for Momex.
 
 Defines the interface that all storage backends must implement.
 """
@@ -35,7 +35,7 @@ class StorageBackend(ABC):
     """Abstract base class for storage backends.
 
     All storage backends must implement these methods to be compatible
-    with Memex. This allows swapping between SQLite, PostgreSQL, etc.
+    with Momex. This allows swapping between SQLite, PostgreSQL, etc.
 
     Example implementation:
         class MyBackend(StorageBackend):

@@ -1,4 +1,4 @@
-# Memex Usage
+# Momex Usage
 
 ## Setup
 
@@ -18,11 +18,11 @@ export AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
 
 ### Async API
 
-Memex is fully async. All operations use `async/await`:
+Momex is fully async. All operations use `async/await`:
 
 ```python
 import asyncio
-from memex import Memory
+from momex import Memory
 
 async def main():
     memory = Memory(collection="user:alice")
@@ -46,9 +46,9 @@ A **collection** is a named storage space for memories. Each collection has its 
 The `:` separator creates a hierarchy that enables prefix queries:
 
 ```
-company:engineering:alice  →  ./memex_data/company/engineering/alice/memory.db
-company:engineering:bob    →  ./memex_data/company/engineering/bob/memory.db
-company:marketing:charlie  →  ./memex_data/company/marketing/charlie/memory.db
+company:engineering:alice  →  ./momex_data/company/engineering/alice/memory.db
+company:engineering:bob    →  ./momex_data/company/engineering/bob/memory.db
+company:marketing:charlie  →  ./momex_data/company/marketing/charlie/memory.db
 ```
 
 Query behavior:
@@ -62,7 +62,7 @@ Query behavior:
 
 ```python
 import asyncio
-from memex import Memory
+from momex import Memory
 
 async def main():
     memory = Memory(collection="user:alice")
@@ -118,7 +118,7 @@ async def main():
 ### Query Across Collections
 
 ```python
-from memex import Memory, query
+from momex import Memory, query
 
 async def main():
     # Create memories for different users
@@ -141,7 +141,7 @@ async def main():
 Use `search()` to get raw vector search results without LLM summarization. This is useful when you want to provide context to a chat agent:
 
 ```python
-from memex import Memory, search
+from momex import Memory, search
 
 async def main():
     alice = Memory(collection="company:engineering:alice")
@@ -169,7 +169,7 @@ async def main():
 ### Manage Collections
 
 ```python
-from memex import MemoryManager
+from momex import MemoryManager
 
 manager = MemoryManager()
 
@@ -187,7 +187,7 @@ manager.rename("user:old", "user:new")
 
 ### Storage Backends
 
-Memex supports two storage backends:
+Momex supports two storage backends:
 
 | Backend | Use Case | Features |
 |---------|----------|----------|
@@ -197,13 +197,13 @@ Memex supports two storage backends:
 #### SQLite (Default)
 
 ```python
-from memex import Memory, MemexConfig, StorageConfig
+from momex import Memory, MomexConfig, StorageConfig
 
 # Default - uses SQLite
 memory = Memory(collection="user:alice")
 
 # Explicit SQLite config
-config = MemexConfig(
+config = MomexConfig(
     storage=StorageConfig(
         backend="sqlite",
         path="./my_data",
@@ -221,13 +221,13 @@ pip install asyncpg
 ```
 
 ```python
-from memex import Memory, MemexConfig, StorageConfig
+from momex import Memory, MomexConfig, StorageConfig
 
-config = MemexConfig(
+config = MomexConfig(
     storage=StorageConfig(
         backend="postgres",
-        connection_string="postgresql://user:pass@localhost/memex",
-        table_prefix="memex",  # optional, default "memex"
+        connection_string="postgresql://user:pass@localhost/momex",
+        table_prefix="momex",  # optional, default "momex"
     )
 )
 memory = Memory(collection="user:alice", config=config)
@@ -239,23 +239,23 @@ PostgreSQL backend works with all major cloud providers:
 
 | Provider | Connection String |
 |----------|------------------|
-| **AWS RDS** | `postgresql://user:pass@xxx.rds.amazonaws.com:5432/memex` |
-| **Azure** | `postgresql://user:pass@xxx.postgres.database.azure.com:5432/memex` |
+| **AWS RDS** | `postgresql://user:pass@xxx.rds.amazonaws.com:5432/momex` |
+| **Azure** | `postgresql://user:pass@xxx.postgres.database.azure.com:5432/momex` |
 | **Supabase** | `postgresql://user:pass@db.xxx.supabase.co:5432/postgres` |
-| **Neon** | `postgresql://user:pass@xxx.neon.tech/memex` |
-| **Vercel Postgres** | `postgresql://user:pass@xxx.vercel-storage.com/memex` |
+| **Neon** | `postgresql://user:pass@xxx.neon.tech/momex` |
+| **Vercel Postgres** | `postgresql://user:pass@xxx.vercel-storage.com/momex` |
 
-### MemexConfig
+### MomexConfig
 
 ```python
-from memex import Memory, MemexConfig, StorageConfig
+from momex import Memory, MomexConfig, StorageConfig
 
 # Simple SQLite config (legacy style)
-config = MemexConfig(storage_path="./my_data")
+config = MomexConfig(storage_path="./my_data")
 memory = Memory(collection="user:alice", config=config)
 
 # Or set global default
-MemexConfig.set_default(storage_path="./my_data")
+MomexConfig.set_default(storage_path="./my_data")
 alice = Memory(collection="user:alice")  # uses default
 bob = Memory(collection="user:bob")      # uses default
 ```
@@ -263,14 +263,14 @@ bob = Memory(collection="user:bob")      # uses default
 ### YAML Configuration
 
 ```yaml
-# memex_config.yaml
+# momex_config.yaml
 
 # Storage backend configuration
 storage:
   backend: sqlite  # or "postgres"
-  path: ./memex_data  # for sqlite
+  path: ./momex_data  # for sqlite
   # connection_string: postgresql://...  # for postgres
-  # table_prefix: memex  # for postgres
+  # table_prefix: momex  # for postgres
 
 # Embedding model - affects search quality and similarity scores
 # Options: text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large
@@ -296,7 +296,7 @@ fact_types:
 ```
 
 ```python
-config = MemexConfig.from_yaml("memex_config.yaml")
+config = MomexConfig.from_yaml("momex_config.yaml")
 memory = Memory(collection="user:alice", config=config)
 ```
 
@@ -313,9 +313,9 @@ memory = Memory(collection="user:alice", config=config)
 Control what types of information to extract from conversations:
 
 ```python
-from memex import FactType, MemexConfig
+from momex import FactType, MomexConfig
 
-config = MemexConfig(
+config = MomexConfig(
     fact_types=[
         FactType(
             name="Technical Skills",
@@ -375,7 +375,7 @@ All functions are async:
 
 ### Importance Scoring
 
-Memex automatically assigns importance scores to memories based on content type:
+Momex automatically assigns importance scores to memories based on content type:
 
 | Category | Importance | Examples |
 |----------|------------|----------|

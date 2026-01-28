@@ -1,6 +1,6 @@
-"""Memex Quick Start Example.
+"""Momex Quick Start Example.
 
-This example demonstrates the basic usage of Memex for structured memory.
+This example demonstrates the basic usage of Momex for structured memory.
 
 Prerequisites:
     Set LLM via environment variables:
@@ -11,11 +11,11 @@ Prerequisites:
         export AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
 
 Run:
-    python examples/memex/quickstart.py
+    python examples/momex/quickstart.py
 """
 
 import asyncio
-from memex import Memory
+from momex import Memory
 
 
 async def main():

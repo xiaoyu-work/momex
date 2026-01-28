@@ -1,4 +1,4 @@
-"""SQLite storage backend for Memex.
+"""SQLite storage backend for Momex.
 
 A standalone SQLite implementation that stores memories with embeddings.
 """

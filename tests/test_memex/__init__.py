@@ -1,1 +1,0 @@
-"""Memex tests package."""

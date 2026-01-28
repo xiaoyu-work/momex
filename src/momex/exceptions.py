@@ -1,4 +1,4 @@
-"""Memex custom exceptions.
+"""Momex custom exceptions.
 
 Structured exception classes with error codes, suggestions, and debug information
 for better error handling in commercial applications.
@@ -19,12 +19,12 @@ from __future__ import annotations
 from typing import Any
 
 
-class MemexError(Exception):
-    """Base exception for all Memex-related errors.
+class MomexError(Exception):
+    """Base exception for all Momex-related errors.
 
     Attributes:
         message: Human-readable error message.
-        error_code: Unique error identifier for programmatic handling (e.g., "MEMEX_001").
+        error_code: Unique error identifier for programmatic handling (e.g., "MOMEX_001").
         details: Additional context about the error.
         suggestion: User-friendly suggestion for resolving the error.
     """
@@ -32,7 +32,7 @@ class MemexError(Exception):
     def __init__(
         self,
         message: str,
-        error_code: str = "MEMEX_000",
+        error_code: str = "MOMEX_000",
         details: dict[str, Any] | None = None,
         suggestion: str | None = None,
     ) -> None:
@@ -58,7 +58,7 @@ class MemexError(Exception):
         return " | ".join(parts)
 
 
-class CollectionNotFoundError(MemexError):
+class CollectionNotFoundError(MomexError):
     """Raised when a collection does not exist.
 
     Example:
@@ -76,13 +76,13 @@ class CollectionNotFoundError(MemexError):
     ) -> None:
         super().__init__(
             message=message or f"Collection '{collection}' not found.",
-            error_code="MEMEX_101",
+            error_code="MOMEX_101",
             details={"collection": collection},
             suggestion=suggestion or "Check the collection name or use MemoryManager.list_collections() to see available collections.",
         )
 
 
-class MemoryNotFoundError(MemexError):
+class MemoryNotFoundError(MomexError):
     """Raised when a memory item does not exist.
 
     Example:
@@ -102,19 +102,19 @@ class MemoryNotFoundError(MemexError):
 
         super().__init__(
             message=message or f"Memory with ID '{memory_id}' not found.",
-            error_code="MEMEX_102",
+            error_code="MOMEX_102",
             details=details,
             suggestion=suggestion or "Check the memory ID or use search() to find memories.",
         )
 
 
-class ConfigurationError(MemexError):
+class ConfigurationError(MomexError):
     """Raised when configuration is invalid or missing.
 
     Example:
         raise ConfigurationError(
             message="Invalid YAML format",
-            config_path="memex_config.yaml"
+            config_path="momex_config.yaml"
         )
     """
 
@@ -130,13 +130,13 @@ class ConfigurationError(MemexError):
 
         super().__init__(
             message=message,
-            error_code="MEMEX_201",
+            error_code="MOMEX_201",
             details=details,
             suggestion=suggestion or "Check your configuration file or environment variables.",
         )
 
 
-class ValidationError(MemexError):
+class ValidationError(MomexError):
     """Raised when input validation fails.
 
     Example:
@@ -161,20 +161,20 @@ class ValidationError(MemexError):
 
         super().__init__(
             message=message,
-            error_code="MEMEX_301",
+            error_code="MOMEX_301",
             details=details,
             suggestion=suggestion,
         )
 
 
-class StorageError(MemexError):
+class StorageError(MomexError):
     """Raised when database or storage operations fail.
 
     Example:
         raise StorageError(
             message="Failed to write to database",
             operation="add",
-            db_path="memex_data/user/alice/memory.db"
+            db_path="momex_data/user/alice/memory.db"
         )
     """
 
@@ -193,13 +193,13 @@ class StorageError(MemexError):
 
         super().__init__(
             message=message,
-            error_code="MEMEX_401",
+            error_code="MOMEX_401",
             details=details,
             suggestion=suggestion or "Check disk space and file permissions.",
         )
 
 
-class EmbeddingError(MemexError):
+class EmbeddingError(MomexError):
     """Raised when embedding generation fails.
 
     Example:
@@ -221,13 +221,13 @@ class EmbeddingError(MemexError):
 
         super().__init__(
             message=message,
-            error_code="MEMEX_501",
+            error_code="MOMEX_501",
             details=details,
             suggestion=suggestion or "Check your OPENAI_API_KEY or AZURE_OPENAI_API_KEY environment variable.",
         )
 
 
-class LLMError(MemexError):
+class LLMError(MomexError):
     """Raised when LLM operations fail (fact extraction, query, etc.).
 
     Example:
@@ -249,13 +249,13 @@ class LLMError(MemexError):
 
         super().__init__(
             message=message,
-            error_code="MEMEX_502",
+            error_code="MOMEX_502",
             details=details,
             suggestion=suggestion or "Check your LLM configuration (OPENAI_API_KEY, OPENAI_MODEL).",
         )
 
 
-class ExportError(MemexError):
+class ExportError(MomexError):
     """Raised when export operations fail.
 
     Example:
@@ -277,7 +277,7 @@ class ExportError(MemexError):
 
         super().__init__(
             message=message,
-            error_code="MEMEX_601",
+            error_code="MOMEX_601",
             details=details,
             suggestion=suggestion or "Check the export path and file permissions.",
         )

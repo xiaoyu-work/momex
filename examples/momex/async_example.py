@@ -1,4 +1,4 @@
-"""Memex Async API Example.
+"""Momex Async API Example.
 
 This example demonstrates using the async API for better performance
 when integrating with async frameworks like FastAPI, aiohttp, etc.
@@ -6,7 +6,7 @@ when integrating with async frameworks like FastAPI, aiohttp, etc.
 
 import asyncio
 
-from memex import Memory, query_async
+from momex import Memory, query_async
 
 
 async def main():

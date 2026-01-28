@@ -1,4 +1,4 @@
-"""Memex Conversation Example.
+"""Momex Conversation Example.
 
 This example demonstrates how to store memories from conversations
 using the add_conversation() method.
@@ -9,12 +9,12 @@ Prerequisites:
 """
 
 import asyncio
-from memex import Memory, MemexConfig
+from momex import Memory, MomexConfig
 
 
 async def main():
     # Configure storage
-    config = MemexConfig(storage_path="./conversation_data")
+    config = MomexConfig(storage_path="./conversation_data")
 
     # Create memory for a user
     memory = Memory(collection="user:alice", config=config)

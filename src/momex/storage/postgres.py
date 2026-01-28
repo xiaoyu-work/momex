@@ -1,4 +1,4 @@
-"""PostgreSQL storage backend for Memex.
+"""PostgreSQL storage backend for Momex.
 
 Uses pgvector extension for efficient vector similarity search.
 Compatible with AWS RDS, Azure PostgreSQL, Supabase, Neon, etc.
@@ -21,27 +21,27 @@ class PostgresBackend(StorageBackend):
 
     Args:
         connection_string: PostgreSQL connection string.
-        table_prefix: Prefix for table names (default "memex").
+        table_prefix: Prefix for table names (default "momex").
         embedding_dim: Dimension of embedding vectors (default 1536).
 
     Example:
         backend = PostgresBackend(
-            connection_string="postgresql://user:pass@localhost/memex"
+            connection_string="postgresql://user:pass@localhost/momex"
         )
         await backend.initialize()
         record_id = await backend.add("Hello", embedding=[0.1, 0.2, ...])
 
     Cloud compatibility:
-        - AWS RDS: postgresql://user:pass@xxx.rds.amazonaws.com:5432/memex
-        - Azure: postgresql://user:pass@xxx.postgres.database.azure.com:5432/memex
+        - AWS RDS: postgresql://user:pass@xxx.rds.amazonaws.com:5432/momex
+        - Azure: postgresql://user:pass@xxx.postgres.database.azure.com:5432/momex
         - Supabase: postgresql://user:pass@db.xxx.supabase.co:5432/postgres
-        - Neon: postgresql://user:pass@xxx.neon.tech/memex
+        - Neon: postgresql://user:pass@xxx.neon.tech/momex
     """
 
     def __init__(
         self,
         connection_string: str,
-        table_prefix: str = "memex",
+        table_prefix: str = "momex",
         embedding_dim: int = 1536,
     ) -> None:
         self.connection_string = connection_string

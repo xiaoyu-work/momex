@@ -1,4 +1,4 @@
-"""Memex prompts for fact extraction and memory management."""
+"""Momex prompts for fact extraction and memory management."""
 
 from __future__ import annotations
 

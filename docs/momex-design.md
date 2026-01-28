@@ -1,8 +1,8 @@
-# Memex Design
+# Momex Design
 
 ## Overview
 
-Memex is a high-level memory API for AI agents, built on TypeAgent's Structured RAG. It provides:
+Momex is a high-level memory API for AI agents, built on TypeAgent's Structured RAG. It provides:
 
 - **Collections**: Named storage spaces for organizing memories by user, team, or purpose
 - **Hierarchical organization**: Use `:` separator to create nested collections
@@ -13,7 +13,7 @@ Memex is a high-level memory API for AI agents, built on TypeAgent's Structured 
 
 ```
 ┌─────────────────┐
-│   Memex API     │  Memory, MemoryManager, query()
+│   Momex API     │  Memory, MemoryManager, query()
 ├─────────────────┤
 │   TypeAgent     │  Structured RAG, Embeddings, Knowledge Extraction
 ├─────────────────┤
@@ -27,9 +27,9 @@ Collection names map to directory structure. The `:` separator creates subdirect
 
 | Collection Name | Storage Path |
 |-----------------|--------------|
-| `alice` | `./memex_data/alice/memory.db` |
-| `user:alice` | `./memex_data/user/alice/memory.db` |
-| `company:engineering:alice` | `./memex_data/company/engineering/alice/memory.db` |
+| `alice` | `./momex_data/alice/memory.db` |
+| `user:alice` | `./momex_data/user/alice/memory.db` |
+| `company:engineering:alice` | `./momex_data/company/engineering/alice/memory.db` |
 
 This enables prefix-based queries:
 - `query("company:engineering:alice", ...)` → searches only alice
@@ -108,14 +108,14 @@ Controls how similar an existing memory must be to consider it for UPDATE/DELETE
 
 ## Soft Delete
 
-TypeAgent uses append-only storage by design. Memex implements soft delete:
+TypeAgent uses append-only storage by design. Momex implements soft delete:
 
 - Deleted message IDs stored in `deleted.json` alongside `memory.db`
 - Deleted memories filtered out in queries, searches, exports
 - Can restore deleted memories via `restore(memory_id)`
 
 ```
-./memex_data/user/alice/
+./momex_data/user/alice/
 ├── memory.db      # TypeAgent data (append-only)
 └── deleted.json   # Soft delete records
 ```

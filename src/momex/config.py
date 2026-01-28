@@ -1,4 +1,4 @@
-"""Memex configuration module."""
+"""Momex configuration module."""
 
 from __future__ import annotations
 
@@ -59,18 +59,18 @@ class StorageConfig:
         backend: Storage backend type ("sqlite" or "postgres").
         path: Path for SQLite database (used when backend="sqlite").
         connection_string: PostgreSQL connection string (used when backend="postgres").
-        table_prefix: Table name prefix for PostgreSQL (default "memex").
+        table_prefix: Table name prefix for PostgreSQL (default "momex").
 
     Example YAML:
         # SQLite (default)
         storage:
           backend: sqlite
-          path: ./memex_data
+          path: ./momex_data
 
         # PostgreSQL
         storage:
           backend: postgres
-          connection_string: postgresql://user:pass@localhost/memex
+          connection_string: postgresql://user:pass@localhost/momex
 
         # Supabase
         storage:
@@ -79,9 +79,9 @@ class StorageConfig:
     """
 
     backend: Literal["sqlite", "postgres"] = "sqlite"
-    path: str = "./memex_data"
+    path: str = "./momex_data"
     connection_string: str | None = None
-    table_prefix: str = "memex"
+    table_prefix: str = "momex"
 
     def __post_init__(self) -> None:
         """Validate configuration."""
@@ -93,8 +93,8 @@ class StorageConfig:
 
 
 @dataclass
-class MemexConfig:
-    """Configuration for Memex memory system.
+class MomexConfig:
+    """Configuration for Momex memory system.
 
     LLM configuration is handled by TypeAgent via environment variables:
         - OPENAI_API_KEY or AZURE_OPENAI_API_KEY
@@ -112,22 +112,22 @@ class MemexConfig:
 
     Example:
         # Simple SQLite config
-        config = MemexConfig()
+        config = MomexConfig()
 
         # PostgreSQL config
-        config = MemexConfig(
+        config = MomexConfig(
             storage=StorageConfig(
                 backend="postgres",
-                connection_string="postgresql://user:pass@localhost/memex"
+                connection_string="postgresql://user:pass@localhost/momex"
             )
         )
 
         # From YAML
-        config = MemexConfig.from_yaml("memex_config.yaml")
+        config = MomexConfig.from_yaml("momex_config.yaml")
     """
 
     # Class-level default config
-    _default: "MemexConfig | None" = None
+    _default: "MomexConfig | None" = None
 
     # Storage configuration
     storage: StorageConfig = field(default_factory=StorageConfig)
@@ -154,8 +154,8 @@ class MemexConfig:
             self.storage = StorageConfig(backend="sqlite", path=self.storage_path)
 
         # Environment variable override
-        env_storage = os.getenv("MEMEX_STORAGE_PATH")
-        if env_storage and self.storage.path == "./memex_data":
+        env_storage = os.getenv("MOMEX_STORAGE_PATH")
+        if env_storage and self.storage.path == "./momex_data":
             self.storage = StorageConfig(backend="sqlite", path=env_storage)
 
         # Auto-detect embedding dimension from model
@@ -177,16 +177,16 @@ class MemexConfig:
         return self.storage.path
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> MemexConfig:
+    def from_yaml(cls, path: str | Path) -> MomexConfig:
         """Create configuration from a YAML file.
 
         YAML format:
             # Storage backend configuration
             storage:
               backend: sqlite  # or postgres
-              path: ./memex_data  # for sqlite
+              path: ./momex_data  # for sqlite
               connection_string: postgresql://...  # for postgres
-              table_prefix: memex  # for postgres
+              table_prefix: momex  # for postgres
 
             # Embedding model configuration
             embedding_model: text-embedding-3-small
@@ -204,7 +204,7 @@ class MemexConfig:
             path: Path to the YAML configuration file.
 
         Returns:
-            MemexConfig instance.
+            MomexConfig instance.
         """
         import yaml
 
@@ -254,7 +254,7 @@ class MemexConfig:
         fact_types: list[FactType] | None = None,
         similarity_threshold: float = 0.3,
         embedding_model: str = "text-embedding-3-small",
-    ) -> "MemexConfig":
+    ) -> "MomexConfig":
         """Set the global default configuration.
 
         Args:
@@ -265,12 +265,12 @@ class MemexConfig:
             embedding_model: OpenAI embedding model name.
 
         Returns:
-            The created default MemexConfig instance.
+            The created default MomexConfig instance.
         """
         if storage is None:
             storage = StorageConfig(
                 backend="sqlite",
-                path=storage_path or "./memex_data",
+                path=storage_path or "./momex_data",
             )
 
         cls._default = cls(
@@ -282,13 +282,13 @@ class MemexConfig:
         return cls._default
 
     @classmethod
-    def get_default(cls) -> "MemexConfig":
+    def get_default(cls) -> "MomexConfig":
         """Get the global default configuration.
 
         If no default has been set, creates one with default values.
 
         Returns:
-            The default MemexConfig instance.
+            The default MomexConfig instance.
         """
         if cls._default is None:
             cls._default = cls()

@@ -1,15 +1,15 @@
-"""Memex Hierarchical Query Example.
+"""Momex Hierarchical Query Example.
 
 This example demonstrates how to use hierarchical collections
 and prefix queries for personal and team assistants.
 """
 
-from memex import Memory, MemoryManager, MemexConfig, query
+from momex import Memory, MemoryManager, MomexConfig, query
 
 
 def main():
     # Configure storage location
-    config = MemexConfig(
+    config = MomexConfig(
         storage_path="./hierarchical_data",
     )
 

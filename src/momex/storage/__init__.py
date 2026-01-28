@@ -1,20 +1,20 @@
-"""Memex storage backends.
+"""Momex storage backends.
 
-Provides pluggable storage backends for Memex memory system.
+Provides pluggable storage backends for Momex memory system.
 
 Available backends:
     - SQLiteBackend: Local SQLite database (default, uses TypeAgent)
     - PostgresBackend: PostgreSQL with pgvector extension
 
 Example:
-    >>> from memex import MemexConfig
-    >>> from memex.storage import PostgresBackend
+    >>> from momex import MomexConfig
+    >>> from momex.storage import PostgresBackend
     >>>
     >>> # Use PostgreSQL backend
-    >>> config = MemexConfig(
+    >>> config = MomexConfig(
     ...     storage=StorageConfig(
     ...         backend="postgres",
-    ...         connection_string="postgresql://user:pass@localhost/memex"
+    ...         connection_string="postgresql://user:pass@localhost/momex"
     ...     )
     ... )
 """

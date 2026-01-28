@@ -6,9 +6,9 @@
 - [High-level API](high-level-api.md)
 - [Environment Variables](env-vars.md)
 
-## Memex (Simplified Multi-Tenant API)
+## Momex (Simplified Multi-Tenant API)
 
-- [Memex Documentation](memex.md) - Simplified API with multi-tenant support
+- [Momex Documentation](momex.md) - Simplified API with multi-tenant support
 
 ## Advanced
 

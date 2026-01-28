@@ -1,27 +1,27 @@
-"""Tests for Memex Memory, MemoryManager, and prefix query functions."""
+"""Tests for Momex Memory, MemoryManager, and prefix query functions."""
 
 import os
 import tempfile
 
 import pytest
 
-from memex import AddResult, Memory, MemexConfig, MemoryItem, MemoryManager
+from momex import AddResult, Memory, MomexConfig, MemoryItem, MemoryManager
 
 
-class TestMemexConfig:
-    """Tests for MemexConfig."""
+class TestMomexConfig:
+    """Tests for MomexConfig."""
 
     def test_default_config(self):
         """Test default configuration values."""
-        config = MemexConfig()
-        assert config.storage_path == "./memex_data"
+        config = MomexConfig()
+        assert config.storage_path == "./momex_data"
         assert config.llm_provider == "openai"
         assert config.auto_extract is True
         assert config.db_name == "memory.db"
 
     def test_custom_config(self):
         """Test custom configuration."""
-        config = MemexConfig(
+        config = MomexConfig(
             storage_path="/custom/path",
             llm_provider="azure",
             llm_model="gpt-4",
@@ -39,7 +39,7 @@ class TestMemory:
     def test_memory_init(self):
         """Test Memory initialization."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
             memory = Memory(collection="company:engineering:alice", config=config)
             assert memory.collection == "company:engineering:alice"
             assert "company" in memory.db_path
@@ -50,7 +50,7 @@ class TestMemory:
     def test_memory_db_path_simple(self):
         """Test Memory with simple collection name (no hierarchy)."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
             memory = Memory(collection="alice", config=config)
             assert memory.db_path.endswith("memory.db")
             assert "alice" in memory.db_path
@@ -58,7 +58,7 @@ class TestMemory:
     def test_memory_db_path_hierarchical(self):
         """Test Memory with hierarchical collection name."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
 
             # Two levels
             m1 = Memory(collection="company:alice", config=config)
@@ -84,7 +84,7 @@ class TestMemoryManager:
     def test_manager_list_empty(self):
         """Test listing collections when empty."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
             manager = MemoryManager(config=config)
 
             collections = manager.list_collections()
@@ -93,7 +93,7 @@ class TestMemoryManager:
     def test_manager_exists(self):
         """Test checking if collection exists."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
             manager = MemoryManager(config=config)
 
             # Manually create collection
@@ -109,7 +109,7 @@ class TestMemoryManager:
     def test_manager_delete(self):
         """Test deleting a collection."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
             manager = MemoryManager(config=config)
 
             # Create collection
@@ -133,7 +133,7 @@ class TestMemoryManager:
     def test_manager_rename(self):
         """Test renaming a collection."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
             manager = MemoryManager(config=config)
 
             # Create collection
@@ -152,7 +152,7 @@ class TestMemoryManager:
     def test_manager_info(self):
         """Test getting collection info."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
             manager = MemoryManager(config=config)
 
             # Create collection
@@ -170,7 +170,7 @@ class TestMemoryManager:
     def test_manager_list_collections(self):
         """Test listing multiple collections."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
             manager = MemoryManager(config=config)
 
             # Create hierarchical collections
@@ -194,7 +194,7 @@ class TestMemoryManager:
     def test_manager_list_collections_with_prefix(self):
         """Test listing collections with prefix filter."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
             manager = MemoryManager(config=config)
 
             # Create hierarchical collections
@@ -247,7 +247,7 @@ class TestMemoryAsync:
     async def test_add_and_query(self):
         """Test adding and querying memories."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
             memory = Memory(collection="company:engineering:alice", config=config)
 
             result = await memory.add_async(
@@ -264,7 +264,7 @@ class TestMemoryAsync:
     async def test_search(self):
         """Test searching memories."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
             memory = Memory(collection="company:engineering:alice", config=config)
 
             await memory.add_async("Alice is a software engineer")
@@ -278,7 +278,7 @@ class TestMemoryAsync:
     async def test_stats(self):
         """Test memory statistics."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
             memory = Memory(collection="company:engineering:alice", config=config)
 
             await memory.add_async("Test content")
@@ -295,10 +295,10 @@ class TestPrefixQueryAsync:
     @pytest.mark.skip(reason="Requires LLM API key")
     async def test_query_single_collection(self):
         """Test querying a single collection by exact prefix."""
-        from memex import query_async
+        from momex import query_async
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
 
             # Add memory
             memory = Memory(collection="company:engineering:alice", config=config)
@@ -311,10 +311,10 @@ class TestPrefixQueryAsync:
     @pytest.mark.skip(reason="Requires LLM API key")
     async def test_query_prefix_multiple(self):
         """Test querying multiple collections by prefix."""
-        from memex import query_async
+        from momex import query_async
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MemexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage_path=tmpdir)
 
             # Add memories to different collections
             alice = Memory(collection="company:engineering:alice", config=config)

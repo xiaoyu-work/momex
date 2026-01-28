@@ -2,16 +2,16 @@
 
 I've been keeping an eye on this repo for a while. I'm also personally interested in personal assistant agents, and I've been trying to find best practices for memory. Structured RAG is a great design, but since this is an experimental project, the feature set isn't complete yet. So I forked the original repo and added more features, aiming to make it work for more general use cases and projects.
 
-This fork adds **Memex** - a simplified, collection-based API wrapper for TypeAgent's Structured RAG.
+This fork adds **Momex** - a simplified, collection-based API wrapper for TypeAgent's Structured RAG.
 
 ## What's New
 
-- `src/memex/` - New high-level API package
-- `docs/memex.md` - Memex documentation
-- `tests/test_memex/` - Unit tests
-- `examples/memex/` - Usage examples
+- `src/momex/` - New high-level API package
+- `docs/momex.md` - Momex documentation
+- `tests/test_momex/` - Unit tests
+- `examples/momex/` - Usage examples
 
-## Memex Features
+## Momex Features
 
 | Feature | Description |
 |---------|-------------|
@@ -24,7 +24,7 @@ This fork adds **Memex** - a simplified, collection-based API wrapper for TypeAg
 ## Quick Start
 
 ```python
-from memex import Memory, query
+from momex import Memory, query
 
 # Add memories with hierarchical identity
 alice = Memory(collection="company:engineering:alice")
@@ -41,7 +41,7 @@ answer = query("company", "Who likes Python?")
 # Searches entire company
 ```
 
-See [docs/memex.md](docs/memex.md) for full documentation.
+See [docs/momex.md](docs/momex.md) for full documentation.
 
 ---
 

@@ -1,6 +1,6 @@
-# Memex
+# Momex
 
-Memex is a high-level memory API for AI agents, built on TypeAgent's Structured RAG.
+Momex is a high-level memory API for AI agents, built on TypeAgent's Structured RAG.
 
 ## Features
 
@@ -12,13 +12,13 @@ Memex is a high-level memory API for AI agents, built on TypeAgent's Structured 
 
 ## Documentation
 
-- [Usage Guide](memex-usage.md) - How to use Memex
-- [Design Document](memex-design.md) - Architecture and internals
+- [Usage Guide](momex-usage.md) - How to use Momex
+- [Design Document](momex-design.md) - Architecture and internals
 
 ## Quick Example
 
 ```python
-from memex import Memory, query
+from momex import Memory, query
 
 # Create memory for a user
 memory = Memory(collection="company:engineering:alice")

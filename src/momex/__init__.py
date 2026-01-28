@@ -1,11 +1,11 @@
-"""Memex - Structured RAG Memory for AI Agents.
+"""Momex - Structured RAG Memory for AI Agents.
 
 A high-level async API for structured knowledge memory, built on TypeAgent's
 Structured RAG technology.
 
 Example:
     >>> import asyncio
-    >>> from memex import Memory, query
+    >>> from momex import Memory, query
     >>>
     >>> async def main():
     ...     # Create memory with hierarchical collection name
@@ -40,19 +40,19 @@ Configuration:
         export AZURE_OPENAI_API_KEY=xxx
         export AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
 
-    Memex-specific config (storage path, fact types) can be set via MemexConfig:
-    >>> from memex import MemexConfig
-    >>> MemexConfig.set_default(storage_path="./my_data")
+    Momex-specific config (storage path, fact types) can be set via MomexConfig:
+    >>> from momex import MomexConfig
+    >>> MomexConfig.set_default(storage_path="./my_data")
 """
 
-from .config import DEFAULT_FACT_TYPES, FactType, MemexConfig, StorageConfig
+from .config import DEFAULT_FACT_TYPES, FactType, MomexConfig, StorageConfig
 from .exceptions import (
     CollectionNotFoundError,
     ConfigurationError,
     EmbeddingError,
     ExportError,
     LLMError,
-    MemexError,
+    MomexError,
     MemoryNotFoundError,
     StorageError,
     ValidationError,
@@ -71,7 +71,7 @@ __all__ = [
     # Core classes
     "Memory",
     "MemoryManager",
-    "MemexConfig",
+    "MomexConfig",
     "StorageConfig",
     "FactType",
     "DEFAULT_FACT_TYPES",
@@ -85,7 +85,7 @@ __all__ = [
     "search",
     "stats",
     # Exceptions
-    "MemexError",
+    "MomexError",
     "CollectionNotFoundError",
     "MemoryNotFoundError",
     "ConfigurationError",

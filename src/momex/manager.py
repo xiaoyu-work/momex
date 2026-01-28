@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .config import MemexConfig
+from .config import MomexConfig
 from .exceptions import CollectionNotFoundError, ValidationError
 
 
@@ -33,20 +33,20 @@ class MemoryManager:
     """Manage memory collections (list, delete, rename, info).
 
     Example:
-        >>> from memex import MemoryManager
+        >>> from momex import MemoryManager
         >>> manager = MemoryManager()
         >>> collections = manager.list_collections()
         >>> manager.delete("user:old_user")
         >>> manager.rename("user:alice", "user:alice_backup")
     """
 
-    def __init__(self, config: MemexConfig | None = None) -> None:
+    def __init__(self, config: MomexConfig | None = None) -> None:
         """Initialize MemoryManager.
 
         Args:
             config: Configuration object. If None, uses default config.
         """
-        self.config = config or MemexConfig()
+        self.config = config or MomexConfig()
         self._storage_path = Path(self.config.storage.path)
 
     def list_collections(self, prefix: str | None = None) -> list[str]:

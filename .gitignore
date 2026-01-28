@@ -1,5 +1,6 @@
 # Editor settings
 .vscode
+.claude/
 
 # Python
 __pycache__
@@ -42,6 +43,6 @@ pytest.local.ini
 # Monty Python demo
 /examples/testdata/MP
 
-# Memex
-memex_data/
+# Momex
+momex_data/
 test.py

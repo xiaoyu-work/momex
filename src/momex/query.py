@@ -1,11 +1,11 @@
-"""Memex prefix-based query functions."""
+"""Momex prefix-based query functions."""
 
 from __future__ import annotations
 
 import asyncio
 from typing import Any
 
-from .config import MemexConfig
+from .config import MomexConfig
 from .manager import MemoryManager
 from .memory import Memory, MemoryItem
 
@@ -16,7 +16,7 @@ MAX_CONCURRENT_QUERIES = 5
 async def query(
     prefix: str,
     question: str,
-    config: MemexConfig | None = None,
+    config: MomexConfig | None = None,
 ) -> str:
     """Query memories across all collections matching a prefix.
 
@@ -29,7 +29,7 @@ async def query(
     Returns:
         Combined answer string based on stored memories.
     """
-    config = config or MemexConfig.get_default()
+    config = config or MomexConfig.get_default()
     manager = MemoryManager(config=config)
 
     # Find all collections matching prefix
@@ -71,7 +71,7 @@ async def search(
     query_text: str,
     limit: int = 10,
     threshold: float | None = None,
-    config: MemexConfig | None = None,
+    config: MomexConfig | None = None,
 ) -> list[MemoryItem]:
     """Search memories across all collections matching a prefix using vector similarity.
 
@@ -91,7 +91,7 @@ async def search(
     Returns:
         List of MemoryItem objects from all matching collections, sorted by score.
     """
-    config = config or MemexConfig.get_default()
+    config = config or MomexConfig.get_default()
     manager = MemoryManager(config=config)
 
     # Find all collections matching prefix
@@ -130,7 +130,7 @@ async def search(
 
 async def stats(
     prefix: str,
-    config: MemexConfig | None = None,
+    config: MomexConfig | None = None,
 ) -> dict[str, Any]:
     """Get statistics for all collections matching a prefix.
 
@@ -141,7 +141,7 @@ async def stats(
     Returns:
         Dict with stats per collection and totals.
     """
-    config = config or MemexConfig.get_default()
+    config = config or MomexConfig.get_default()
     manager = MemoryManager(config=config)
 
     # Find all collections matching prefix
