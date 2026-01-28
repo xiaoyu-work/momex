@@ -110,9 +110,13 @@ class Memory:
         from typeagent.knowpro.conversation_base import ConversationBase
         from typeagent.knowpro.convsettings import ConversationSettings
         from typeagent.knowpro.universal_message import ConversationMessage
+        from typeagent.knowpro.convknowledge import set_llm_config
 
         # Validate config before use
         self.config.validate()
+
+        # Set LLM config for TypeAgent (used by KnowledgeExtractor)
+        set_llm_config(self.config.get_llm_config())
 
         if self.config.is_postgres:
             storage_provider = await self._create_postgres_provider()
@@ -139,8 +143,8 @@ class Memory:
         # Create storage path from collection name
         db_path = _collection_to_db_path(
             self.collection,
-            self.config.storage.path,
-            self.config.db_name,
+            self.config.storage_path,
+            "memory.db",
         )
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -491,8 +495,6 @@ class Memory:
         Returns:
             Number of contradicting memories removed.
         """
-        from typeagent.aitools import chat
-
         # Search for potentially related memories
         results = await self.search(new_content, limit=20)
 
@@ -523,9 +525,10 @@ Only identify clear contradictions (e.g., "likes X" vs "doesn't like X"), not me
 Response:"""
 
         try:
-            model = chat.ChatModel()
-            response = await model.get_completion(prompt)
-            response_text = response.strip().lower()
+            # Use TypeAgent's LLM abstraction
+            llm = self.config.create_llm()
+            response = await llm.complete(prompt, max_tokens=100)
+            response_text = response.content.strip().lower()
 
             if response_text == "none" or not response_text:
                 return 0
@@ -670,8 +673,8 @@ Response:"""
             return self.config.postgres.url
         return str(_collection_to_db_path(
             self.collection,
-            self.config.storage.path,
-            self.config.db_name,
+            self.config.storage_path,
+            "memory.db",
         ))
 
     @property

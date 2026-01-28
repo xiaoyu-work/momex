@@ -1,14 +1,18 @@
-# Copyright (c) Microsoft Corporation.
+# Copyright (c) Xiaoyu Zhang.
 # Licensed under the MIT License.
 
 import asyncio
 from dataclasses import dataclass, field
 import os
+from typing import TYPE_CHECKING
 
 import typechat
 
 from . import kplib
 from ..aitools import auth
+
+if TYPE_CHECKING:
+    from ..llm import LLMConfig
 
 # TODO: Move ModelWrapper and create_typechat_model() to aitools package.
 
@@ -16,6 +20,27 @@ from ..aitools import auth
 # TODO: Make these parameters that can be configured (e.g. from command line).
 DEFAULT_MAX_RETRY_ATTEMPTS = 0
 DEFAULT_TIMEOUT_SECONDS = 25
+
+# Global LLM config - can be set by MomexConfig
+_global_llm_config: "LLMConfig | None" = None
+
+
+def set_llm_config(config: "LLMConfig") -> None:
+    """Set the global LLM config for TypeAgent.
+
+    This should be called before creating any KnowledgeExtractor.
+    Typically called by Momex when initializing Memory.
+
+    Args:
+        config: LLM configuration from MomexConfig.
+    """
+    global _global_llm_config
+    _global_llm_config = config
+
+
+def get_llm_config() -> "LLMConfig | None":
+    """Get the global LLM config."""
+    return _global_llm_config
 
 
 class ModelWrapper(typechat.TypeChatLanguageModel):
@@ -43,7 +68,25 @@ class ModelWrapper(typechat.TypeChatLanguageModel):
         return await self.base_model.complete(prompt)
 
 
-def create_typechat_model() -> typechat.TypeChatLanguageModel:
+def create_typechat_model(config: "LLMConfig | None" = None) -> typechat.TypeChatLanguageModel:
+    """Create a TypeChat language model.
+
+    Args:
+        config: Optional LLM config. If provided, uses our LLM abstraction.
+                If None, checks global config, then falls back to env vars.
+
+    Returns:
+        TypeChatLanguageModel instance.
+    """
+    # Use provided config, or global config, or fall back to env vars
+    config = config or _global_llm_config
+
+    if config is not None:
+        # Use our LLM abstraction with TypeChat adapter
+        from ..llm import create_typechat_model_from_config
+        return create_typechat_model_from_config(config)
+
+    # Legacy: fall back to environment variables
     env: dict[str, str | None] = dict(os.environ)
     key_name = "AZURE_OPENAI_API_KEY"
     key = env.get(key_name)

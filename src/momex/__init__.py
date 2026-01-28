@@ -6,37 +6,47 @@ TermIndex) for entity/action/topic extraction and search.
 
 Example:
     >>> import asyncio
-    >>> from momex import Memory, query
+    >>> from momex import Memory, MomexConfig
     >>>
     >>> async def main():
-    ...     # Create memory with hierarchical collection name
-    ...     memory = Memory(collection="momex:engineering:xiaoyuzhang")
+    ...     # Configure LLM (required)
+    ...     config = MomexConfig(
+    ...         provider="openai",  # openai, azure, anthropic, deepseek, qwen
+    ...         model="gpt-4o",
+    ...         api_key="sk-xxx",
+    ...     )
+    ...
+    ...     # Create memory
+    ...     memory = Memory(collection="user:xiaoyuzhang", config=config)
     ...
     ...     # Add memories - TypeAgent extracts entities, actions, topics
     ...     await memory.add("I like Python programming")
     ...
-    ...     # Query single collection
+    ...     # Query
     ...     answer = await memory.query("What does the user like?")
-    ...
-    ...     # Query with prefix (searches all matching collections)
-    ...     answer = await query("momex:engineering", "What languages do people use?")
     ...
     >>> asyncio.run(main())
 
 Configuration:
-    LLM is configured via TypeAgent's environment variables:
-        export OPENAI_API_KEY=sk-xxx
-        export OPENAI_MODEL=gpt-4o
-        # or for Azure:
-        export AZURE_OPENAI_API_KEY=xxx
-        export AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
+    LLM can be configured via code, YAML, or environment variables.
+    The same config is used for both TypeAgent (knowledge extraction) and
+    Momex (contradiction detection).
 
-    Momex-specific config (storage path) can be set via MomexConfig:
-    >>> from momex import MomexConfig
-    >>> MomexConfig.set_default(storage_path="./my_data")
+    Supported providers: openai, azure, anthropic, deepseek, qwen
+
+    Code:
+        config = MomexConfig(provider="openai", model="gpt-4o", api_key="sk-xxx")
+
+    YAML:
+        config = MomexConfig.from_yaml("config.yaml")
+
+    Environment variables:
+        export MOMEX_PROVIDER=openai
+        export MOMEX_MODEL=gpt-4o
+        export MOMEX_API_KEY=sk-xxx
 """
 
-from .config import MomexConfig, StorageConfig, PostgresConfig, StorageBackend
+from .config import MomexConfig, PostgresConfig
 from .exceptions import (
     CollectionNotFoundError,
     ConfigurationError,
@@ -56,9 +66,7 @@ __all__ = [
     "Memory",
     "MemoryManager",
     "MomexConfig",
-    "StorageConfig",
     "PostgresConfig",
-    "StorageBackend",
     # Data classes
     "AddResult",
     "SearchItem",

@@ -4,14 +4,6 @@
 
 ```bash
 pip install -e .
-
-# LLM configuration (via TypeAgent)
-export OPENAI_API_KEY=your-key
-export OPENAI_MODEL=gpt-4o
-
-# Or for Azure:
-export AZURE_OPENAI_API_KEY=your-key
-export AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
 ```
 
 ## Core Concepts
@@ -22,10 +14,17 @@ Momex is fully async. All operations use `async/await`:
 
 ```python
 import asyncio
-from momex import Memory
+from momex import Memory, MomexConfig
 
 async def main():
-    memory = Memory(collection="user:xiaoyuzhang")
+    # Configure LLM (required)
+    config = MomexConfig(
+        provider="openai",
+        model="gpt-4o",
+        api_key="sk-xxx",
+    )
+
+    memory = Memory(collection="user:xiaoyuzhang", config=config)
     await memory.add("I like Python")
     answer = await memory.query("What language?")
     print(answer)
@@ -220,19 +219,27 @@ Momex supports two storage backends:
 ### SQLite Configuration (Default)
 
 ```python
-from momex import Memory, MomexConfig, StorageConfig
+from momex import Memory, MomexConfig
 
 # Simple - use defaults
 memory = Memory(collection="user:xiaoyuzhang")
 
 # Custom storage path
 config = MomexConfig(
-    storage=StorageConfig(path="./my_data")
+    provider="openai",
+    model="gpt-4o",
+    api_key="sk-xxx",
+    storage_path="./my_data",
 )
 memory = Memory(collection="user:xiaoyuzhang", config=config)
 
 # Set global default
-MomexConfig.set_default(storage_path="./my_data")
+MomexConfig.set_default(
+    provider="openai",
+    model="gpt-4o",
+    api_key="sk-xxx",
+    storage_path="./my_data",
+)
 ```
 
 ### PostgreSQL Configuration
@@ -267,11 +274,11 @@ memory = Memory(collection="user:xiaoyuzhang", config=config)
 **SQLite (config_sqlite.yaml):**
 ```yaml
 backend: sqlite
+storage_path: ./momex_data
 
-storage:
-  path: ./momex_data
-
-db_name: memory.db
+provider: openai
+model: gpt-4o
+api_key: sk-xxx
 ```
 
 **PostgreSQL (config_postgres.yaml):**
@@ -295,6 +302,61 @@ memory = Memory(collection="user:xiaoyuzhang", config=config)
 config.to_yaml("my_config.yaml")
 ```
 
+### LLM Configuration
+
+LLM is required. Supports **OpenAI**, **Azure**, **Anthropic**, **DeepSeek**, **Qwen**.
+
+```python
+from momex import Memory, MomexConfig
+
+# OpenAI
+config = MomexConfig(
+    provider="openai",
+    model="gpt-4o",
+    api_key="sk-xxx",
+)
+
+# Azure OpenAI
+config = MomexConfig(
+    provider="azure",
+    model="gpt-4o",
+    api_key="xxx",
+    api_base="https://xxx.openai.azure.com",
+)
+
+# Anthropic
+config = MomexConfig(
+    provider="anthropic",
+    model="claude-sonnet-4-20250514",
+    api_key="sk-ant-xxx",
+)
+
+# DeepSeek
+config = MomexConfig(
+    provider="deepseek",
+    model="deepseek-chat",
+    api_key="sk-xxx",
+)
+
+# Qwen (Alibaba Cloud)
+config = MomexConfig(
+    provider="qwen",
+    model="qwen-plus",
+    api_key="sk-xxx",
+)
+
+memory = Memory(collection="user:xiaoyuzhang", config=config)
+```
+
+**YAML Configuration:**
+```yaml
+provider: openai  # openai, azure, anthropic, deepseek, qwen
+model: gpt-4o
+api_key: sk-xxx
+# api_base: https://xxx.openai.azure.com  # Required for Azure
+temperature: 0.0
+```
+
 ### Environment Variables
 
 | Variable | Description |
@@ -302,6 +364,10 @@ config.to_yaml("my_config.yaml")
 | `MOMEX_BACKEND` | `sqlite` or `postgres` |
 | `MOMEX_STORAGE_PATH` | SQLite storage directory |
 | `MOMEX_POSTGRES_URL` | PostgreSQL connection URL |
+| `MOMEX_PROVIDER` | LLM provider: `openai`, `azure`, `anthropic`, `deepseek`, `qwen` |
+| `MOMEX_MODEL` | LLM model name |
+| `MOMEX_API_KEY` | LLM API key |
+| `MOMEX_API_BASE` | LLM API base URL (required for Azure) |
 
 ```bash
 # SQLite
@@ -310,6 +376,12 @@ export MOMEX_STORAGE_PATH=./my_data
 # PostgreSQL
 export MOMEX_BACKEND=postgres
 export MOMEX_POSTGRES_URL=postgresql://user:pass@localhost:5432/momex
+
+# LLM
+export MOMEX_PROVIDER=openai
+export MOMEX_MODEL=gpt-4o
+export MOMEX_API_KEY=sk-xxx
+# export MOMEX_API_BASE=https://xxx.openai.azure.com  # Required for Azure
 ```
 
 ## API Reference

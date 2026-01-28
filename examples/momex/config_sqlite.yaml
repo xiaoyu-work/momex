@@ -1,9 +1,12 @@
 # Momex Configuration - SQLite Backend
-# This is the default configuration for local development
 
 backend: sqlite
 
-storage:
-  path: ./momex_data
+storage_path: ./momex_data
 
-db_name: memory.db
+# LLM configuration
+provider: openai  # openai, azure, anthropic, deepseek, qwen
+model: gpt-4o
+api_key: sk-xxx
+# api_base: https://xxx.openai.azure.com  # Required for Azure
+temperature: 0.0

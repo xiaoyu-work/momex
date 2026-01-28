@@ -47,7 +47,7 @@ class MemoryManager:
             config: Configuration object. If None, uses default config.
         """
         self.config = config or MomexConfig()
-        self._storage_path = Path(self.config.storage.path)
+        self._storage_path = Path(self.config.storage_path)
 
     def list_collections(self, prefix: str | None = None) -> list[str]:
         """List all collections, optionally filtered by prefix.
@@ -65,7 +65,7 @@ class MemoryManager:
             return collections
 
         # Walk through storage directory using pathlib
-        for db_file in self._storage_path.rglob(self.config.db_name):
+        for db_file in self._storage_path.rglob("memory.db"):
             # Get relative path from storage root to the directory containing db
             rel_path = db_file.parent.relative_to(self._storage_path)
             # Convert path to collection name
@@ -215,7 +215,7 @@ class MemoryManager:
 
     def _get_db_path(self, collection: str) -> Path:
         """Get the database file path for a collection."""
-        return self._get_collection_dir(collection) / self.config.db_name
+        return self._get_collection_dir(collection) / "memory.db"
 
     def _cleanup_empty_dirs(self, path: Path) -> None:
         """Remove empty parent directories up to storage_path."""

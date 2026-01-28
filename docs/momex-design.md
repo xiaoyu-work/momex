@@ -15,11 +15,26 @@ Momex is a high-level memory API for AI agents, built on TypeAgent's Structured 
 ┌─────────────────┐
 │   Momex API     │  Memory, MemoryManager, query(), search()
 ├─────────────────┤
+│   MomexConfig   │  LLM config (provider, model, api_key)
+├─────────────────┤
+│  TypeAgent LLM  │  LLMBase, OpenAI/Azure/Anthropic/DeepSeek/Qwen
+├─────────────────┤
 │   TypeAgent     │  ConversationBase, KnowledgeExtractor, SemanticRefIndex
 ├─────────────────┤
 │ StorageProvider │  SQLite (default) or PostgreSQL
 └─────────────────┘
 ```
+
+### Supported Providers
+
+| Provider | Base URL | Example Model |
+|----------|----------|---------------|
+| `openai` | api.openai.com | gpt-4o |
+| `azure` | custom (required) | gpt-4o |
+| `anthropic` | api.anthropic.com | claude-sonnet-4-20250514 |
+| `deepseek` | api.deepseek.com | deepseek-chat |
+| `qwen` | dashscope.aliyuncs.com | qwen-plus |
+
 
 ## Storage Backends
 
@@ -29,19 +44,6 @@ Momex supports two storage backends:
 |---------|----------|----------|
 | **SQLite** | Development, single instance | One DB file per collection, no setup required |
 | **PostgreSQL** | Production, multi-instance | Shared database, connection pooling, pgvector |
-
-### SQLite (Default)
-
-- Each collection gets its own database file
-- No external dependencies
-- Great for development and single-instance deployment
-
-### PostgreSQL
-
-- Shared database for all collections
-- Connection pooling for high concurrency
-- Uses pgvector extension for embedding similarity search
-- Supports multi-instance deployment (multiple servers sharing data)
 
 ## Collection Storage
 

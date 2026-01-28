@@ -1,32 +1,23 @@
 # Momex Configuration Example
 # Use with: config = MomexConfig.from_yaml("momex_config.yaml")
 
+# Storage backend: "sqlite" (default) or "postgres"
+backend: sqlite
+
+# SQLite storage path
 storage_path: ./momex_data
-llm_provider: openai
-# llm_model: gpt-4o
-# llm_api_key: your-api-key  # Or use OPENAI_API_KEY env var
 
-# Similarity threshold for memory matching (0.0 - 1.0)
-similarity_threshold: 0.5
+# PostgreSQL configuration (uncomment to use)
+# backend: postgres
+# postgres:
+#   url: postgresql://user:password@localhost:5432/momex
+#   pool_min: 2
+#   pool_max: 10
+#   schema: public
 
-# Custom fact types to extract from conversations
-# If not specified, uses default types (preferences, personal details, plans, etc.)
-fact_types:
-  - name: Personal Preferences
-    description: Keep track of likes, dislikes, and specific preferences in various categories such as food, products, activities, and entertainment.
-
-  - name: Important Personal Details
-    description: Remember significant personal information like names, relationships, and important dates.
-
-  - name: Plans and Intentions
-    description: Note upcoming events, trips, goals, and any plans the user has shared.
-
-  - name: Professional Details
-    description: Remember job titles, work habits, career goals, projects, and other professional information.
-
-  - name: Technical Preferences
-    description: Programming languages, frameworks, tools, and technical stack preferences.
-
-  # Add your custom fact types here:
-  # - name: Custom Type
-  #   description: Description of what to extract
+# LLM configuration (or use MOMEX_PROVIDER, MOMEX_MODEL, MOMEX_API_KEY env vars)
+provider: openai  # openai, azure, anthropic, deepseek, qwen
+model: gpt-4o
+api_key: sk-xxx
+# api_base: https://xxx.openai.azure.com  # Required for Azure
+temperature: 0.0
