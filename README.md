@@ -25,21 +25,25 @@ pip install momex
 ## Quick Start
 
 ```python
+import asyncio
 from momex import Memory, query
 
-# Add memories with hierarchical identity
-xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang")
-xiaoyuzhang.add("I like Python")
+async def main():
+    # Add memories with hierarchical identity
+    xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang")
+    await xiaoyuzhang.add("I like Python")
 
-gvanrossum = Memory(collection="momex:engineering:gvanrossum")
-gvanrossum.add("I prefer Java")
+    gvanrossum = Memory(collection="momex:engineering:gvanrossum")
+    await gvanrossum.add("I prefer Java")
 
-# Query with prefix - searches all matching collections
-answer = query("momex:engineering", "What languages do people like?")
-# Searches both xiaoyuzhang and gvanrossum
+    # Query with prefix - searches all matching collections
+    answer = await query("momex:engineering", "What languages do people like?")
+    # Searches both xiaoyuzhang and gvanrossum
 
-answer = query("momex", "Who likes Python?")
-# Searches entire momex
+    answer = await query("momex", "Who likes Python?")
+    # Searches entire momex
+
+asyncio.run(main())
 ```
 
 See [docs/momex.md](docs/momex.md) for full documentation.

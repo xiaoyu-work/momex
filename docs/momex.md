@@ -18,20 +18,24 @@ Momex is a high-level memory API for AI agents, built on TypeAgent's Structured 
 ## Quick Example
 
 ```python
+import asyncio
 from momex import Memory, query
 
-# Create memory for a user
-memory = Memory(collection="momex:engineering:xiaoyuzhang")
+async def main():
+    # Create memory for a user
+    memory = Memory(collection="momex:engineering:xiaoyuzhang")
 
-# Add memories from conversation
-memory.add_conversation([
-    {"role": "user", "content": "I'm Alice, a Python developer"},
-    {"role": "assistant", "content": "Nice to meet you!"},
-])
+    # Add memories from conversation
+    await memory.add([
+        {"role": "user", "content": "I'm Xiaoyuzhang, a Python developer"},
+        {"role": "assistant", "content": "Nice to meet you!"},
+    ])
 
-# Query single collection
-answer = memory.query("What does the user do?")
+    # Query single collection
+    answer = await memory.query("What does the user do?")
 
-# Query across collections (prefix query)
-answer = query("momex:engineering", "What languages do people use?")
+    # Query across collections (prefix query)
+    answer = await query("momex:engineering", "What languages do people use?")
+
+asyncio.run(main())
 ```
