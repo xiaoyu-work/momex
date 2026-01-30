@@ -201,8 +201,12 @@ from momex import MemoryManager
 manager = MemoryManager()
 
 # List collections
-all_collections = manager.list_collections()
+all_collections = manager.list_collections()  # SQLite
 eng_only = manager.list_collections(prefix="momex:engineering")
+
+# For PostgreSQL:
+# all_collections = await manager.list_collections_async()
+# eng_only = await manager.list_collections_async(prefix="momex:engineering")
 
 # Other operations
 manager.exists("momex:engineering:xiaoyuzhang")

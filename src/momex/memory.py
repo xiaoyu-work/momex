@@ -204,6 +204,7 @@ class Memory:
     ):
         """Create PostgreSQL storage provider."""
         from typeagent.knowpro.universal_message import ConversationMessage
+        from typeagent.knowpro.interfaces import ConversationMetadata
         from typeagent.storage.postgres import PostgresStorageProvider
 
         # Use collection name as part of table prefix or schema
@@ -222,6 +223,10 @@ class Memory:
             min_pool_size=self.config.postgres.pool_min,
             max_pool_size=self.config.postgres.pool_max,
             schema=schema,
+            metadata=ConversationMetadata(
+                name_tag=self.collection,
+                tags=[self.collection],
+            ),
         )
 
         return storage_provider

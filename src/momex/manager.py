@@ -59,6 +59,18 @@ class MemoryManager:
         Returns:
             List of collection names.
         """
+        if self.config.is_postgres:
+            import asyncio
+
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(self.list_collections_async(prefix=prefix))
+            raise RuntimeError(
+                "PostgreSQL backend requires async collection listing. "
+                "Use await list_collections_async()."
+            )
+
         collections = []
 
         if not self._storage_path.exists():
@@ -78,6 +90,61 @@ class MemoryManager:
                     collections.append(collection_name)
 
         return sorted(collections)
+
+    async def list_collections_async(self, prefix: str | None = None) -> list[str]:
+        """List all collections asynchronously (required for PostgreSQL)."""
+        if not self.config.is_postgres:
+            return self.list_collections(prefix=prefix)
+
+        import asyncpg
+        from typeagent.storage.postgres.schema import quote_ident
+
+        conn = await asyncpg.connect(self.config.postgres.url)
+        try:
+            schemas = await conn.fetch(
+                """
+                SELECT nspname
+                FROM pg_namespace
+                WHERE nspname NOT LIKE 'pg_%'
+                  AND nspname <> 'information_schema'
+                """
+            )
+
+            collections: list[str] = []
+            for row in schemas:
+                schema = row[0]
+                has_table = await conn.fetchval(
+                    """
+                    SELECT 1
+                    FROM pg_tables
+                    WHERE schemaname = $1 AND tablename = 'conversationmetadata'
+                    LIMIT 1
+                    """,
+                    schema,
+                )
+                if not has_table:
+                    continue
+
+                tag_rows = await conn.fetch(
+                    f"SELECT value FROM {quote_ident(schema)}.ConversationMetadata WHERE key = $1",
+                    "tag",
+                )
+                names = [r[0] for r in tag_rows]
+                if not names:
+                    name_tag = await conn.fetchval(
+                        f"SELECT value FROM {quote_ident(schema)}.ConversationMetadata WHERE key = $1 LIMIT 1",
+                        "name_tag",
+                    )
+                    if name_tag:
+                        names = [name_tag]
+
+                for name in names:
+                    if prefix is None or name == prefix or name.startswith(prefix + ":"):
+                        collections.append(name)
+
+            return sorted(set(collections))
+        finally:
+            await conn.close()
 
     def exists(self, collection: str) -> bool:
         """Check if a collection exists.

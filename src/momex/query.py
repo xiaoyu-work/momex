@@ -95,7 +95,10 @@ async def search(
     manager = MemoryManager(config=config)
 
     # Find all collections matching prefix
-    collections = manager.list_collections(prefix=prefix)
+    if config.is_postgres:
+        collections = await manager.list_collections_async(prefix=prefix)
+    else:
+        collections = manager.list_collections(prefix=prefix)
 
     if not collections:
         return []
@@ -135,7 +138,10 @@ async def stats(
     manager = MemoryManager(config=config)
 
     # Find all collections matching prefix
-    collections = manager.list_collections(prefix=prefix)
+    if config.is_postgres:
+        collections = await manager.list_collections_async(prefix=prefix)
+    else:
+        collections = manager.list_collections(prefix=prefix)
 
     if not collections:
         return {
