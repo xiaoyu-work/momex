@@ -43,6 +43,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         message_text_index_settings: MessageTextIndexSettings | None = None,
         related_term_index_settings: RelatedTermIndexSettings | None = None,
         metadata: ConversationMetadata | None = None,
+        schema: str | None = None,
     ):
         """Initialize PostgreSQL storage provider.
 
@@ -59,6 +60,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         self.semantic_ref_type = semantic_ref_type
         self._metadata = metadata
         self._initialized = False
+        self.schema = schema
 
         # Set up embedding settings
         if message_text_index_settings is None:
@@ -100,7 +102,8 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         embedding_size = self.message_text_index_settings.embedding_index_settings.embedding_size
 
         # Initialize database schema
-        await init_db_schema(self.pool, embedding_size)
+        await init_db_schema(self.pool, embedding_size, schema=self.schema)
+        await self._check_embedding_consistency()
 
         # Initialize collections
         self._message_collection = PostgresMessageCollection(
@@ -138,6 +141,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         metadata: ConversationMetadata | None = None,
         min_pool_size: int = 2,
         max_pool_size: int = 10,
+        schema: str | None = None,
     ) -> "PostgresStorageProvider[TMessage]":
         """Create and initialize a PostgreSQL storage provider.
 
@@ -156,10 +160,17 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             Initialized PostgresStorageProvider instance
         """
         # Create connection pool
+        server_settings = None
+        if schema:
+            from .schema import format_search_path
+
+            server_settings = {"search_path": format_search_path(schema)}
+
         pool = await asyncpg.create_pool(
             connection_string,
             min_size=min_pool_size,
             max_size=max_pool_size,
+            server_settings=server_settings,
         )
 
         # Create provider
@@ -170,6 +181,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             message_text_index_settings=message_text_index_settings,
             related_term_index_settings=related_term_index_settings,
             metadata=metadata,
+            schema=schema,
         )
 
         # Initialize
@@ -185,6 +197,59 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         # For now, we don't wrap in a transaction here
         await self._init_conversation_metadata_if_needed()
         return self
+
+    async def _check_embedding_consistency(self) -> None:
+        """Check that stored embedding metadata matches configured settings."""
+        expected_size = (
+            self.message_text_index_settings.embedding_index_settings.embedding_size
+        )
+        expected_name = (
+            self.message_text_index_settings.embedding_index_settings.embedding_model.model_name
+        )
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT key, value FROM ConversationMetadata")
+
+        if not rows:
+            return
+
+        metadata_dict: dict[str, list[str]] = {}
+        for row in rows:
+            key, value = row[0], row[1]
+            if key not in metadata_dict:
+                metadata_dict[key] = []
+            metadata_dict[key].append(value)
+
+        def get_single(key: str) -> str | None:
+            values = metadata_dict.get(key)
+            if values is None:
+                return None
+            if len(values) > 1:
+                raise ValueError(
+                    f"Expected single value for key '{key}', got {len(values)}"
+                )
+            return values[0]
+
+        stored_size_str = get_single("embedding_size")
+        stored_name = get_single("embedding_name")
+        stored_size = int(stored_size_str) if stored_size_str else None
+
+        if stored_size is not None and stored_size != expected_size:
+            raise ValueError(
+                "Conversation metadata embedding_size does not match provider settings"
+            )
+        if stored_name is not None and stored_name != expected_name:
+            raise ValueError(
+                "Conversation metadata embedding_model does not match provider settings"
+            )
+
+        updates: dict[str, str] = {}
+        if stored_size is None:
+            updates["embedding_size"] = str(expected_size)
+        if stored_name is None:
+            updates["embedding_name"] = expected_name
+        if updates:
+            await set_conversation_metadata(self.pool, **updates)
 
     async def __aexit__(
         self,

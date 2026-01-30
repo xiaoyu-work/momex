@@ -6,6 +6,7 @@ indexing system (SemanticRefs, TermIndex) rather than text+embedding search.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -57,6 +58,22 @@ def _collection_to_db_path(collection: str, base_path: str, db_name: str) -> Pat
     # Sanitize each part for invalid characters (Windows forbidden chars)
     sanitized = [re.sub(r'[<>"|?*:\\]', '_', part) for part in parts]
     return Path(base_path) / Path(*sanitized) / db_name
+
+
+def _collection_to_schema(collection: str) -> str:
+    """Convert collection name to a PostgreSQL-safe schema name."""
+    base = re.sub(r"[^a-zA-Z0-9_]", "_", collection).lower()
+    if not base:
+        base = "momex"
+    if base[0].isdigit():
+        base = f"c_{base}"
+
+    max_len = 63
+    if len(base) <= max_len:
+        return base
+
+    digest = hashlib.md5(collection.encode("utf-8")).hexdigest()[:8]
+    return f"{base[:54]}_{digest}"
 
 
 class Memory:
@@ -191,6 +208,12 @@ class Memory:
 
         # Use collection name as part of table prefix or schema
         # For now, we'll use a single database with collection stored in metadata
+        schema = (
+            self.config.postgres.schema
+            if self.config.postgres.schema
+            else _collection_to_schema(self.collection)
+        )
+
         storage_provider = await PostgresStorageProvider.create(
             connection_string=self.config.postgres.url,
             message_type=ConversationMessage,
@@ -198,6 +221,7 @@ class Memory:
             related_term_index_settings=related_term_index_settings,
             min_pool_size=self.config.postgres.pool_min,
             max_pool_size=self.config.postgres.pool_max,
+            schema=schema,
         )
 
         return storage_provider

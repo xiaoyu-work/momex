@@ -59,6 +59,11 @@ Momex can also read embedding configuration from environment variables:
 - `MOMEX_EMBEDDING_ENDPOINT_ENVVAR`: Optional env var name that holds the
   embedding endpoint URL (defaults to `AZURE_OPENAI_ENDPOINT_EMBEDDING`).
 
+PostgreSQL configuration can also use environment variables:
+
+- `MOMEX_POSTGRES_URL`: PostgreSQL connection URL.
+- `MOMEX_POSTGRES_SCHEMA`: Optional schema name to isolate a collection.
+
 Note: avoid storing API keys in YAML files; prefer environment variables.
 
 ## Other ways to specify environment variables

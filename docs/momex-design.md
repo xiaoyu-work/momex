@@ -15,7 +15,7 @@ Momex is a high-level memory API for AI agents, built on TypeAgent's Structured 
 ┌─────────────────┐
 │   Momex API     │  Memory, MemoryManager, query(), search()
 ├─────────────────┤
-│   MomexConfig   │  LLM config (provider, model, api_key)
+│   MomexConfig   │  LLM config (provider, model, env-based api_key)
 ├─────────────────┤
 │  TypeAgent LLM  │  LLMBase, OpenAI/Azure/Anthropic/DeepSeek/Qwen
 ├─────────────────┤
@@ -59,7 +59,19 @@ Collection names map to directory structure. The `:` separator creates subdirect
 
 ### PostgreSQL
 
-All collections share one database. Collection name is stored in conversation metadata.
+Collections are isolated by PostgreSQL schema. By default, Momex derives a
+schema name from the collection name and sets `search_path` so all tables are
+created inside that schema. You can also set `postgres.schema` (or
+`MOMEX_POSTGRES_SCHEMA`) to override this.
+
+Schema naming notes:
+- Collection names are lowercased and any non `[a-zA-Z0-9_]` characters are
+  replaced with `_`.
+- If the result starts with a digit, `c_` is prefixed.
+- If longer than 63 characters, the name is truncated and a short hash suffix
+  is appended.
+- Different collection names can map to the same schema name (e.g., `a-b` and
+  `a_b`). This is acceptable if you treat schemas as a coarse grouping.
 
 ### Prefix Queries
 
@@ -156,4 +168,3 @@ This provides:
 - Friendly text formatting
 - Access to raw TypeAgent objects via `.raw`
 - Type information from TypeAgent's native `knowledge_type`
-

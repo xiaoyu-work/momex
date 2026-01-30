@@ -18,16 +18,21 @@ class PostgresConfig:
         url: PostgreSQL connection URL.
         pool_min: Minimum connections in pool.
         pool_max: Maximum connections in pool.
+        schema: Optional schema name to isolate collections.
     """
 
     url: str = ""
     pool_min: int = 2
     pool_max: int = 10
+    schema: str = ""
 
     def __post_init__(self) -> None:
         env_url = os.getenv("MOMEX_POSTGRES_URL")
         if env_url and not self.url:
             self.url = env_url
+        env_schema = os.getenv("MOMEX_POSTGRES_SCHEMA")
+        if env_schema and not self.schema:
+            self.schema = env_schema
 
 
 @dataclass
@@ -173,6 +178,7 @@ class MomexConfig:
                 "url": self.postgres.url,
                 "pool_min": self.postgres.pool_min,
                 "pool_max": self.postgres.pool_max,
+                "schema": self.postgres.schema,
             }
 
         path = Path(path)

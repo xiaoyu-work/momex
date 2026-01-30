@@ -18,10 +18,10 @@ from momex import Memory, MomexConfig
 
 async def main():
     # Configure LLM once (required)
+    # Use MOMEX_API_KEY env var for the key
     MomexConfig.set_default(
         provider="openai",
         model="gpt-4o",
-        api_key="sk-xxx",
     )
 
     memory = Memory(collection="user:xiaoyuzhang")
@@ -222,10 +222,10 @@ Momex supports two storage backends:
 from momex import Memory, MomexConfig
 
 # Set global default once
+# Use MOMEX_API_KEY env var for the key
 MomexConfig.set_default(
     provider="openai",
     model="gpt-4o",
-    api_key="sk-xxx",
     storage_path="./my_data",  # Optional, default: "./momex_data"
 )
 
@@ -251,7 +251,6 @@ from momex import Memory, MomexConfig, PostgresConfig
 MomexConfig.set_default(
     provider="openai",
     model="gpt-4o",
-    api_key="sk-xxx",
     backend="postgres",
     postgres=PostgresConfig(
         url="postgresql://user:password@localhost:5432/momex",
@@ -272,7 +271,6 @@ storage_path: ./momex_data
 
 provider: openai
 model: gpt-4o
-api_key: sk-xxx
 ```
 
 **PostgreSQL (config_postgres.yaml):**
@@ -281,9 +279,15 @@ backend: postgres
 
 postgres:
   url: postgresql://user:password@localhost:5432/momex
+  # schema: optional schema for collection isolation
   pool_min: 2
   pool_max: 10
 ```
+
+If `schema` is not provided, Momex derives one from the collection name by
+lowercasing and replacing non-alphanumeric characters with `_`. Different
+collection names can map to the same schema (e.g., `a-b` and `a_b`), so set an
+explicit schema if you need strict isolation.
 
 **Load from YAML:**
 ```python
@@ -306,26 +310,25 @@ LLM is required. Supports **OpenAI**, **Azure**, **Anthropic**, **DeepSeek**, **
 from momex import MomexConfig
 
 # OpenAI
-MomexConfig.set_default(provider="openai", model="gpt-4o", api_key="sk-xxx")
+MomexConfig.set_default(provider="openai", model="gpt-4o")
 
 # Azure OpenAI
-MomexConfig.set_default(provider="azure", model="gpt-4o", api_key="xxx", api_base="https://xxx.openai.azure.com")
+MomexConfig.set_default(provider="azure", model="gpt-4o", api_base="https://xxx.openai.azure.com")
 
 # Anthropic
-MomexConfig.set_default(provider="anthropic", model="claude-sonnet-4-20250514", api_key="sk-ant-xxx")
+MomexConfig.set_default(provider="anthropic", model="claude-sonnet-4-20250514")
 
 # DeepSeek
-MomexConfig.set_default(provider="deepseek", model="deepseek-chat", api_key="sk-xxx")
+MomexConfig.set_default(provider="deepseek", model="deepseek-chat")
 
 # Qwen (Alibaba Cloud)
-MomexConfig.set_default(provider="qwen", model="qwen-plus", api_key="sk-xxx")
+MomexConfig.set_default(provider="qwen", model="qwen-plus")
 ```
 
 **YAML Configuration:**
 ```yaml
 provider: openai  # openai, azure, anthropic, deepseek, qwen
 model: gpt-4o
-api_key: sk-xxx
 # api_base: https://xxx.openai.azure.com  # Required for Azure
 temperature: 0.0
 ```
@@ -337,6 +340,7 @@ temperature: 0.0
 | `MOMEX_BACKEND` | `sqlite` or `postgres` |
 | `MOMEX_STORAGE_PATH` | SQLite storage directory |
 | `MOMEX_POSTGRES_URL` | PostgreSQL connection URL |
+| `MOMEX_POSTGRES_SCHEMA` | Optional schema for collection isolation |
 | `MOMEX_PROVIDER` | LLM provider: `openai`, `azure`, `anthropic`, `deepseek`, `qwen` |
 | `MOMEX_MODEL` | LLM model name |
 | `MOMEX_API_KEY` | LLM API key |

@@ -15,7 +15,11 @@ from ...knowpro.convsettings import MessageTextIndexSettings
 from ...knowpro.interfaces import TextLocationData, TextToTextLocationIndexData
 from ...knowpro.textlocindex import ScoredTextLocation
 from ...storage.memory.messageindex import IMessageTextEmbeddingIndex
-from .schema import serialize_embedding, deserialize_embedding
+from .schema import (
+    deserialize_embedding,
+    ensure_message_text_embedding_index,
+    serialize_embedding,
+)
 
 
 class PostgresMessageTextIndex(IMessageTextEmbeddingIndex):
@@ -32,6 +36,7 @@ class PostgresMessageTextIndex(IMessageTextEmbeddingIndex):
         self._message_collection = message_collection
         # Keep VectorBase for embedding generation (uses OpenAI API)
         self._vectorbase = VectorBase(settings=settings.embedding_index_settings)
+        self._vector_index_ready = False
 
     async def size(self) -> int:
         async with self.pool.acquire() as conn:
@@ -67,6 +72,10 @@ class PostgresMessageTextIndex(IMessageTextEmbeddingIndex):
                     ON CONFLICT (msg_id, chunk_ordinal) DO UPDATE SET embedding = $3
                     """,
                     msg_ord, chunk_ord, embedding_str,
+                )
+            if not self._vector_index_ready:
+                self._vector_index_ready = await ensure_message_text_embedding_index(
+                    conn
                 )
 
     async def add_messages(

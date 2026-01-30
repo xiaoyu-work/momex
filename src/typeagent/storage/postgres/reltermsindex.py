@@ -9,7 +9,11 @@ import numpy as np
 from ...aitools.embeddings import NormalizedEmbedding
 from ...aitools.vectorbase import TextEmbeddingIndexSettings, VectorBase
 from ...knowpro import interfaces
-from .schema import deserialize_embedding, serialize_embedding
+from .schema import (
+    deserialize_embedding,
+    ensure_related_terms_embedding_index,
+    serialize_embedding,
+)
 
 
 class PostgresRelatedTermsAliases(interfaces.ITermToRelatedTerms):
@@ -141,6 +145,7 @@ class PostgresRelatedTermsFuzzy(interfaces.ITermToRelatedTermsFuzzy):
         # Keep VectorBase for embedding generation
         self._vector_base = VectorBase(self._embedding_settings)
         self._added_terms: set[str] = set()
+        self._vector_index_ready = False
 
     async def _init_from_db(self) -> None:
         """Initialize added_terms set from database."""
@@ -226,6 +231,10 @@ class PostgresRelatedTermsFuzzy(interfaces.ITermToRelatedTermsFuzzy):
                     term, embedding_str,
                 )
                 self._added_terms.add(term)
+            if not self._vector_index_ready:
+                self._vector_index_ready = await ensure_related_terms_embedding_index(
+                    conn
+                )
 
     async def lookup_terms(
         self,

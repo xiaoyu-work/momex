@@ -4,7 +4,6 @@
 """PostgreSQL database schema definitions."""
 
 from datetime import datetime, timezone
-import typing
 
 import numpy as np
 
@@ -13,6 +12,7 @@ from ...knowpro.interfaces import ConversationMetadata, STATUS_INGESTED
 
 # Constants
 CONVERSATION_SCHEMA_VERSION = 1
+VECTOR_INDEX_MIN_ROWS = 1000
 
 # Enable pgvector extension
 PGVECTOR_EXTENSION = """
@@ -129,6 +129,12 @@ CREATE TABLE IF NOT EXISTS RelatedTermsFuzzy (
 );
 """
 
+RELATED_TERMS_FUZZY_EMBEDDING_INDEX_TEMPLATE = """
+CREATE INDEX IF NOT EXISTS idx_related_terms_embedding
+ON RelatedTermsFuzzy USING ivfflat (term_embedding vector_cosine_ops)
+WITH (lists = 100);
+"""
+
 INGESTED_SOURCES_SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS IngestedSources (
     source_id TEXT PRIMARY KEY,
@@ -171,9 +177,63 @@ def _create_default_metadata() -> ConversationMetadata:
     )
 
 
-async def init_db_schema(pool, embedding_size: int = 1536) -> None:
+def quote_ident(name: str) -> str:
+    """Safely quote a PostgreSQL identifier."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def format_search_path(schema: str) -> str:
+    """Format search_path with a preferred schema and public fallback."""
+    return f'{quote_ident(schema)}, public'
+
+
+async def _index_exists(conn, index_name: str) -> bool:
+    row = await conn.fetchrow(
+        """
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = current_schema()
+          AND indexname = $1
+        """,
+        index_name,
+    )
+    return row is not None
+
+
+async def ensure_message_text_embedding_index(
+    conn, min_rows: int = VECTOR_INDEX_MIN_ROWS
+) -> bool:
+    if await _index_exists(conn, "idx_message_text_embedding"):
+        return True
+    row = await conn.fetchrow("SELECT COUNT(*) FROM MessageTextIndex")
+    if row[0] < min_rows:
+        return False
+    await conn.execute(MESSAGE_TEXT_INDEX_EMBEDDING_INDEX_TEMPLATE)
+    return True
+
+
+async def ensure_related_terms_embedding_index(
+    conn, min_rows: int = VECTOR_INDEX_MIN_ROWS
+) -> bool:
+    if await _index_exists(conn, "idx_related_terms_embedding"):
+        return True
+    row = await conn.fetchrow("SELECT COUNT(*) FROM RelatedTermsFuzzy")
+    if row[0] < min_rows:
+        return False
+    await conn.execute(RELATED_TERMS_FUZZY_EMBEDDING_INDEX_TEMPLATE)
+    return True
+
+
+async def init_db_schema(
+    pool, embedding_size: int = 1536, schema: str | None = None
+) -> None:
     """Initialize the database schema with all required tables."""
     async with pool.acquire() as conn:
+        # Optional per-collection schema
+        if schema:
+            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {quote_ident(schema)}")
+            await conn.execute(f"SET search_path TO {format_search_path(schema)}")
+
         # Enable pgvector
         await conn.execute(PGVECTOR_EXTENSION)
 
