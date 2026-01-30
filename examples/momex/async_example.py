@@ -11,7 +11,7 @@ Prerequisites:
 """
 
 import asyncio
-from momex import Memory, query
+from momex import Memory
 
 
 async def main():

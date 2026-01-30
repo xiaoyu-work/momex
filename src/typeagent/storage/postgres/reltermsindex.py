@@ -6,7 +6,6 @@
 import asyncpg
 import numpy as np
 
-from ...aitools.embeddings import NormalizedEmbedding
 from ...aitools.vectorbase import TextEmbeddingIndexSettings, VectorBase
 from ...knowpro import interfaces
 from .schema import (

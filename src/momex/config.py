@@ -227,6 +227,13 @@ class MomexConfig:
         """Create TypeAgent embedding model."""
         from typeagent.aitools.embeddings import AsyncEmbeddingModel
 
+        # AsyncEmbeddingModel reads API key from env vars, so set them if we have a key
+        if self.api_key and not os.getenv("OPENAI_API_KEY") and not os.getenv("AZURE_OPENAI_API_KEY"):
+            if self.provider == "azure":
+                os.environ["AZURE_OPENAI_API_KEY"] = self.api_key
+            else:
+                os.environ["OPENAI_API_KEY"] = self.api_key
+
         model_name = self.embedding_model or None
         endpoint_envvar = self.embedding_endpoint_envvar or None
         return AsyncEmbeddingModel(

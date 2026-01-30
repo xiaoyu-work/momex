@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 
 import asyncpg
 
-from ...aitools.embeddings import AsyncEmbeddingModel
 from ...aitools.vectorbase import TextEmbeddingIndexSettings
 from ...knowpro import interfaces
 from ...knowpro.convsettings import MessageTextIndexSettings, RelatedTermIndexSettings
@@ -294,7 +293,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             self.message_text_index_settings.embedding_index_settings.embedding_model.model_name
         )
 
-        metadata_kwds = {
+        metadata_kwds: dict[str, str | list[str]] = {
             "name_tag": name_tag,
             "schema_version": str(CONVERSATION_SCHEMA_VERSION),
             "created_at": format_timestamp_utc(current_time),

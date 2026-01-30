@@ -167,6 +167,18 @@ class MemoryManager:
         Returns:
             True if deleted, False if not found.
         """
+        if self.config.is_postgres:
+            import asyncio
+
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(self.delete_async(collection))
+            raise RuntimeError(
+                "PostgreSQL backend requires async delete. "
+                "Use await delete_async()."
+            )
+
         collection_dir = self._get_collection_dir(collection)
 
         if not collection_dir.exists():
@@ -178,6 +190,35 @@ class MemoryManager:
         self._cleanup_empty_dirs(collection_dir.parent)
 
         return True
+
+    async def delete_async(self, collection: str) -> bool:
+        """Delete a collection asynchronously (required for PostgreSQL)."""
+        if not self.config.is_postgres:
+            return self.delete(collection)
+
+        import asyncpg
+        from typeagent.storage.postgres.schema import quote_ident
+        from .memory import _collection_to_schema
+
+        schema = (
+            self.config.postgres.schema
+            if self.config.postgres.schema
+            else _collection_to_schema(collection)
+        )
+
+        conn = await asyncpg.connect(self.config.postgres.url)
+        try:
+            exists = await conn.fetchval(
+                "SELECT 1 FROM pg_namespace WHERE nspname = $1",
+                schema,
+            )
+            if not exists:
+                return False
+
+            await conn.execute(f"DROP SCHEMA {quote_ident(schema)} CASCADE")
+            return True
+        finally:
+            await conn.close()
 
     def rename(self, old_name: str, new_name: str) -> bool:
         """Rename a collection.

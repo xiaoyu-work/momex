@@ -9,9 +9,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -19,12 +18,16 @@ from .config import MomexConfig
 from .exceptions import LLMError
 
 if TYPE_CHECKING:
+    from typeagent.knowpro.conversation_base import ConversationBase
     from typeagent.knowpro.convsettings import (
         MessageTextIndexSettings,
         RelatedTermIndexSettings,
     )
 
 
+
+
+DELETED_SEMREFS_METADATA_KEY = "momex_deleted_semrefs"
 
 
 @dataclass
@@ -109,6 +112,7 @@ class Memory:
         # TypeAgent conversation (lazy initialized)
         self._conversation = None
         self._initialized = False
+        self._deleted_semref_ids: set[int] | None = None
 
         # Auto-load dotenv
         self._load_dotenv()
@@ -132,7 +136,6 @@ class Memory:
 
         from typeagent.knowpro.conversation_base import ConversationBase
         from typeagent.knowpro.convsettings import ConversationSettings
-        from typeagent.knowpro.universal_message import ConversationMessage
         from typeagent.knowpro.convknowledge import set_llm_config
 
         # Validate config before use
@@ -166,6 +169,82 @@ class Memory:
         )
 
         self._initialized = True
+
+    def _conversation_required(self) -> "ConversationBase":
+        assert self._conversation is not None, "Conversation not initialized"
+        return self._conversation
+
+    async def _get_conversation_metadata(self):
+        storage = self._conversation_required().storage_provider
+        if hasattr(storage, "get_conversation_metadata_async"):
+            return await storage.get_conversation_metadata_async()
+        return storage.get_conversation_metadata()
+
+    async def _set_conversation_metadata(self, **kwds: str | list[str] | None) -> None:
+        storage = self._conversation_required().storage_provider
+        if self.config.is_postgres and hasattr(storage, "pool"):
+            from typeagent.storage.postgres.schema import set_conversation_metadata
+
+            await set_conversation_metadata(storage.pool, **kwds)
+        else:
+            storage.set_conversation_metadata(**kwds)
+
+    async def _load_deleted_semref_ids(self) -> set[int]:
+        if self._deleted_semref_ids is not None:
+            return self._deleted_semref_ids
+
+        metadata = await self._get_conversation_metadata()
+        deleted_raw = ""
+        if metadata.extra and DELETED_SEMREFS_METADATA_KEY in metadata.extra:
+            deleted_raw = metadata.extra[DELETED_SEMREFS_METADATA_KEY]
+
+        if not deleted_raw:
+            self._deleted_semref_ids = set()
+            return self._deleted_semref_ids
+
+        try:
+            parsed = json.loads(deleted_raw)
+        except json.JSONDecodeError:
+            parsed = []
+
+        deleted_ids: set[int] = set()
+        if isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, int):
+                    deleted_ids.add(item)
+                elif isinstance(item, str) and item.isdigit():
+                    deleted_ids.add(int(item))
+
+        self._deleted_semref_ids = deleted_ids
+        return deleted_ids
+
+    async def _store_deleted_semref_ids(self, deleted_ids: set[int]) -> None:
+        serialized = json.dumps(sorted(deleted_ids))
+        await self._set_conversation_metadata(**{DELETED_SEMREFS_METADATA_KEY: serialized})
+
+    def _filter_search_results(
+        self,
+        results,
+        deleted_ids: set[int],
+    ):
+        if not deleted_ids:
+            return results
+        filtered = []
+        for search_result in results:
+            knowledge_matches = {}
+            for ktype, kmatches in search_result.knowledge_matches.items():
+                kept = [
+                    match
+                    for match in kmatches.semantic_ref_matches
+                    if match.semantic_ref_ordinal not in deleted_ids
+                ]
+                if kept:
+                    kmatches.semantic_ref_matches = kept
+                    knowledge_matches[ktype] = kmatches
+            search_result.knowledge_matches = knowledge_matches
+            if search_result.knowledge_matches or search_result.message_matches:
+                filtered.append(search_result)
+        return filtered
 
     def _create_sqlite_provider(
         self,
@@ -270,6 +349,7 @@ class Memory:
             ])
         """
         await self._ensure_initialized()
+        conversation_obj = self._conversation_required()
 
         # Detect and remove contradictions before adding
         contradictions_removed = 0
@@ -286,13 +366,13 @@ class Memory:
 
         # Normalize input to conversation format
         if isinstance(messages, str):
-            conversation = [{"role": "user", "content": messages}]
+            conversation_messages = [{"role": "user", "content": messages}]
         else:
-            conversation = messages
+            conversation_messages = messages
 
         # Convert to TypeAgent ConversationMessage format
         ta_messages: list[ConversationMessage] = []
-        for msg in conversation:
+        for msg in conversation_messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if not content:
@@ -318,7 +398,7 @@ class Memory:
 
         # Use TypeAgent's add_messages_with_indexing for full knowledge extraction
         if infer:
-            result = await self._conversation.add_messages_with_indexing(ta_messages)
+            result = await conversation_obj.add_messages_with_indexing(ta_messages)
             return AddResult(
                 messages_added=result.messages_added,
                 entities_extracted=result.semrefs_added,
@@ -329,12 +409,14 @@ class Memory:
         else:
             # Direct add without LLM processing
             # Temporarily disable auto_extract_knowledge
-            old_setting = self._conversation.settings.semantic_ref_index_settings.auto_extract_knowledge
-            self._conversation.settings.semantic_ref_index_settings.auto_extract_knowledge = False
+            old_setting = (
+                conversation_obj.settings.semantic_ref_index_settings.auto_extract_knowledge
+            )
+            conversation_obj.settings.semantic_ref_index_settings.auto_extract_knowledge = False
             try:
-                result = await self._conversation.add_messages_with_indexing(ta_messages)
+                result = await conversation_obj.add_messages_with_indexing(ta_messages)
             finally:
-                self._conversation.settings.semantic_ref_index_settings.auto_extract_knowledge = old_setting
+                conversation_obj.settings.semantic_ref_index_settings.auto_extract_knowledge = old_setting
 
             return AddResult(
                 messages_added=result.messages_added,
@@ -359,9 +441,69 @@ class Memory:
             Answer string based on stored memories.
         """
         await self._ensure_initialized()
+        conversation = self._conversation_required()
+
+        from typeagent.knowpro import answers, answer_response_schema, convknowledge, searchlang, search_query_schema
+        from typeagent.aitools import utils
+        import typechat
 
         try:
-            return await self._conversation.query(question)
+            if conversation._query_translator is None:
+                model = convknowledge.create_typechat_model()
+                conversation._query_translator = utils.create_translator(
+                    model, search_query_schema.SearchQuery
+                )
+            if conversation._answer_translator is None:
+                model = convknowledge.create_typechat_model()
+                conversation._answer_translator = utils.create_translator(
+                    model, answer_response_schema.AnswerResponse
+                )
+
+            search_options = searchlang.LanguageSearchOptions(
+                compile_options=searchlang.LanguageQueryCompileOptions(
+                    exact_scope=False,
+                    verb_scope=True,
+                    term_filter=None,
+                    apply_scope=True,
+                ),
+                exact_match=False,
+                max_message_matches=25,
+            )
+
+            result = await searchlang.search_conversation_with_language(
+                conversation,
+                conversation._query_translator,
+                question,
+                search_options,
+            )
+
+            if isinstance(result, typechat.Failure):
+                return f"Search failed: {result.message}"
+
+            search_results = result.value
+            deleted_ids = await self._load_deleted_semref_ids()
+            if deleted_ids:
+                search_results = self._filter_search_results(search_results, deleted_ids)
+
+            answer_options = answers.AnswerContextOptions(
+                entities_top_k=50, topics_top_k=50, messages_top_k=None, chunking=None
+            )
+
+            _, combined_answer = await answers.generate_answers(
+                conversation._answer_translator,
+                search_results,
+                conversation,
+                question,
+                options=answer_options,
+            )
+
+            match combined_answer.type:
+                case "NoAnswer":
+                    return f"No answer found: {combined_answer.why_no_answer or 'Unable to find relevant information'}"
+                case "Answered":
+                    return combined_answer.answer or "No answer provided"
+                case _:
+                    return f"Unexpected answer type: {combined_answer.type}"
         except Exception as e:
             raise LLMError(
                 message=f"Failed to query memories: {e}",
@@ -383,6 +525,7 @@ class Memory:
             List of SearchItem with type, text, score, and raw TypeAgent object.
         """
         await self._ensure_initialized()
+        conversation = self._conversation_required()
 
         from typeagent.knowpro import searchlang, convknowledge, search_query_schema, kplib
         from typeagent.knowpro.interfaces import Topic
@@ -390,9 +533,9 @@ class Memory:
         import typechat
 
         # Initialize query translator if needed
-        if self._conversation._query_translator is None:
+        if conversation._query_translator is None:
             model = convknowledge.create_typechat_model()
-            self._conversation._query_translator = utils.create_translator(
+            conversation._query_translator = utils.create_translator(
                 model, search_query_schema.SearchQuery
             )
 
@@ -409,8 +552,8 @@ class Memory:
         )
 
         result = await searchlang.search_conversation_with_language(
-            self._conversation,
-            self._conversation._query_translator,
+            conversation,
+            conversation._query_translator,
             query_text,
             options,
         )
@@ -421,11 +564,16 @@ class Memory:
         # Wrap TypeAgent results into SearchItem
         items: list[SearchItem] = []
 
-        for search_result in result.value:
+        search_results = result.value
+        deleted_ids = await self._load_deleted_semref_ids()
+        if deleted_ids:
+            search_results = self._filter_search_results(search_results, deleted_ids)
+
+        for search_result in search_results:
             # Process knowledge matches
-            for knowledge_type, matches in search_result.knowledge_matches.items():
+            for _, matches in search_result.knowledge_matches.items():
                 for scored in matches.semantic_ref_matches[:limit]:
-                    sem_ref = await self._conversation.semantic_refs.get_item(
+                    sem_ref = await conversation.semantic_refs.get_item(
                         scored.semantic_ref_ordinal
                     )
                     if sem_ref is None:
@@ -465,7 +613,7 @@ class Memory:
 
             # Process message matches
             for msg_match in search_result.message_matches[:limit]:
-                msg = await self._conversation.messages.get_item(msg_match.message_ordinal)
+                msg = await conversation.messages.get_item(msg_match.message_ordinal)
                 if msg is None:
                     continue
 
@@ -518,13 +666,17 @@ class Memory:
             return 0
 
         # Delete from indexes
+        deleted_ids = await self._load_deleted_semref_ids()
+        deleted_ids.update(semref_ids)
+        await self._store_deleted_semref_ids(deleted_ids)
+
         deleted_count = await self._delete_by_ids(semref_ids)
 
         return deleted_count
 
     async def _delete_by_ids(self, semref_ids: list[int]) -> int:
         """Internal: Delete semantic refs by IDs."""
-        storage = self._conversation.storage_provider
+        storage = self._conversation_required().storage_provider
         deleted_count = 0
 
         for semref_id in semref_ids:
@@ -537,7 +689,7 @@ class Memory:
                 continue
 
         # Commit for SQLite
-        if self.config.is_sqlite:
+        if self.config.is_sqlite and hasattr(storage, "db"):
             storage.db.commit()
 
         return deleted_count
@@ -610,6 +762,9 @@ Response:"""
                     semref_ids.append(item.raw.semantic_ref_ordinal)
 
             if semref_ids:
+                deleted_ids = await self._load_deleted_semref_ids()
+                deleted_ids.update(semref_ids)
+                await self._store_deleted_semref_ids(deleted_ids)
                 return await self._delete_by_ids(semref_ids)
 
         except Exception:
@@ -625,11 +780,15 @@ Response:"""
             True if successful.
         """
         await self._ensure_initialized()
-        await self._conversation.storage_provider.clear()
+        conversation = self._conversation_required()
+        await conversation.storage_provider.clear()
 
         # Commit for SQLite (PostgreSQL handles this automatically)
-        if self.config.is_sqlite:
-            self._conversation.storage_provider.db.commit()
+        if self.config.is_sqlite and hasattr(conversation.storage_provider, "db"):
+            conversation.storage_provider.db.commit()
+
+        self._deleted_semref_ids = set()
+        await self._store_deleted_semref_ids(self._deleted_semref_ids)
 
         return True
 
@@ -640,9 +799,10 @@ Response:"""
             Dict with counts of messages, semantic refs, etc.
         """
         await self._ensure_initialized()
+        conversation = self._conversation_required()
 
-        message_count = await self._conversation.messages.size()
-        semref_count = await self._conversation.semantic_refs.size()
+        message_count = await conversation.messages.size()
+        semref_count = await conversation.semantic_refs.size()
 
         backend_name = "postgres" if self.config.is_postgres else "sqlite"
 
@@ -660,13 +820,14 @@ Response:"""
             path: Path to the output JSON file.
         """
         await self._ensure_initialized()
+        conversation = self._conversation_required()
 
         from .exceptions import ExportError
 
         # Get all messages
-        messages = await self._conversation.messages.get_slice(0, 999999)
+        messages = await conversation.messages.get_slice(0, 999999)
         # Get all semantic refs
-        semrefs = await self._conversation.semantic_refs.get_slice(0, 999999)
+        semrefs = await conversation.semantic_refs.get_slice(0, 999999)
 
         from typeagent.knowpro import kplib
 
