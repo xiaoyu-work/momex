@@ -38,7 +38,7 @@ class MomexConfig:
         config = MomexConfig(
             provider="openai",
             model="gpt-4o",
-            api_key="sk-xxx",
+            embedding_model="text-embedding-3-small",
         )
     """
 
@@ -51,6 +51,11 @@ class MomexConfig:
     api_key: str = ""
     api_base: str = ""  # Required for Azure
     temperature: float = 0.0
+
+    # Embeddings (optional - API keys via env vars)
+    embedding_model: str = ""
+    embedding_size: int | None = None
+    embedding_endpoint_envvar: str = ""
 
     # Storage
     backend: Literal["sqlite", "postgres"] = "sqlite"
@@ -76,6 +81,24 @@ class MomexConfig:
             self.api_key = os.getenv("MOMEX_API_KEY", "")
         if not self.api_base:
             self.api_base = os.getenv("MOMEX_API_BASE", "")
+
+        # Embedding env var fallbacks
+        if not self.embedding_model:
+            self.embedding_model = os.getenv("MOMEX_EMBEDDING_MODEL", "")
+        if self.embedding_size is None:
+            env_size = os.getenv("MOMEX_EMBEDDING_SIZE", "")
+            if env_size:
+                try:
+                    self.embedding_size = int(env_size)
+                except ValueError as exc:
+                    raise ConfigurationError(
+                        message="embedding_size must be an integer",
+                        suggestion="Set MOMEX_EMBEDDING_SIZE to an integer value",
+                    ) from exc
+        if not self.embedding_endpoint_envvar:
+            self.embedding_endpoint_envvar = os.getenv(
+                "MOMEX_EMBEDDING_ENDPOINT_ENVVAR", ""
+            )
 
         if not self.model:
             raise ConfigurationError(
@@ -133,6 +156,13 @@ class MomexConfig:
             "backend": self.backend,
         }
 
+        if self.embedding_model:
+            data["embedding_model"] = self.embedding_model
+        if self.embedding_size is not None:
+            data["embedding_size"] = self.embedding_size
+        if self.embedding_endpoint_envvar:
+            data["embedding_endpoint_envvar"] = self.embedding_endpoint_envvar
+
         if self.api_base:
             data["api_base"] = self.api_base
 
@@ -185,6 +215,18 @@ class MomexConfig:
             api_key=self.api_key,
             api_base=self.api_base,
             temperature=self.temperature,
+        )
+
+    def create_embedding_model(self):
+        """Create TypeAgent embedding model."""
+        from typeagent.aitools.embeddings import AsyncEmbeddingModel
+
+        model_name = self.embedding_model or None
+        endpoint_envvar = self.embedding_endpoint_envvar or None
+        return AsyncEmbeddingModel(
+            embedding_size=self.embedding_size,
+            model_name=model_name,
+            endpoint_envvar=endpoint_envvar,
         )
 
     def create_llm(self):

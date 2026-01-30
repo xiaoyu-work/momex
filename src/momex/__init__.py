@@ -23,7 +23,7 @@ Example:
     ...     config = MomexConfig(
     ...         provider="openai",  # openai, azure, anthropic, deepseek, qwen
     ...         model="gpt-4o",
-    ...         api_key="sk-xxx",
+    ...         # api_key via MOMEX_API_KEY env var
     ...     )
     ...
     ...     # Create memory
@@ -38,9 +38,9 @@ Example:
     >>> asyncio.run(main())
 
 Configuration:
-    LLM can be configured via code, YAML, or environment variables.
-    The same config is used for both TypeAgent (knowledge extraction) and
-    Momex (contradiction detection).
+    LLM and embedding models can be configured via code, YAML, or
+    environment variables. The same LLM config is used for both TypeAgent
+    (knowledge extraction) and Momex (contradiction detection).
 
     Supported providers: openai, azure, anthropic, deepseek, qwen
 
@@ -54,6 +54,7 @@ Configuration:
         export MOMEX_PROVIDER=openai
         export MOMEX_MODEL=gpt-4o
         export MOMEX_API_KEY=sk-xxx
+        export MOMEX_EMBEDDING_MODEL=text-embedding-3-small
 """
 
 import logging

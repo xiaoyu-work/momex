@@ -50,6 +50,17 @@ If you use Azure OpenAI you will know where to get these
 If you set both `OPENAI_API_KEY` and `AZURE_OPENAI_API_KEY`,
 `OPENAI_API_KEY` will win.
 
+## Momex convenience variables
+
+Momex can also read embedding configuration from environment variables:
+
+- `MOMEX_EMBEDDING_MODEL`: Embedding model name (e.g. `text-embedding-3-small`).
+- `MOMEX_EMBEDDING_SIZE`: Optional embedding dimension override.
+- `MOMEX_EMBEDDING_ENDPOINT_ENVVAR`: Optional env var name that holds the
+  embedding endpoint URL (defaults to `AZURE_OPENAI_ENDPOINT_EMBEDDING`).
+
+Note: avoid storing API keys in YAML files; prefer environment variables.
+
 ## Other ways to specify environment variables
 
 It is recommended to put your environment variables in a file named

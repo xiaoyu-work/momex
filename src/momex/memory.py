@@ -12,10 +12,16 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .config import MomexConfig
 from .exceptions import LLMError
+
+if TYPE_CHECKING:
+    from typeagent.knowpro.convsettings import (
+        MessageTextIndexSettings,
+        RelatedTermIndexSettings,
+    )
 
 
 
@@ -118,13 +124,22 @@ class Memory:
         # Set LLM config for TypeAgent (used by KnowledgeExtractor)
         set_llm_config(self.config.get_llm_config())
 
-        if self.config.is_postgres:
-            storage_provider = await self._create_postgres_provider()
-        else:
-            storage_provider = self._create_sqlite_provider()
+        embedding_model = self.config.create_embedding_model()
+        settings = ConversationSettings(model=embedding_model)
 
-        # Create conversation settings with the storage provider
-        settings = ConversationSettings(storage_provider=storage_provider)
+        if self.config.is_postgres:
+            storage_provider = await self._create_postgres_provider(
+                settings.message_text_index_settings,
+                settings.related_term_index_settings,
+            )
+        else:
+            storage_provider = self._create_sqlite_provider(
+                settings.message_text_index_settings,
+                settings.related_term_index_settings,
+            )
+
+        # Attach storage provider to settings
+        settings.storage_provider = storage_provider
 
         # Create conversation using factory method
         self._conversation = await ConversationBase.create(
@@ -135,7 +150,11 @@ class Memory:
 
         self._initialized = True
 
-    def _create_sqlite_provider(self):
+    def _create_sqlite_provider(
+        self,
+        message_text_index_settings: MessageTextIndexSettings,
+        related_term_index_settings: RelatedTermIndexSettings,
+    ):
         """Create SQLite storage provider."""
         from typeagent.knowpro.universal_message import ConversationMessage
         from typeagent.storage.sqlite import SqliteStorageProvider
@@ -152,6 +171,8 @@ class Memory:
         storage_provider = SqliteStorageProvider(
             db_path=str(db_path),
             message_type=ConversationMessage,
+            message_text_index_settings=message_text_index_settings,
+            related_term_index_settings=related_term_index_settings,
         )
 
         # Commit any pending schema initialization transaction
@@ -159,7 +180,11 @@ class Memory:
 
         return storage_provider
 
-    async def _create_postgres_provider(self):
+    async def _create_postgres_provider(
+        self,
+        message_text_index_settings: MessageTextIndexSettings,
+        related_term_index_settings: RelatedTermIndexSettings,
+    ):
         """Create PostgreSQL storage provider."""
         from typeagent.knowpro.universal_message import ConversationMessage
         from typeagent.storage.postgres import PostgresStorageProvider
@@ -169,6 +194,8 @@ class Memory:
         storage_provider = await PostgresStorageProvider.create(
             connection_string=self.config.postgres.url,
             message_type=ConversationMessage,
+            message_text_index_settings=message_text_index_settings,
+            related_term_index_settings=related_term_index_settings,
             min_pool_size=self.config.postgres.pool_min,
             max_pool_size=self.config.postgres.pool_max,
         )
@@ -681,4 +708,3 @@ Response:"""
     def is_initialized(self) -> bool:
         """Check if the memory is initialized."""
         return self._initialized
-

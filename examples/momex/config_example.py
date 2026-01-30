@@ -5,11 +5,11 @@ from momex import Memory, MomexConfig
 
 
 async def main():
-    # Configure once (or use MOMEX_PROVIDER, MOMEX_MODEL, MOMEX_API_KEY env vars)
+    # Configure once (use MOMEX_API_KEY env var for the key)
     MomexConfig.set_default(
         provider="openai",  # openai, azure, anthropic, deepseek, qwen
         model="gpt-4o",
-        api_key="sk-xxx",
+        embedding_model="text-embedding-3-small",
     )
 
     # Create memory

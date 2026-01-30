@@ -1,5 +1,5 @@
 # Momex Configuration Example
-# Use with: config = MomexConfig.from_yaml("momex_config.yaml")
+# Copy and edit as needed. Keep API keys in environment variables.
 
 # Storage backend: "sqlite" (default) or "postgres"
 backend: sqlite
@@ -15,10 +15,9 @@ storage_path: ./momex_data
 #   pool_max: 10
 #   schema: public
 
-# LLM configuration (or use MOMEX_PROVIDER, MOMEX_MODEL, MOMEX_API_KEY env vars)
+# LLM configuration (use MOMEX_PROVIDER, MOMEX_MODEL, MOMEX_API_KEY env vars)
 provider: openai  # openai, azure, anthropic, deepseek, qwen
 model: gpt-4o
-# api_key: use MOMEX_API_KEY env var
 # api_base: https://xxx.openai.azure.com  # Required for Azure
 temperature: 0.0
 

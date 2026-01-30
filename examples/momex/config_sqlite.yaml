@@ -7,6 +7,10 @@ storage_path: ./momex_data
 # LLM configuration
 provider: openai  # openai, azure, anthropic, deepseek, qwen
 model: gpt-4o
-api_key: sk-xxx
+# api_key: use MOMEX_API_KEY env var
 # api_base: https://xxx.openai.azure.com  # Required for Azure
 temperature: 0.0
+
+# Embedding configuration (API key via OPENAI_API_KEY or AZURE_OPENAI_API_KEY)
+embedding_model: text-embedding-3-small
+# embedding_endpoint_envvar: AZURE_OPENAI_ENDPOINT_EMBEDDING_3_SMALL
