@@ -380,15 +380,6 @@ class SearchQueryCompiler:
             term_group = SearchTermGroup(boolean_op="or", terms=[])
         for search_term in search_terms:
             term_group.terms.append(SearchTerm(Term(search_term)))
-            # Also search for the term as Subject or Object to find actions
-            # This handles cases where LLM translates queries as simple terms
-            # instead of structured ActionTerms
-            self.add_property_term_to_group(
-                PropertyNames.Subject.value, search_term, term_group
-            )
-            self.add_property_term_to_group(
-                PropertyNames.Object.value, search_term, term_group
-            )
         return term_group
 
     def compile_entity_terms(
@@ -505,25 +496,14 @@ class SearchQueryCompiler:
         term_group: SearchTermGroup,
     ) -> None:
         if is_entity_term_list(action_term.actor_entities):
-            # Use "or" group to match either Subject or Object
-            # This handles LLM translation ambiguity where entities may be
-            # placed in actor_entities instead of target_entities
-            subject_or_object_group = SearchTermGroup("or")
             self.add_entity_names_to_group(
-                action_term.actor_entities, PropertyNames.Subject, subject_or_object_group
+                action_term.actor_entities, PropertyNames.Subject, term_group
             )
-            self.add_entity_names_to_group(
-                action_term.actor_entities, PropertyNames.Object, subject_or_object_group
-            )
-            term_group.add_term(subject_or_object_group)
 
     def compile_object(self, entity: EntityTerm) -> SearchTermGroup:
         # A target can be the name of an object of an action OR the name of an entity.
-        # Also match Subject to handle LLM translation ambiguity where entities
-        # may be placed in target_entities instead of actor_entities
         term_group = SearchTermGroup("or")
         self.add_entity_name_to_group(entity, PropertyNames.Object, term_group)
-        self.add_entity_name_to_group(entity, PropertyNames.Subject, term_group)
         self.add_entity_name_to_group(
             entity, PropertyNames.EntityName, term_group, self.exact_scope
         )

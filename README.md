@@ -20,45 +20,26 @@ pip install momex
 
 ## Quick Start
 
-Just call `chat()` - memory is handled automatically:
-
 ```python
 import asyncio
 from momex import Agent, MomexConfig
 
 async def main():
-    # Configure once
     config = MomexConfig(
         provider="openai",
         model="gpt-4o",
         # api_key via MOMEX_API_KEY env var
     )
 
-    # Create agents for different users
-    xiaoyuzhang = Agent("user:xiaoyuzhang", config)
-    gvanrossum = Agent("user:gvanrossum", config)
+    agent = Agent("user:xiaoyuzhang", config)
 
-    # Chat - LLM automatically decides what to remember
-    r = await xiaoyuzhang.chat("My name is Xiaoyu, I love Python")
+    r = await agent.chat("My name is Xiaoyu, I love Python")
     print(r.content)
-    # Stored to long-term memory (identity + preference)
 
-    r = await gvanrossum.chat("I'm Guido, I prefer Java")
-    print(r.content)
-    # Stored to long-term memory (identity info)
-
-    # Memory persists - agent remembers across conversations
-    r = await xiaoyuzhang.chat("What's my name?")
+    r = await agent.chat("What's my name?")
     print(r.content)  # "Your name is Xiaoyu"
 
-    r = await xiaoyuzhang.chat("Help me write a hello world")
-    # NOT stored to long-term memory (temporary request)
-
-    # Session persists across restarts
-    print(f"Session: {xiaoyuzhang.session_id}")
-
-    await xiaoyuzhang.close()
-    await gvanrossum.close()
+    await agent.close()
 
 asyncio.run(main())
 ```
