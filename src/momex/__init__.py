@@ -73,9 +73,14 @@ from .exceptions import (
 from .manager import MemoryManager
 from .memory import AddResult, Memory, SearchItem
 from .query import query, search, stats
+from .short_term import ShortTermMemory, Message, SessionInfo
+from .agent import Agent, ChatResponse
 
 __all__ = [
-    # Core classes
+    # High-level API (Level 1)
+    "Agent",
+    "ChatResponse",
+    # Core classes (Level 2)
     "Memory",
     "MemoryManager",
     "MomexConfig",
@@ -83,6 +88,10 @@ __all__ = [
     # Data classes
     "AddResult",
     "SearchItem",
+    # Short-term memory
+    "ShortTermMemory",
+    "Message",
+    "SessionInfo",
     # Prefix query functions (async)
     "query",
     "search",

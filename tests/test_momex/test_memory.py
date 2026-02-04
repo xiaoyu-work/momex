@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from momex import AddResult, Memory, MomexConfig, MemoryItem, MemoryManager
+from momex import AddResult, Memory, MomexConfig, MemoryManager
 
 
 class TestMomexConfig:
@@ -15,22 +15,18 @@ class TestMomexConfig:
         """Test default configuration values."""
         config = MomexConfig()
         assert config.storage_path == "./momex_data"
-        assert config.llm_provider == "openai"
-        assert config.auto_extract is True
-        assert config.db_name == "memory.db"
+        assert config.backend == "sqlite"
 
     def test_custom_config(self):
         """Test custom configuration."""
         config = MomexConfig(
             storage_path="/custom/path",
-            llm_provider="azure",
-            llm_model="gpt-4",
-            auto_extract=False,
+            provider="azure",
+            model="gpt-4",
         )
         assert config.storage_path == "/custom/path"
-        assert config.llm_provider == "azure"
-        assert config.llm_model == "gpt-4"
-        assert config.auto_extract is False
+        assert config.provider == "azure"
+        assert config.model == "gpt-4"
 
 
 class TestMemory:

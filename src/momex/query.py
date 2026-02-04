@@ -107,9 +107,6 @@ async def search(
     else:
         collections = manager.list_collections(prefix=prefix)
 
-    import sys
-    print(f"[DEBUG search] prefix={prefix!r}, collections={collections}", file=sys.stderr)
-
     if not collections:
         return []
 
@@ -117,17 +114,12 @@ async def search(
     sem = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
 
     async def search_one(coll_name: str) -> tuple[str, list[SearchItem]]:
-        import sys as _sys
         async with sem:
             try:
                 memory = Memory(collection=coll_name, config=config)
                 results = await memory.search(query_text, limit=limit)
-                print(f"[DEBUG search_one] {coll_name}: {len(results)} results", file=_sys.stderr)
                 return (coll_name, results)
-            except Exception as e:
-                print(f"[search_one] Error searching {coll_name}: {type(e).__name__}: {e}", file=_sys.stderr)
-                import traceback
-                traceback.print_exc(file=_sys.stderr)
+            except Exception:
                 return (coll_name, [])
 
     results = await asyncio.gather(*[search_one(c) for c in collections])

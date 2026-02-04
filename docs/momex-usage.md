@@ -6,6 +6,156 @@
 pip install -e .
 ```
 
+## Two API Levels
+
+Momex provides two levels of abstraction:
+
+| Level | API | Use Case |
+|-------|-----|----------|
+| **Level 1** | `Agent` | Chat applications - automatic memory management |
+| **Level 2** | `Memory`, `ShortTermMemory` | Custom agents - full control over memory |
+
+## Level 1: Agent API (Recommended)
+
+The `Agent` class provides a simple chat interface with automatic memory management.
+LLM decides what goes to short-term vs long-term memory.
+
+### Basic Usage
+
+```python
+import asyncio
+from momex import Agent, MomexConfig
+
+async def main():
+    config = MomexConfig(provider="openai", model="gpt-4o")
+    agent = Agent("user:xiaoyuzhang", config)
+
+    # Just chat - memory is automatic
+    response = await agent.chat("My name is Xiaoyu, I'm a Python developer")
+    print(response.content)
+    # Stored to long-term memory (identity info)
+
+    response = await agent.chat("What's my name?")
+    print(response.content)  # "Your name is Xiaoyu"
+
+    response = await agent.chat("What's the weather today?")
+    # NOT stored to long-term memory (temporary query)
+
+    await agent.close()
+
+asyncio.run(main())
+```
+
+### How It Works
+
+When you call `agent.chat(message)`:
+
+1. **Short-term**: Message is always recorded to conversation history
+2. **Classification**: LLM decides if message should also be stored long-term
+3. **Retrieval**: Relevant memories are retrieved from long-term storage
+4. **Response**: LLM generates response using context from both memory types
+
+### Session Management
+
+```python
+agent = Agent("user:xiaoyuzhang", config)
+
+# Current session
+print(agent.session_id)
+
+# Chat in session
+await agent.chat("Hello")
+await agent.chat("I like coffee")
+
+# Start new session
+new_id = agent.new_session()
+
+# List all sessions
+sessions = agent.list_sessions()
+for s in sessions:
+    print(f"{s.session_id}: {s.message_count} messages")
+
+# Load previous session
+agent.load_session(sessions[0].session_id)
+
+# Get conversation history
+history = agent.get_history()
+for msg in history:
+    print(f"{msg.role}: {msg.content}")
+
+# Clear history
+agent.clear_history()
+
+await agent.close()
+```
+
+### End Session with Summary
+
+```python
+# Chat throughout a session
+await agent.chat("My name is Bob")
+await agent.chat("I work at Google")
+await agent.chat("I prefer Python over Java")
+
+# End session - optionally save summary to long-term memory
+summary = await agent.end_session(save_summary=True)
+print(summary)  # "Bob works at Google and prefers Python"
+```
+
+### Context Manager
+
+```python
+async with Agent("user:xiaoyuzhang", config) as agent:
+    response = await agent.chat("Hello!")
+    print(response.content)
+# Connection closed automatically
+```
+
+### Custom System Prompt
+
+```python
+agent = Agent(
+    "user:xiaoyuzhang",
+    config,
+    system_prompt="You are a helpful coding assistant. Be concise.",
+    max_context_messages=20,      # Recent messages to include
+    max_retrieved_memories=10,    # Long-term memories to retrieve
+)
+```
+
+### Agent API Reference
+
+| Method | Description |
+|--------|-------------|
+| `await chat(message)` | Send message, get response (auto memory) |
+| `new_session()` | Start new session (returns session_id) |
+| `load_session(id)` | Load existing session (returns bool) |
+| `list_sessions()` | List all sessions |
+| `delete_session(id)` | Delete a session |
+| `get_history()` | Get conversation history |
+| `clear_history()` | Clear current session |
+| `await end_session(save_summary)` | End session, optionally save summary |
+| `cleanup_expired_sessions()` | Remove old sessions |
+| `stats()` | Get short-term stats |
+| `await stats_async()` | Get full stats (short + long term) |
+| `await close()` | Close connections |
+
+### ChatResponse
+
+```python
+response = await agent.chat("I'm Alice")
+
+print(response.content)  # Assistant's reply
+```
+
+The Agent automatically handles memory decisions internally. If you need to inspect or control memory storage, use the Level 2 APIs (`Memory`, `ShortTermMemory`).
+
+---
+
+## Level 2: Memory APIs
+
+For custom agents that need full control over memory.
+
 ## Core Concepts
 
 ### Async API
@@ -427,4 +577,136 @@ print(f"Messages added: {result.messages_added}")
 print(f"Knowledge extracted: {result.entities_extracted}")
 print(f"Contradictions removed: {result.contradictions_removed}")
 print(f"Success: {result.success}")
+```
+
+## Short-Term Memory
+
+`ShortTermMemory` provides session-based conversation history with persistence.
+Unlike `Memory`, it stores raw messages without LLM knowledge extraction.
+
+### Basic Usage
+
+```python
+from momex import ShortTermMemory, MomexConfig
+
+config = MomexConfig()
+
+# Use context manager for clean connection handling
+with ShortTermMemory("user:xiaoyuzhang", config) as stm:
+    # Add messages
+    stm.add("Hello, I'm Alice", role="user")
+    stm.add("Nice to meet you, Alice!", role="assistant")
+    stm.add("I work at Google", role="user")
+
+    # Get recent messages
+    messages = stm.get(limit=10)
+    for msg in messages:
+        print(f"{msg.role}: {msg.content}")
+
+    # Get all messages
+    all_messages = stm.get_all()
+
+    # Get statistics
+    stats = stm.stats()
+    print(f"Messages: {stats['message_count']}")
+```
+
+### Session Management
+
+```python
+from momex import ShortTermMemory
+
+with ShortTermMemory("user:xiaoyuzhang", config) as stm:
+    # Current session ID
+    print(f"Session: {stm.session_id}")
+
+    stm.add("First session message", role="user")
+    first_session = stm.session_id
+
+    # Start new session
+    new_session = stm.new_session()
+    stm.add("Second session message", role="user")
+
+    # List all sessions
+    sessions = stm.list_sessions()
+    for s in sessions:
+        print(f"{s.session_id}: {s.message_count} messages")
+
+    # Load previous session
+    stm.load_session(first_session)
+    print(stm.get_all())  # Shows first session messages
+
+    # Delete a session
+    stm.delete_session(new_session)
+```
+
+### Persistence Across Restarts
+
+```python
+# First run
+with ShortTermMemory("user:xiaoyuzhang", config) as stm:
+    stm.add("Remember this", role="user")
+    saved_session_id = stm.session_id
+
+# After restart - resume session
+with ShortTermMemory("user:xiaoyuzhang", config, session_id=saved_session_id) as stm:
+    messages = stm.get_all()  # Previous messages restored
+```
+
+### Cleanup
+
+```python
+with ShortTermMemory("user:xiaoyuzhang", config, session_ttl_hours=24) as stm:
+    # Remove sessions older than 24 hours
+    deleted = stm.cleanup_expired()
+    print(f"Deleted {deleted} old messages")
+
+    # Clear current session
+    stm.clear()
+```
+
+### ShortTermMemory API
+
+| Method | Description |
+|--------|-------------|
+| `add(content, role="user")` | Add a message (returns `Message`) |
+| `get(limit=20)` | Get recent messages |
+| `get_all()` | Get all messages in current session |
+| `clear()` | Clear current session |
+| `stats()` | Get statistics |
+| `new_session()` | Start new session (returns new session_id) |
+| `load_session(session_id)` | Load existing session (returns bool) |
+| `list_sessions(limit=50)` | List all sessions (returns `list[SessionInfo]`) |
+| `delete_session(session_id)` | Delete a session (returns bool) |
+| `cleanup_expired()` | Remove old sessions (returns count) |
+| `close()` | Close database connection |
+
+### Message and SessionInfo
+
+```python
+# Message dataclass
+msg = stm.add("Hello", role="user")
+print(msg.role)       # "user"
+print(msg.content)    # "Hello"
+print(msg.timestamp)  # ISO format
+print(msg.id)         # Database ID
+
+# SessionInfo dataclass
+sessions = stm.list_sessions()
+for s in sessions:
+    print(s.session_id)
+    print(s.started_at)
+    print(s.last_message_at)
+    print(s.message_count)
+```
+
+### Storage Location
+
+Short-term memory is stored alongside long-term memory:
+
+```
+momex_data/
+└── user/xiaoyuzhang/
+    ├── memory.db        # Long-term memory (Memory class)
+    └── short_term.db    # Short-term memory (ShortTermMemory class)
 ```

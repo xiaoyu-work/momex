@@ -6,12 +6,11 @@ This fork adds **Momex** - a high-level API wrapper for TypeAgent's Structured R
 
 ## What's New
 
-- `src/momex/` - High-level memory API package
-- Multi-tenant support with hierarchical collections (`momex:engineering:xiaoyuzhang`)
-- Prefix queries across multiple collections
+- **Agent API** - High-level chat interface with automatic memory management
+- **Short-term memory** - Session-based conversation history with persistence
+- **Long-term memory** - Structured RAG with entity/action/topic extraction
+- Multi-tenant support with hierarchical collections (`user:xiaoyuzhang`)
 - PostgreSQL backend with pgvector for production deployment
-- YAML configuration support
-- Export to JSON
 
 ## Installation
 
@@ -21,36 +20,55 @@ pip install momex
 
 ## Quick Start
 
+Just call `chat()` - memory is handled automatically:
+
 ```python
 import asyncio
-from momex import Memory, MomexConfig, query
+from momex import Agent, MomexConfig
 
 async def main():
-    # Configure LLM once (required)
-    MomexConfig.set_default(
-        provider="openai",  # openai, azure, anthropic, deepseek, qwen
+    # Configure once
+    config = MomexConfig(
+        provider="openai",
         model="gpt-4o",
-        api_key="sk-xxx",  # or set MOMEX_API_KEY env var
+        # api_key via MOMEX_API_KEY env var
     )
 
-    # Add memories with hierarchical identity
-    xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang")
-    await xiaoyuzhang.add("I like Python")
+    # Create agents for different users
+    xiaoyuzhang = Agent("user:xiaoyuzhang", config)
+    gvanrossum = Agent("user:gvanrossum", config)
 
-    gvanrossum = Memory(collection="momex:engineering:gvanrossum")
-    await gvanrossum.add("I prefer Java")
+    # Chat - LLM automatically decides what to remember
+    r = await xiaoyuzhang.chat("My name is Xiaoyu, I love Python")
+    print(r.content)
+    # Stored to long-term memory (identity + preference)
 
-    # Search - returns structured results (entities, actions, topics, messages)
-    results = await xiaoyuzhang.search("What languages?")
-    for item in results:
-        print(f"[{item.type}] {item.text} (score={item.score:.2f})")
+    r = await gvanrossum.chat("I'm Guido, I prefer Java")
+    print(r.content)
+    # Stored to long-term memory (identity info)
 
-    # Query with prefix - searches all matching collections, returns LLM answer
-    answer = await query("momex:engineering", "What languages do people like?")
-    print(f"Q: What languages?\nA: {answer}")
+    # Memory persists - agent remembers across conversations
+    r = await xiaoyuzhang.chat("What's my name?")
+    print(r.content)  # "Your name is Xiaoyu"
+
+    r = await xiaoyuzhang.chat("Help me write a hello world")
+    # NOT stored to long-term memory (temporary request)
+
+    # Session persists across restarts
+    print(f"Session: {xiaoyuzhang.session_id}")
+
+    await xiaoyuzhang.close()
+    await gvanrossum.close()
 
 asyncio.run(main())
 ```
+
+## Two API Levels
+
+| Level | API | Description |
+|-------|-----|-------------|
+| **Level 1** | `Agent` | Chat API with automatic memory (recommended) |
+| **Level 2** | `Memory`, `ShortTermMemory` | Manual control for custom agents |
 
 See [docs/momex.md](docs/momex.md) for full documentation.
 
