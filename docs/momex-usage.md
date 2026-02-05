@@ -455,6 +455,83 @@ config = MomexConfig(
 )
 ```
 
+#### When to use `postgres_pgbouncer=True`
+
+Some PostgreSQL services use connection poolers (like PgBouncer) that require special handling:
+
+| Service | Default Connection | Need `postgres_pgbouncer`? |
+|---------|-------------------|---------------------------|
+| **Azure Database for PostgreSQL** | Direct | ❌ No |
+| **AWS RDS PostgreSQL** | Direct | ❌ No |
+| **Google Cloud SQL** | Direct | ❌ No |
+| **Supabase** (port 6543) | PgBouncer | ✅ **Yes** |
+| **Supabase** (port 5432) | Direct | ❌ No |
+| **Neon** | Pooled | ✅ **Yes** |
+| **Self-hosted PostgreSQL** | Direct | ❌ No |
+| **Self-hosted with PgBouncer** | PgBouncer | ✅ **Yes** |
+
+**Why?** PgBouncer in transaction mode doesn't support prepared statements and doesn't preserve session-level settings. Setting `postgres_pgbouncer=True` disables prepared statements and ensures proper schema handling.
+
+```python
+# Azure / AWS / GCP - Direct connection, no special config needed
+config = MomexConfig(
+    llm=LLMConfig(...),
+    storage=StorageConfig(
+        backend="postgres",
+        postgres_url="postgresql://user:pass@your-db.postgres.database.azure.com:5432/mydb",
+    ),
+)
+
+# Supabase (pooler port 6543) - Requires pgbouncer mode
+config = MomexConfig(
+    llm=LLMConfig(...),
+    storage=StorageConfig(
+        backend="postgres",
+        postgres_url="postgresql://user:pass@db.xxx.supabase.co:6543/postgres",
+        postgres_pgbouncer=True,  # Required!
+    ),
+)
+
+# Neon - Requires pgbouncer mode
+config = MomexConfig(
+    llm=LLMConfig(...),
+    storage=StorageConfig(
+        backend="postgres",
+        postgres_url="postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/mydb",
+        postgres_pgbouncer=True,  # Required!
+    ),
+)
+```
+
+### Azure OpenAI Configuration
+
+```python
+from momex import MomexConfig, LLMConfig, EmbeddingConfig, StorageConfig
+
+config = MomexConfig(
+    llm=LLMConfig(
+        provider="azure",
+        model="gpt-4o",  # Your deployment name
+        api_key="your-azure-api-key",
+        api_base="https://your-resource.openai.azure.com",
+    ),
+    embedding=EmbeddingConfig(
+        provider="azure",
+        model="text-embedding-3-small",  # Your embedding deployment name
+        api_key="your-azure-api-key",
+        api_base="https://your-resource.openai.azure.com",
+        # api_version="2024-12-01-preview",  # Optional, has default
+    ),
+    storage=StorageConfig(
+        backend="postgres",
+        postgres_url="postgresql://...",
+        postgres_pgbouncer=True,  # If using Supabase
+    ),
+)
+```
+
+**Note:** For Azure OpenAI, you must configure `EmbeddingConfig` separately since LLM and embedding may use different deployments.
+
 ### YAML Configuration
 
 **config.yaml:**
@@ -517,6 +594,7 @@ See [Environment Variables](env-vars.md) for full documentation.
 | `MOMEX_STORAGE_PATH` | SQLite storage directory |
 | `MOMEX_STORAGE_POSTGRES_URL` | PostgreSQL connection URL |
 | `MOMEX_STORAGE_POSTGRES_SCHEMA` | Schema for collection isolation |
+| `MOMEX_STORAGE_POSTGRES_PGBOUNCER` | Set to `true` for Supabase/PgBouncer |
 
 ```bash
 # OpenAI (simplest)

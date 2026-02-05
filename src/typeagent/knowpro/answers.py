@@ -498,12 +498,12 @@ async def find_actions_for_entities(
         # Search for actions where this entity is the subject
         subject_matches = await property_index.lookup_property("subject", entity_name)
         if subject_matches:
-            related_action_ordinals.update(subject_matches)
+            related_action_ordinals.update(m.semantic_ref_ordinal for m in subject_matches)
 
         # Search for actions where this entity is the object
         object_matches = await property_index.lookup_property("object", entity_name)
         if object_matches:
-            related_action_ordinals.update(object_matches)
+            related_action_ordinals.update(m.semantic_ref_ordinal for m in object_matches)
 
     if not related_action_ordinals:
         return []

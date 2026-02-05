@@ -77,8 +77,23 @@ class PostgresTimestampToTextRangeIndex(interfaces.ITimestampToTextRangeIndex):
         self, message_timestamps: list[tuple[interfaces.MessageOrdinal, str]]
     ) -> None:
         """Add multiple timestamps."""
+        from datetime import datetime
+
         async with self.pool.acquire() as conn:
-            for message_ordinal, timestamp in message_timestamps:
+            for message_ordinal, timestamp_str in message_timestamps:
+                # Convert string to datetime for asyncpg
+                timestamp = None
+                if timestamp_str:
+                    if isinstance(timestamp_str, str):
+                        if timestamp_str.endswith("Z"):
+                            timestamp_str = timestamp_str[:-1] + "+00:00"
+                        try:
+                            timestamp = datetime.fromisoformat(timestamp_str)
+                        except ValueError:
+                            pass
+                    elif isinstance(timestamp_str, datetime):
+                        timestamp = timestamp_str
+
                 await conn.execute(
                     "UPDATE Messages SET start_timestamp = $1 WHERE msg_id = $2",
                     timestamp, message_ordinal,

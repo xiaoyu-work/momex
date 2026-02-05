@@ -58,13 +58,26 @@ class PostgresMessageCollection[TMessage: interfaces.IMessage](
 
     def _deserialize_message_from_row(self, row) -> TMessage:
         """Rehydrate a message from database row columns."""
-        chunks_json = row["chunks"]
+        chunks_raw = row["chunks"]
         start_timestamp = row["start_timestamp"]
-        tags_json = row["tags"]
-        metadata_json = row["metadata"]
-        extra_json = row["extra"]
+        tags_raw = row["tags"]
+        metadata_raw = row["metadata"]
+        extra_raw = row["extra"]
 
-        # Parse JSON fields and build a JSON object using camelCase.
+        # Parse JSON strings if needed (asyncpg may return strings for JSONB)
+        def parse_json(val):
+            if val is None:
+                return None
+            if isinstance(val, str):
+                return json.loads(val)
+            return val
+
+        chunks_json = parse_json(chunks_raw)
+        tags_json = parse_json(tags_raw)
+        metadata_json = parse_json(metadata_raw)
+        extra_json = parse_json(extra_raw)
+
+        # Build a JSON object using camelCase.
         message_data = extra_json if extra_json else {}
         message_data["textChunks"] = chunks_json if chunks_json else []
         message_data["timestamp"] = start_timestamp.isoformat() if start_timestamp else None
@@ -79,14 +92,30 @@ class PostgresMessageCollection[TMessage: interfaces.IMessage](
 
     def _serialize_message_to_row(self, message: TMessage) -> tuple:
         """Shred a message object into database columns."""
+        from datetime import datetime, timezone
+
         message_data = serialization.serialize_object(message)
 
         chunks = message_data.pop("textChunks", [])
         chunk_uri = None
-        start_timestamp = message_data.pop("timestamp", None)
+        start_timestamp_str = message_data.pop("timestamp", None)
         tags = message_data.pop("tags", [])
         metadata = message_data.pop("metadata", {})
         extra = message_data if message_data else None
+
+        # Convert timestamp string to datetime for asyncpg
+        start_timestamp = None
+        if start_timestamp_str:
+            if isinstance(start_timestamp_str, str):
+                # Parse ISO format timestamp
+                if start_timestamp_str.endswith("Z"):
+                    start_timestamp_str = start_timestamp_str[:-1] + "+00:00"
+                try:
+                    start_timestamp = datetime.fromisoformat(start_timestamp_str)
+                except ValueError:
+                    start_timestamp = None
+            elif isinstance(start_timestamp_str, datetime):
+                start_timestamp = start_timestamp_str
 
         return (chunks, chunk_uri, start_timestamp, tags, metadata, extra)
 
@@ -200,9 +229,20 @@ class PostgresSemanticRefCollection(interfaces.ISemanticRefCollection):
     def _deserialize_semantic_ref_from_row(self, row) -> interfaces.SemanticRef:
         """Deserialize a semantic ref from database row columns."""
         semref_id = row["semref_id"]
-        range_json = row["range_json"]
+        range_raw = row["range_json"]
         knowledge_type = row["knowledge_type"]
-        knowledge_json = row["knowledge_json"]
+        knowledge_raw = row["knowledge_json"]
+
+        # Parse JSON strings if needed (asyncpg may return strings for JSONB)
+        def parse_json(val):
+            if val is None:
+                return None
+            if isinstance(val, str):
+                return json.loads(val)
+            return val
+
+        range_json = parse_json(range_raw)
+        knowledge_json = parse_json(knowledge_raw)
 
         semantic_ref_data = interfaces.SemanticRefData(
             semanticRefOrdinal=semref_id,

@@ -25,6 +25,49 @@ from .semrefindex import PostgresTermToSemanticRefIndex
 from .timestampindex import PostgresTimestampToTextRangeIndex
 
 
+class PgBouncerPoolWrapper:
+    """Wrapper for asyncpg pool that sets search_path on every connection acquire.
+
+    This is needed for pgbouncer mode where session-level settings don't persist.
+    """
+
+    def __init__(self, pool: asyncpg.Pool, schema: str):
+        self._pool = pool
+        self._schema = schema
+        from .schema import format_search_path
+        self._search_path = format_search_path(schema)
+
+    def acquire(self):
+        """Return a context manager that sets search_path on enter."""
+        return _PgBouncerAcquireContext(self._pool, self._search_path)
+
+    async def close(self):
+        """Close the underlying pool."""
+        await self._pool.close()
+
+    def __getattr__(self, name):
+        """Delegate other attributes to the underlying pool."""
+        return getattr(self._pool, name)
+
+
+class _PgBouncerAcquireContext:
+    """Context manager for acquiring a connection with search_path set."""
+
+    def __init__(self, pool: asyncpg.Pool, search_path: str):
+        self._pool = pool
+        self._search_path = search_path
+        self._conn = None
+
+    async def __aenter__(self):
+        self._conn = await self._pool.acquire()
+        await self._conn.execute(f"SET search_path TO {self._search_path}")
+        return self._conn
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self._conn:
+            await self._pool.release(self._conn)
+
+
 class PostgresStorageProvider[TMessage: interfaces.IMessage](
     interfaces.IStorageProvider[TMessage]
 ):
@@ -54,12 +97,13 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             related_term_index_settings: Settings for related terms index
             metadata: Initial conversation metadata
         """
-        self.pool = pool
+        self.pool = pool  # Will be replaced with wrapper if pgbouncer mode
         self.message_type = message_type
         self.semantic_ref_type = semantic_ref_type
         self._metadata = metadata
         self._initialized = False
         self.schema = schema
+        self._pgbouncer = False  # Set by create() if using pgbouncer mode
 
         # Set up embedding settings
         if message_text_index_settings is None:
@@ -88,6 +132,15 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         self._timestamp_index: PostgresTimestampToTextRangeIndex | None = None
         self._message_text_index: PostgresMessageTextIndex | None = None
         self._related_terms_index: PostgresRelatedTermsIndex | None = None
+
+    async def _set_search_path(self, conn) -> None:
+        """Set search_path for the connection if schema is configured.
+
+        This is needed for pgbouncer mode where session-level settings don't persist.
+        """
+        if self.schema and self._pgbouncer:
+            from .schema import format_search_path
+            await conn.execute(f"SET search_path TO {format_search_path(self.schema)}")
 
     async def initialize(self) -> None:
         """Initialize the database schema and components.
@@ -141,6 +194,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         min_pool_size: int = 2,
         max_pool_size: int = 10,
         schema: str | None = None,
+        pgbouncer: bool = False,
     ) -> "PostgresStorageProvider[TMessage]":
         """Create and initialize a PostgreSQL storage provider.
 
@@ -154,27 +208,58 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             metadata: Initial conversation metadata
             min_pool_size: Minimum connections in pool
             max_pool_size: Maximum connections in pool
+            pgbouncer: Enable pgbouncer compatibility mode (disables prepared statements).
+                Required for Supabase, PgBouncer, and similar connection poolers.
 
         Returns:
             Initialized PostgresStorageProvider instance
         """
-        # Create connection pool
-        server_settings = None
-        if schema:
-            from .schema import format_search_path
+        # For pgbouncer mode with schema, create the schema first before creating pool
+        if pgbouncer and schema:
+            from .schema import quote_ident
+            temp_conn = await asyncpg.connect(connection_string, statement_cache_size=0)
+            try:
+                await temp_conn.execute(f"CREATE SCHEMA IF NOT EXISTS {quote_ident(schema)}")
+            finally:
+                await temp_conn.close()
 
-            server_settings = {"search_path": format_search_path(schema)}
+        # Create connection pool
+        pool_kwargs: dict = {
+            "min_size": min_pool_size,
+            "max_size": max_pool_size,
+        }
+
+        # pgbouncer mode: disable prepared statements and use init callback for search_path
+        if pgbouncer:
+            pool_kwargs["statement_cache_size"] = 0
+            # For pgbouncer, we need to set search_path on each connection via init
+            if schema:
+                from .schema import format_search_path
+                search_path = format_search_path(schema)
+
+                async def init_connection(conn):
+                    await conn.execute(f"SET search_path TO {search_path}")
+
+                pool_kwargs["init"] = init_connection
+        else:
+            # For non-pgbouncer, use server_settings (session-level)
+            if schema:
+                from .schema import format_search_path
+                pool_kwargs["server_settings"] = {"search_path": format_search_path(schema)}
 
         pool = await asyncpg.create_pool(
             connection_string,
-            min_size=min_pool_size,
-            max_size=max_pool_size,
-            server_settings=server_settings,
+            **pool_kwargs,
         )
+
+        # Wrap pool for pgbouncer mode to auto-set search_path
+        wrapped_pool = pool
+        if pgbouncer and schema:
+            wrapped_pool = PgBouncerPoolWrapper(pool, schema)
 
         # Create provider
         provider = cls(
-            pool=pool,
+            pool=wrapped_pool,
             message_type=message_type,
             semantic_ref_type=semantic_ref_type,
             message_text_index_settings=message_text_index_settings,
@@ -182,6 +267,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             metadata=metadata,
             schema=schema,
         )
+        provider._pgbouncer = pgbouncer
 
         # Initialize
         await provider.initialize()
@@ -207,6 +293,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         )
 
         async with self.pool.acquire() as conn:
+            await self._set_search_path(conn)
             rows = await conn.fetch("SELECT key, value FROM ConversationMetadata")
 
         if not rows:
@@ -248,7 +335,9 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         if stored_name is None:
             updates["embedding_name"] = expected_name
         if updates:
-            await set_conversation_metadata(self.pool, **updates)
+            await set_conversation_metadata(
+                self.pool, schema=self.schema if self._pgbouncer else None, **updates
+            )
 
     async def __aexit__(
         self,
@@ -272,6 +361,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         current_time = datetime.now(timezone.utc)
 
         async with self.pool.acquire() as conn:
+            await self._set_search_path(conn)
             row = await conn.fetchrow("SELECT 1 FROM ConversationMetadata LIMIT 1")
             if row is not None:
                 return
@@ -309,7 +399,9 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             if key not in {"embedding_size", "embedding_name"}:
                 metadata_kwds[key] = value
 
-        await set_conversation_metadata(self.pool, **metadata_kwds)
+        await set_conversation_metadata(
+            self.pool, schema=self.schema if self._pgbouncer else None, **metadata_kwds
+        )
 
     @property
     def messages(self) -> PostgresMessageCollection[TMessage]:
@@ -381,6 +473,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
     async def clear(self) -> None:
         """Clear all data from the storage provider."""
         async with self.pool.acquire() as conn:
+            await self._set_search_path(conn)
             # Clear in reverse dependency order
             await conn.execute("DELETE FROM RelatedTermsFuzzy")
             await conn.execute("DELETE FROM RelatedTermsAliases")
@@ -426,6 +519,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
     async def get_conversation_metadata_async(self) -> ConversationMetadata:
         """Get conversation metadata."""
         async with self.pool.acquire() as conn:
+            await self._set_search_path(conn)
             rows = await conn.fetch("SELECT key, value FROM ConversationMetadata")
 
             if not rows:
@@ -492,7 +586,9 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         """Set or update conversation metadata (sync version)."""
         import asyncio
         asyncio.get_event_loop().run_until_complete(
-            set_conversation_metadata(self.pool, **kwds)
+            set_conversation_metadata(
+                self.pool, schema=self.schema if self._pgbouncer else None, **kwds
+            )
         )
 
     def update_conversation_timestamps(
@@ -521,7 +617,9 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             metadata_kwds["updated_at"] = format_timestamp_utc(updated_at)
 
         if metadata_kwds:
-            await set_conversation_metadata(self.pool, **metadata_kwds)
+            await set_conversation_metadata(
+                self.pool, schema=self.schema if self._pgbouncer else None, **metadata_kwds
+            )
 
     def get_db_version(self) -> int:
         """Get the database schema version."""
@@ -540,6 +638,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
     async def _is_source_ingested_async(self, source_id: str) -> bool:
         """Check if a source has already been ingested (async)."""
         async with self.pool.acquire() as conn:
+            await self._set_search_path(conn)
             row = await conn.fetchrow(
                 "SELECT status FROM IngestedSources WHERE source_id = $1",
                 source_id,
@@ -556,6 +655,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
     async def _get_source_status_async(self, source_id: str) -> str | None:
         """Get the ingestion status of a source (async)."""
         async with self.pool.acquire() as conn:
+            await self._set_search_path(conn)
             row = await conn.fetchrow(
                 "SELECT status FROM IngestedSources WHERE source_id = $1",
                 source_id,
@@ -576,6 +676,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
     ) -> None:
         """Mark a source as ingested (async)."""
         async with self.pool.acquire() as conn:
+            await self._set_search_path(conn)
             await conn.execute(
                 """
                 INSERT INTO IngestedSources (source_id, status)

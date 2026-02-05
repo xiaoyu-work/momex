@@ -6,7 +6,8 @@ Supports code-based configuration, YAML files, and environment variables.
 Environment variables use the MOMEX_ prefix with nested structure:
 - LLM: MOMEX_LLM_PROVIDER, MOMEX_LLM_MODEL, MOMEX_LLM_API_KEY, MOMEX_LLM_API_BASE
 - Embedding: MOMEX_EMBEDDING_PROVIDER, MOMEX_EMBEDDING_MODEL, MOMEX_EMBEDDING_API_KEY
-- Storage: MOMEX_STORAGE_BACKEND, MOMEX_STORAGE_PATH, MOMEX_STORAGE_POSTGRES_URL
+- Storage: MOMEX_STORAGE_BACKEND, MOMEX_STORAGE_PATH, MOMEX_STORAGE_POSTGRES_URL,
+           MOMEX_STORAGE_POSTGRES_PGBOUNCER (set to "true" for Supabase/PgBouncer)
 """
 
 from __future__ import annotations
@@ -65,6 +66,7 @@ class EmbeddingConfig:
         model: Model name (e.g., "text-embedding-3-small").
         api_key: API key. If None, attempts to reuse from LLM config.
         api_base: Base URL for the embedding API.
+        api_version: API version (for Azure).
         dimensions: Optional embedding dimension override.
     """
 
@@ -72,6 +74,7 @@ class EmbeddingConfig:
     model: str = "text-embedding-3-small"
     api_key: str = ""
     api_base: str = ""
+    api_version: str = ""
     dimensions: int | None = None
 
 
@@ -86,6 +89,8 @@ class StorageConfig:
         postgres_schema: PostgreSQL schema name for collection isolation.
         postgres_pool_min: Minimum pool connections (default: 2).
         postgres_pool_max: Maximum pool connections (default: 10).
+        postgres_pgbouncer: Enable pgbouncer compatibility mode (disables prepared statements).
+            Required for Supabase, PgBouncer, and similar connection poolers.
     """
 
     backend: Literal["sqlite", "postgres"] = "sqlite"
@@ -94,6 +99,7 @@ class StorageConfig:
     postgres_schema: str = ""
     postgres_pool_min: int = 2
     postgres_pool_max: int = 10
+    postgres_pgbouncer: bool = False
 
     @property
     def is_postgres(self) -> bool:
@@ -194,11 +200,15 @@ class MomexConfig:
         if backend not in ("sqlite", "postgres"):
             backend = "sqlite"
 
+        pgbouncer_str = os.getenv("MOMEX_STORAGE_POSTGRES_PGBOUNCER", "").lower()
+        pgbouncer = pgbouncer_str in ("true", "1", "yes")
+
         storage = StorageConfig(
             backend=backend,  # type: ignore
             path=os.getenv("MOMEX_STORAGE_PATH", "./momex_data"),
             postgres_url=os.getenv("MOMEX_STORAGE_POSTGRES_URL", ""),
             postgres_schema=os.getenv("MOMEX_STORAGE_POSTGRES_SCHEMA", ""),
+            postgres_pgbouncer=pgbouncer,
         )
 
         return cls(llm=llm, embedding=embedding, storage=storage)
@@ -281,19 +291,14 @@ class MomexConfig:
 
         cfg = self.get_embedding_config()
 
-        # Set API keys for the embedding model (it reads from env vars)
-        if cfg.api_key:
-            if cfg.provider == "azure":
-                if not os.getenv("AZURE_OPENAI_API_KEY"):
-                    os.environ["AZURE_OPENAI_API_KEY"] = cfg.api_key
-            else:
-                if not os.getenv("OPENAI_API_KEY"):
-                    os.environ["OPENAI_API_KEY"] = cfg.api_key
-
+        # Pass parameters directly (like LLMConfig)
         return AsyncEmbeddingModel(
             embedding_size=cfg.dimensions,
             model_name=cfg.model or None,
-            endpoint_envvar=None,
+            api_key=cfg.api_key or None,
+            api_base=cfg.api_base or None,
+            provider=cfg.provider or None,
+            api_version=cfg.api_version or None,
         )
 
     def create_llm(self):
@@ -371,6 +376,7 @@ class MomexConfig:
             postgres_schema=storage_data.get("postgres_schema", ""),
             postgres_pool_min=storage_data.get("postgres_pool_min", 2),
             postgres_pool_max=storage_data.get("postgres_pool_max", 10),
+            postgres_pgbouncer=storage_data.get("postgres_pgbouncer", False),
         )
 
         return cls(llm=llm, embedding=embedding, storage=storage)
@@ -414,6 +420,8 @@ class MomexConfig:
                 data["storage"]["postgres_schema"] = self.storage.postgres_schema
             data["storage"]["postgres_pool_min"] = self.storage.postgres_pool_min
             data["storage"]["postgres_pool_max"] = self.storage.postgres_pool_max
+            if self.storage.postgres_pgbouncer:
+                data["storage"]["postgres_pgbouncer"] = self.storage.postgres_pgbouncer
 
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)

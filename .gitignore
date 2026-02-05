@@ -47,3 +47,5 @@ pytest.local.ini
 # Momex
 momex_data/
 test.py
+test_postgres.py
+test_memory.py

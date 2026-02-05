@@ -178,9 +178,14 @@ class ConversationBase(
             )
 
             # Update the updated_at timestamp
-            storage.update_conversation_timestamps(
-                updated_at=datetime.now(timezone.utc)
-            )
+            if hasattr(storage, '_update_conversation_timestamps_async'):
+                await storage._update_conversation_timestamps_async(
+                    updated_at=datetime.now(timezone.utc)
+                )
+            else:
+                storage.update_conversation_timestamps(
+                    updated_at=datetime.now(timezone.utc)
+                )
 
             return result
 

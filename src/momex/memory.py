@@ -302,6 +302,7 @@ class Memory:
             min_pool_size=self.config.storage.postgres_pool_min,
             max_pool_size=self.config.storage.postgres_pool_max,
             schema=schema,
+            pgbouncer=self.config.storage.postgres_pgbouncer,
             metadata=ConversationMetadata(
                 name_tag=self.collection,
                 tags=[self.collection],

@@ -60,6 +60,11 @@ class AsyncEmbeddingModel:
         model_name: str | None = None,
         endpoint_envvar: str | None = None,
         max_retries: int = DEFAULT_MAX_RETRIES,
+        # New: direct parameters (like LLMConfig)
+        api_key: str | None = None,
+        api_base: str | None = None,
+        provider: str | None = None,  # "openai" or "azure"
+        api_version: str | None = None,  # Azure API version
     ):
         if model_name is None:
             model_name = DEFAULT_MODEL_NAME
@@ -84,16 +89,23 @@ class AsyncEmbeddingModel:
                 f"Cannot customize embedding_size for default model {DEFAULT_MODEL_NAME}"
             )
 
-        # Read API keys once
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        # Support both direct parameters and environment variables
+        # Direct parameters take precedence
+        openai_api_key = api_key if provider == "openai" else os.getenv("OPENAI_API_KEY")
+        azure_api_key = api_key if provider == "azure" else os.getenv("AZURE_OPENAI_API_KEY")
 
-        # Prefer OpenAI if both are set, use Azure if only Azure is set
-        self.use_azure = bool(azure_api_key) and not bool(openai_api_key)
+        # Determine provider
+        if provider == "azure":
+            self.use_azure = True
+        elif provider == "openai":
+            self.use_azure = False
+        else:
+            # Auto-detect: prefer OpenAI if both are set, use Azure if only Azure is set
+            self.use_azure = bool(azure_api_key) and not bool(openai_api_key)
 
         if endpoint_envvar is None:
             # Check if OpenAI credentials are available, prefer OpenAI over Azure
-            if openai_api_key:
+            if openai_api_key and not self.use_azure:
                 endpoint_envvar = "OPENAI_BASE_URL"  # Use OpenAI
             elif suggested_endpoint_envvar is not None:
                 endpoint_envvar = suggested_endpoint_envvar
@@ -106,17 +118,19 @@ class AsyncEmbeddingModel:
         if self.model_name == TEST_MODEL_NAME:
             self.async_client = None
         elif self.use_azure:
-            if not azure_api_key:
-                raise ValueError("AZURE_OPENAI_API_KEY not found in environment.")
+            actual_api_key = api_key or azure_api_key
+            if not actual_api_key:
+                raise ValueError("Azure API key not provided and AZURE_OPENAI_API_KEY not found in environment.")
             with timelog("Using Azure OpenAI"):
-                self._setup_azure(azure_api_key)
+                self._setup_azure(actual_api_key, api_base, api_version, max_retries)
         else:
-            if not openai_api_key:
-                raise ValueError("OPENAI_API_KEY not found in environment.")
-            endpoint = os.getenv(self.endpoint_envvar)
+            actual_api_key = api_key or openai_api_key
+            if not actual_api_key:
+                raise ValueError("OpenAI API key not provided and OPENAI_API_KEY not found in environment.")
+            endpoint = api_base or os.getenv(self.endpoint_envvar)
             with timelog("Using OpenAI"):
                 self.async_client = AsyncOpenAI(
-                    base_url=endpoint, api_key=openai_api_key, max_retries=max_retries
+                    base_url=endpoint, api_key=actual_api_key, max_retries=max_retries
                 )
 
         if self.model_name in tiktoken_model.MODEL_TO_ENCODING:
@@ -131,13 +145,32 @@ class AsyncEmbeddingModel:
 
         self._embedding_cache = {}
 
-    def _setup_azure(self, azure_api_key: str) -> None:
+    def _setup_azure(
+        self,
+        azure_api_key: str,
+        api_base: str | None = None,
+        api_version: str | None = None,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+    ) -> None:
         from .utils import get_azure_api_key, parse_azure_endpoint
 
         azure_api_key = get_azure_api_key(azure_api_key)
-        self.azure_endpoint, self.azure_api_version = parse_azure_endpoint(
-            self.endpoint_envvar
-        )
+
+        # Use direct api_base if provided, otherwise fall back to environment variable
+        if api_base:
+            self.azure_endpoint = api_base.rstrip("/")
+            # Use provided api_version, or use default
+            if api_version:
+                self.azure_api_version = api_version
+            else:
+                self.azure_api_version = "2024-12-01-preview"
+        else:
+            self.azure_endpoint, self.azure_api_version = parse_azure_endpoint(
+                self.endpoint_envvar
+            )
+            # Override with provided api_version if given
+            if api_version:
+                self.azure_api_version = api_version
 
         if azure_api_key != os.getenv("AZURE_OPENAI_API_KEY"):
             # If we got a token from identity, store the provider for refresh
@@ -147,6 +180,7 @@ class AsyncEmbeddingModel:
             api_version=self.azure_api_version,
             azure_endpoint=self.azure_endpoint,
             api_key=azure_api_key,
+            max_retries=max_retries,
         )
 
     async def refresh_auth(self):

@@ -280,9 +280,13 @@ async def get_db_schema_version(pool) -> int:
         return CONVERSATION_SCHEMA_VERSION
 
 
-async def set_conversation_metadata(pool, **kwds: str | list[str] | None) -> None:
+async def set_conversation_metadata(
+    pool, schema: str | None = None, **kwds: str | list[str] | None
+) -> None:
     """Set or update conversation metadata key-value pairs."""
     async with pool.acquire() as conn:
+        if schema:
+            await conn.execute(f"SET search_path TO {format_search_path(schema)}")
         for key, value in kwds.items():
             # Delete existing rows for this key
             await conn.execute(
