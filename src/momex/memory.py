@@ -486,7 +486,7 @@ class Memory:
                 search_results = self._filter_search_results(search_results, deleted_ids)
 
             answer_options = answers.AnswerContextOptions(
-                entities_top_k=50, topics_top_k=50, messages_top_k=None, chunking=None
+                entities_top_k=50, topics_top_k=50, messages_top_k=20, chunking=None
             )
 
             _, combined_answer = await answers.generate_answers(
