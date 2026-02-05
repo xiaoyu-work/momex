@@ -10,9 +10,11 @@ from ...knowpro.interfaces import (
     IConversation,
     IPropertyToSemanticRefIndex,
     ISemanticRefCollection,
+    ITermToRelatedTermsIndex,
     ScoredSemanticRefOrdinal,
     SemanticRefOrdinal,
     Tag,
+    Term,
     Topic,
 )
 
@@ -75,6 +77,32 @@ async def add_entity_properties_to_index(
             await add_facet(facet, property_index, semantic_ref_ordinal)
 
 
+async def add_entity_aliases_to_index(
+    entity: kplib.ConcreteEntity,
+    related_terms_index: ITermToRelatedTermsIndex | None,
+) -> None:
+    """Add entity aliases to the related terms index.
+
+    This enables searching for an entity by any of its aliases.
+    For example, if entity "小张" has alias "张三", then searching for "张三"
+    will also find actions involving "小张".
+    """
+    if related_terms_index is None or entity.aliases is None:
+        return
+
+    # For each alias, add a mapping: alias -> entity.name
+    # This way, when someone searches for the alias, we also search for the main name
+    for alias in entity.aliases:
+        await related_terms_index.aliases.add_related_term(
+            alias, Term(text=entity.name)
+        )
+        # Also add reverse mapping: entity.name -> alias
+        # This way, searching for the main name also finds aliases
+        await related_terms_index.aliases.add_related_term(
+            entity.name, Term(text=alias)
+        )
+
+
 async def add_action_properties_to_index(
     action: kplib.Action,
     property_index: IPropertyToSemanticRefIndex,
@@ -124,6 +152,9 @@ async def add_to_property_index(
         if (property_index := csi.property_to_semantic_ref_index) is None:
             property_index = csi.property_to_semantic_ref_index = PropertyIndex()
 
+        # Get the related terms index for adding aliases
+        related_terms_index = csi.term_to_related_terms_index
+
         semantic_refs = conversation.semantic_refs
         size = await semantic_refs.size()
 
@@ -139,6 +170,10 @@ async def add_to_property_index(
             elif isinstance(semantic_ref.knowledge, kplib.ConcreteEntity):
                 await add_entity_properties_to_index(
                     semantic_ref.knowledge, property_index, semantic_ref_ordinal
+                )
+                # Add entity aliases to related terms index
+                await add_entity_aliases_to_index(
+                    semantic_ref.knowledge, related_terms_index
                 )
             elif isinstance(semantic_ref.knowledge, Tag):
                 tag = semantic_ref.knowledge

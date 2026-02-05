@@ -79,6 +79,14 @@ class ConcreteEntity:
             "Facets are concise 'properties'."
         ),
     ] = None
+    aliases: Annotated[
+        list[str] | None,
+        Doc(
+            "Other names this entity is known by, including nicknames, "
+            "former names, abbreviations, or alternative spellings. "
+            "E.g., if someone says 'I used to be called John', then 'John' is an alias."
+        ),
+    ] = None
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.name!r}, {self.type}, {self.facets})"
