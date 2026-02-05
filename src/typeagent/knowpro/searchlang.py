@@ -402,12 +402,9 @@ class SearchQueryCompiler:
         else:
             for term in entity_terms:
                 self.add_entity_term_to_group(term, term_group)
-        # Also search for topics, subjects, and objects.
-        # This ensures entity searches also find actions mentioning the entity.
+        # Also search for topics.
         for term in entity_terms:
             self.add_entity_name_to_group(term, PropertyNames.Topic, term_group)
-            self.add_entity_name_to_group(term, PropertyNames.Subject, term_group)
-            self.add_entity_name_to_group(term, PropertyNames.Object, term_group)
             if term.facets is not None:
                 for facet in term.facets:
                     if facet.facet_value not in (None, "*"):
@@ -526,13 +523,6 @@ class SearchQueryCompiler:
         if entity_term.is_name_pronoun:
             return
         self.add_search_term_to_group(entity_term.name, term_group)
-        # Also search as Subject/Object to find actions mentioning this entity
-        self.add_property_term_to_group(
-            PropertyNames.Subject.value, entity_term.name, term_group
-        )
-        self.add_property_term_to_group(
-            PropertyNames.Object.value, entity_term.name, term_group
-        )
         if entity_term.type:
             for type in entity_term.type:
                 self.add_search_term_to_group(type, term_group)

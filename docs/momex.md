@@ -68,7 +68,7 @@ async def main():
     await memory.add("I like Python programming")
 
     # Search - returns structured results
-    results = await memory.search("What languages?")
+    results = await memory.search("What programming languages?")
     for item in results:
         print(f"[{item.type}] {item.text} (score={item.score:.2f})")
     # Output: [action] none like Python (score=10.00)
@@ -79,7 +79,7 @@ async def main():
     print(f"A: {answer}")
 
     # Query across collections (prefix query)
-    answer = await query("momex:engineering", "What languages do people use?")
+    answer = await query("momex:engineering", "What programming languages do people use?")
     print(f"A: {answer}")
 
 asyncio.run(main())

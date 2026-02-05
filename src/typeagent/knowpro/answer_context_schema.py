@@ -37,6 +37,36 @@ class RelevantMessage:
 
 
 @dataclass
+class RelevantAction:
+    """An action representing a relationship between entities."""
+
+    subject: Annotated[
+        str | None,
+        Doc("The entity performing the action (e.g., 'xiaoyuzhang' in 'xiaoyuzhang likes Python')"),
+    ]
+    verbs: Annotated[
+        list[str],
+        Doc("The action verbs (e.g., ['likes'] in 'xiaoyuzhang likes Python')"),
+    ]
+    object: Annotated[
+        str | None,
+        Doc("The entity receiving the action (e.g., 'Python' in 'xiaoyuzhang likes Python')"),
+    ]
+    subject_entity: Annotated[
+        Any | None,
+        Doc("Full entity details for the subject, if available"),
+    ] = None
+    object_entity: Annotated[
+        Any | None,
+        Doc("Full entity details for the object, if available"),
+    ] = None
+    time_range: Annotated[
+        DateRange | None,
+        Doc("Time period during which this action occurred"),
+    ] = None
+
+
+@dataclass
 class AnswerContext:
     """Use empty lists for unneeded properties."""
 
@@ -44,6 +74,13 @@ class AnswerContext:
         list[RelevantKnowledge],
         Doc(
             "Relevant entities. Use the 'name' and 'type' properties of entities to PRECISELY identify those that answer the user question."
+        ),
+    ]
+    actions: Annotated[
+        list[RelevantAction],
+        Doc(
+            "Relevant actions representing relationships between entities. "
+            "Use 'subject', 'verbs', and 'object' to understand WHO did WHAT to WHOM."
         ),
     ]
     topics: Annotated[list[RelevantKnowledge], Doc("Relevant topics")]

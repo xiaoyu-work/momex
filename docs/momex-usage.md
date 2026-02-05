@@ -308,10 +308,10 @@ async def main():
     await gvanrossum.add("I prefer Java")
 
     # Query single collection
-    answer = await xiaoyuzhang.query("What language?")
+    answer = await xiaoyuzhang.query("What programming language?")
 
     # Query by prefix - searches multiple collections
-    answer = await query("momex:engineering", "What languages do people use?")
+    answer = await query("momex:engineering", "What programming languages do people use?")
     answer = await query("momex", "Who works here?")
 ```
 
@@ -333,7 +333,7 @@ async def main():
         # item.raw contains the original TypeAgent object
 
     # Search across collections with prefix
-    results = await search("momex", "what languages", limit=5)
+    results = await search("momex", "what programming languages", limit=5)
 
     # Use as context for your own LLM
     context = "\n".join([f"- [{coll}] {item.text}" for coll, items in results for item in items])

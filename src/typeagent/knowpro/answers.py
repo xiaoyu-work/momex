@@ -12,7 +12,7 @@ import typechat
 
 logger = logging.getLogger(__name__)
 
-from .answer_context_schema import AnswerContext, RelevantKnowledge, RelevantMessage
+from .answer_context_schema import AnswerContext, RelevantAction, RelevantKnowledge, RelevantMessage
 from .answer_response_schema import AnswerResponse
 from .collections import get_top_k, Scored
 from .interfaces import (
@@ -35,7 +35,7 @@ from .interfaces import (
     TextRange,
     Topic,
 )
-from .kplib import ConcreteEntity, Facet
+from .kplib import Action, ConcreteEntity, Facet
 from .search import ConversationSearchResult
 
 
@@ -164,7 +164,7 @@ async def make_context[TMessage: IMessage, TIndex: ITermToSemanticRefIndex](
     conversation: IConversation[TMessage, TIndex],
     options: AnswerContextOptions | None = None,
 ) -> AnswerContext:
-    context = AnswerContext([], [], [])
+    context = AnswerContext([], [], [], [])
 
     if search_result.message_matches:
         context.messages = await get_relevant_messages_for_answer(
@@ -172,6 +172,10 @@ async def make_context[TMessage: IMessage, TIndex: ITermToSemanticRefIndex](
             search_result.message_matches,
             options and options.messages_top_k,
         )
+
+    # First pass: collect all knowledge by type
+    all_actions: list[RelevantAction] = []
+    entity_map: dict[str, ConcreteEntity] = {}  # For bidirectional linking
 
     for knowledge_type, knowledge in search_result.knowledge_matches.items():
         match knowledge_type:
@@ -181,6 +185,16 @@ async def make_context[TMessage: IMessage, TIndex: ITermToSemanticRefIndex](
                     knowledge,
                     options and options.entities_top_k,
                 )
+                # Build entity map for linking
+                for rel_entity in context.entities:
+                    if isinstance(rel_entity.knowledge, ConcreteEntity):
+                        entity_map[rel_entity.knowledge.name.lower()] = rel_entity.knowledge
+            case "action":
+                all_actions = await get_relevant_actions_for_answer(
+                    conversation,
+                    knowledge,
+                    entity_map,
+                )
             case "topic":
                 context.topics = await get_relevant_topics_for_answer(
                     conversation,
@@ -188,9 +202,39 @@ async def make_context[TMessage: IMessage, TIndex: ITermToSemanticRefIndex](
                     options and options.topics_top_k,
                 )
             case _:
-                pass  # TODO: Actions and tags (once we support them)?
+                pass  # Tags not supported yet
+
+    # Second pass: bidirectional linking - always find actions related to entities
+    if context.entities:
+        related_actions = await find_actions_for_entities(
+            conversation,
+            [e.knowledge for e in context.entities if isinstance(e.knowledge, ConcreteEntity)],
+            entity_map,
+        )
+        # Merge and deduplicate actions
+        all_actions = merge_relevant_actions(all_actions, related_actions)
+
+    context.actions = all_actions
 
     return context
+
+
+def merge_relevant_actions(
+    actions1: list[RelevantAction],
+    actions2: list[RelevantAction],
+) -> list[RelevantAction]:
+    """Merge two lists of RelevantAction, removing duplicates."""
+    seen: set[str] = set()
+    merged: list[RelevantAction] = []
+
+    for action in actions1 + actions2:
+        # Create a unique key for deduplication
+        key = f"{action.subject}|{','.join(action.verbs)}|{action.object}"
+        if key not in seen:
+            seen.add(key)
+            merged.append(action)
+
+    return merged
 
 
 type MergedFacets = dict[str, list[str]]
@@ -211,6 +255,14 @@ class MergedEntity(MergedKnowledge):
     name: str
     type: list[str]
     facets: MergedFacets | None = None
+
+
+@dataclass
+class MergedAction(MergedKnowledge):
+    subject: str | None
+    verbs: list[str]
+    object: str | None
+    indirect_object: str | None = None
 
 
 async def get_relevant_messages_for_answer[
@@ -334,6 +386,157 @@ async def get_relevant_entities_for_answer(
         relevant_entities.append(relevane_entity)
 
     return relevant_entities
+
+
+async def get_relevant_actions_for_answer(
+    conversation: IConversation,
+    search_result: SemanticRefSearchResult,
+    entity_map: dict[str, ConcreteEntity],
+    top_k: int | None = None,
+) -> list[RelevantAction]:
+    """Extract relevant actions from search results with entity linking."""
+    assert conversation.semantic_refs is not None, "Semantic refs must not be None"
+
+    scored_actions = await get_scored_semantic_refs_from_ordinals_iter(
+        conversation.semantic_refs,
+        search_result.semantic_ref_matches,
+        "action",
+    )
+
+    # Merge actions with same subject-verb-object
+    merged_actions = merge_scored_actions(scored_actions, merge_ordinals=True)
+    candidate_actions = list(merged_actions.values())
+
+    if top_k and len(candidate_actions) > top_k:
+        candidate_actions = list(get_top_k(candidate_actions, top_k))
+
+    relevant_actions: list[RelevantAction] = []
+
+    for scored_action in candidate_actions:
+        merged = scored_action.item
+        # Create RelevantAction with entity linking
+        relevant_action = RelevantAction(
+            subject=merged.subject,
+            verbs=merged.verbs,
+            object=merged.object,
+            subject_entity=entity_map.get(merged.subject.lower()) if merged.subject else None,
+            object_entity=entity_map.get(merged.object.lower()) if merged.object else None,
+        )
+
+        # Add time range if available
+        if merged.source_message_ordinals:
+            relevant_action.time_range = await get_enclosing_data_range_for_messages(
+                conversation.messages, merged.source_message_ordinals
+            )
+
+        relevant_actions.append(relevant_action)
+
+    return relevant_actions
+
+
+def merge_scored_actions(
+    scored_actions: Iterable[Scored[SemanticRef]],
+    merge_ordinals: bool,
+) -> dict[str, Scored[MergedAction]]:
+    """Merge actions with the same subject-verb-object."""
+    merged_actions: dict[str, Scored[MergedAction]] = {}
+
+    for scored_action in scored_actions:
+        assert isinstance(scored_action.item.knowledge, Action)
+        action = scored_action.item.knowledge
+
+        subject = action.subject_entity_name if action.subject_entity_name != "none" else None
+        obj = action.object_entity_name if action.object_entity_name != "none" else None
+        indirect_obj = action.indirect_object_entity_name if action.indirect_object_entity_name != "none" else None
+
+        # Create a key for merging
+        key = f"{subject}|{','.join(action.verbs)}|{obj}"
+
+        existing = merged_actions.get(key)
+        if existing is not None:
+            # Merge scores
+            if existing.score < scored_action.score:
+                existing.score = scored_action.score
+        else:
+            existing = Scored(
+                item=MergedAction(
+                    subject=subject,
+                    verbs=list(action.verbs),
+                    object=obj,
+                    indirect_object=indirect_obj,
+                ),
+                score=scored_action.score,
+            )
+            merged_actions[key] = existing
+
+        if merge_ordinals:
+            merge_message_ordinals(existing.item, scored_action.item)
+
+    return merged_actions
+
+
+async def find_actions_for_entities(
+    conversation: IConversation,
+    entities: list[ConcreteEntity],
+    entity_map: dict[str, ConcreteEntity],
+) -> list[RelevantAction]:
+    """Find all actions where the given entities appear as subject or object.
+
+    This implements bidirectional linking: when we find an entity,
+    we also find all actions related to that entity.
+    """
+    assert conversation.semantic_refs is not None, "Semantic refs must not be None"
+    assert conversation.secondary_indexes is not None, "Secondary indexes must not be None"
+
+    property_index = conversation.secondary_indexes.property_to_semantic_ref_index
+    entity_names = {e.name.lower() for e in entities}
+
+    # Find all semantic refs where entity appears as subject or object
+    related_action_ordinals: set[int] = set()
+
+    for entity_name in entity_names:
+        # Search for actions where this entity is the subject
+        subject_matches = await property_index.lookup_property("subject", entity_name)
+        if subject_matches:
+            related_action_ordinals.update(subject_matches)
+
+        # Search for actions where this entity is the object
+        object_matches = await property_index.lookup_property("object", entity_name)
+        if object_matches:
+            related_action_ordinals.update(object_matches)
+
+    if not related_action_ordinals:
+        return []
+
+    # Get the actual actions
+    relevant_actions: list[RelevantAction] = []
+
+    for ordinal in related_action_ordinals:
+        semantic_ref = await conversation.semantic_refs.get_item(ordinal)
+        if not isinstance(semantic_ref.knowledge, Action):
+            continue
+
+        action = semantic_ref.knowledge
+        subject = action.subject_entity_name if action.subject_entity_name != "none" else None
+        obj = action.object_entity_name if action.object_entity_name != "none" else None
+
+        relevant_action = RelevantAction(
+            subject=subject,
+            verbs=list(action.verbs),
+            object=obj,
+            subject_entity=entity_map.get(subject.lower()) if subject else None,
+            object_entity=entity_map.get(obj.lower()) if obj else None,
+        )
+
+        # Add time range
+        if semantic_ref.range:
+            relevant_action.time_range = await get_enclosing_data_range_for_messages(
+                conversation.messages, {semantic_ref.range.start.message_ordinal}
+            )
+
+        relevant_actions.append(relevant_action)
+
+    return relevant_actions
 
 
 async def create_relevant_knowledge(
