@@ -24,7 +24,7 @@ Momex provides two levels of API:
 | Level | Class | Description |
 |-------|-------|-------------|
 | **Level 1** | `Agent` | High-level chat API - automatic memory management |
-| **Level 2** | `Memory`, `ShortTermMemory` | Low-level APIs - manual control |
+| **Level 2** | `Memory` | Low-level API - manual control |
 
 ## Agent API (Level 1)
 

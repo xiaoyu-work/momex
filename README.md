@@ -47,7 +47,7 @@ asyncio.run(main())
 | Level | API | Description |
 |-------|-----|-------------|
 | **Level 1** | `Agent` | Chat API with automatic memory (recommended) |
-| **Level 2** | `Memory`, `ShortTermMemory` | Manual control for custom agents |
+| **Level 2** | `Memory` | Manual control for custom agents |
 
 See [docs/momex.md](docs/momex.md) for full documentation.
 

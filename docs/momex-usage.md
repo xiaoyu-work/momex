@@ -13,7 +13,7 @@ Momex provides two levels of abstraction:
 | Level | API | Use Case |
 |-------|-----|----------|
 | **Level 1** | `Agent` | Chat applications - automatic memory management |
-| **Level 2** | `Memory`, `ShortTermMemory` | Custom agents - full control over memory |
+| **Level 2** | `Memory` | Custom agents - full control over memory |
 
 ## Level 1: Agent API (Recommended)
 
@@ -134,7 +134,7 @@ response = await agent.chat("I'm Alice")
 print(response.content)  # Assistant's reply
 ```
 
-The Agent automatically handles memory decisions internally. If you need to inspect or control memory storage, use the Level 2 APIs (`Memory`, `ShortTermMemory`).
+The Agent automatically handles memory decisions internally. If you need to inspect or control memory storage, use the Level 2 API (`Memory`). For cross-collection queries, use the module-level `query()` and `search()` functions.
 
 ---
 
