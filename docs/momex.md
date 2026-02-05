@@ -48,9 +48,6 @@ async def main():
     r = await xiaoyuzhang.chat("What's my name?")
     print(r.content)  # "Your name is Xiaoyu"
 
-    await xiaoyuzhang.close()
-    await gvanrossum.close()
-
 asyncio.run(main())
 ```
 

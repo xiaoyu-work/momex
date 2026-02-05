@@ -24,12 +24,14 @@ Example:
 from __future__ import annotations
 
 import re
+import sqlite3
 import uuid
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal, Any
+from typing import Literal, Any, Generator
 
 from .config import MomexConfig
 
@@ -68,9 +70,11 @@ class ShortTermMemory:
 
     Maintains conversation history with:
     - In-memory deque for fast access
-    - SQLite/PostgreSQL persistence for durability
+    - SQLite persistence for durability (connections opened/closed on demand)
     - Session-based organization
     - Automatic expiration cleanup
+
+    No manual close() needed - database connections are managed automatically.
 
     Example:
         >>> stm = ShortTermMemory("user:alice", config)
@@ -124,39 +128,18 @@ class ShortTermMemory:
         )
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Database connection (kept open for performance, closed explicitly)
-        self._db: Any = None
-
-        # Initialize database and load session
+        # Initialize database schema and load session
         self._init_db()
         self._load_from_db()
 
-    def _get_db(self):
-        """Get or create database connection."""
-        import sqlite3
-
-        if self._db is None:
-            self._db = sqlite3.connect(self._db_path)
-        return self._db
-
-    def close(self) -> None:
-        """Close database connection.
-
-        Call this when done using the ShortTermMemory to release the database file.
-        Important on Windows where open connections prevent file deletion.
-        """
-        if self._db is not None:
-            self._db.close()
-            self._db = None
-
-    def __enter__(self):
-        """Context manager entry."""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit - closes connection."""
-        self.close()
-        return False
+    @contextmanager
+    def _get_db(self) -> Generator[sqlite3.Connection, None, None]:
+        """Get a database connection (opened and closed automatically)."""
+        conn = sqlite3.connect(self._db_path)
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     @property
     def session_id(self) -> str:
@@ -219,12 +202,12 @@ class ShortTermMemory:
 
     def clear(self) -> None:
         """Clear all messages in current session."""
-        conn = self._get_db()
-        conn.execute(
-            "DELETE FROM ShortTermMessages WHERE session_id = ?",
-            (self._session_id,),
-        )
-        conn.commit()
+        with self._get_db() as conn:
+            conn.execute(
+                "DELETE FROM ShortTermMessages WHERE session_id = ?",
+                (self._session_id,),
+            )
+            conn.commit()
         self._cache.clear()
 
     def stats(self) -> dict[str, Any]:
@@ -233,27 +216,26 @@ class ShortTermMemory:
         Returns:
             Dict with message counts and session info.
         """
-        conn = self._get_db()
+        with self._get_db() as conn:
+            # Current session stats
+            row = conn.execute(
+                """
+                SELECT COUNT(*), MIN(timestamp), MAX(timestamp)
+                FROM ShortTermMessages
+                WHERE session_id = ?
+                """,
+                (self._session_id,),
+            ).fetchone()
 
-        # Current session stats
-        row = conn.execute(
-            """
-            SELECT COUNT(*), MIN(timestamp), MAX(timestamp)
-            FROM ShortTermMessages
-            WHERE session_id = ?
-            """,
-            (self._session_id,),
-        ).fetchone()
+            # Total sessions
+            total_sessions = conn.execute(
+                "SELECT COUNT(DISTINCT session_id) FROM ShortTermMessages"
+            ).fetchone()[0]
 
-        # Total sessions
-        total_sessions = conn.execute(
-            "SELECT COUNT(DISTINCT session_id) FROM ShortTermMessages"
-        ).fetchone()[0]
-
-        # Total messages across all sessions
-        total_messages = conn.execute(
-            "SELECT COUNT(*) FROM ShortTermMessages"
-        ).fetchone()[0]
+            # Total messages across all sessions
+            total_messages = conn.execute(
+                "SELECT COUNT(*) FROM ShortTermMessages"
+            ).fetchone()[0]
 
         return {
             "collection": self.collection,
@@ -289,11 +271,11 @@ class ShortTermMemory:
         Returns:
             True if session exists and was loaded, False otherwise.
         """
-        conn = self._get_db()
-        exists = conn.execute(
-            "SELECT 1 FROM ShortTermMessages WHERE session_id = ? LIMIT 1",
-            (session_id,),
-        ).fetchone()
+        with self._get_db() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM ShortTermMessages WHERE session_id = ? LIMIT 1",
+                (session_id,),
+            ).fetchone()
 
         if not exists:
             return False
@@ -312,17 +294,17 @@ class ShortTermMemory:
         Returns:
             List of SessionInfo objects.
         """
-        conn = self._get_db()
-        rows = conn.execute(
-            """
-            SELECT session_id, MIN(timestamp), MAX(timestamp), COUNT(*)
-            FROM ShortTermMessages
-            GROUP BY session_id
-            ORDER BY MAX(timestamp) DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        with self._get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT session_id, MIN(timestamp), MAX(timestamp), COUNT(*)
+                FROM ShortTermMessages
+                GROUP BY session_id
+                ORDER BY MAX(timestamp) DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
 
         return [
             SessionInfo(
@@ -343,13 +325,13 @@ class ShortTermMemory:
         Returns:
             True if session was deleted, False if not found.
         """
-        conn = self._get_db()
-        cursor = conn.execute(
-            "DELETE FROM ShortTermMessages WHERE session_id = ?",
-            (session_id,),
-        )
-        conn.commit()
-        deleted = cursor.rowcount > 0
+        with self._get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM ShortTermMessages WHERE session_id = ?",
+                (session_id,),
+            )
+            conn.commit()
+            deleted = cursor.rowcount > 0
 
         # Clear cache if deleting current session
         if session_id == self._session_id:
@@ -368,13 +350,13 @@ class ShortTermMemory:
             datetime.now(timezone.utc) - timedelta(hours=self.session_ttl_hours)
         ).isoformat()
 
-        conn = self._get_db()
-        cursor = conn.execute(
-            "DELETE FROM ShortTermMessages WHERE timestamp < ?",
-            (cutoff,),
-        )
-        conn.commit()
-        return cursor.rowcount
+        with self._get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM ShortTermMessages WHERE timestamp < ?",
+                (cutoff,),
+            )
+            conn.commit()
+            return cursor.rowcount
 
     # =========================================================================
     # Database Operations (Internal)
@@ -382,45 +364,45 @@ class ShortTermMemory:
 
     def _init_db(self) -> None:
         """Initialize database schema."""
-        conn = self._get_db()
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ShortTermMessages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                timestamp TEXT NOT NULL
+        with self._get_db() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ShortTermMessages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    timestamp TEXT NOT NULL
+                )
+                """
             )
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_stm_session
-            ON ShortTermMessages(session_id)
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_stm_timestamp
-            ON ShortTermMessages(timestamp)
-            """
-        )
-        conn.commit()
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_stm_session
+                ON ShortTermMessages(session_id)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_stm_timestamp
+                ON ShortTermMessages(timestamp)
+                """
+            )
+            conn.commit()
 
     def _load_from_db(self) -> None:
         """Load current session from database into cache."""
-        conn = self._get_db()
-        rows = conn.execute(
-            """
-            SELECT id, role, content, timestamp
-            FROM ShortTermMessages
-            WHERE session_id = ?
-            ORDER BY timestamp ASC
-            LIMIT ?
-            """,
-            (self._session_id, self.max_messages),
-        ).fetchall()
+        with self._get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, role, content, timestamp
+                FROM ShortTermMessages
+                WHERE session_id = ?
+                ORDER BY timestamp ASC
+                LIMIT ?
+                """,
+                (self._session_id, self.max_messages),
+            ).fetchall()
 
         self._cache.clear()
         for row in rows:
@@ -430,13 +412,13 @@ class ShortTermMemory:
 
     def _save_to_db(self, message: Message) -> None:
         """Save a message to database."""
-        conn = self._get_db()
-        cursor = conn.execute(
-            """
-            INSERT INTO ShortTermMessages (session_id, role, content, timestamp)
-            VALUES (?, ?, ?, ?)
-            """,
-            (self._session_id, message.role, message.content, message.timestamp),
-        )
-        conn.commit()
-        message.id = cursor.lastrowid
+        with self._get_db() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO ShortTermMessages (session_id, role, content, timestamp)
+                VALUES (?, ?, ?, ?)
+                """,
+                (self._session_id, message.role, message.content, message.timestamp),
+            )
+            conn.commit()
+            message.id = cursor.lastrowid

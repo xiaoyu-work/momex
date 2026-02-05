@@ -404,26 +404,6 @@ Summary:"""
         return self._short_term.cleanup_expired()
 
     # =========================================================================
-    # Resource Management
-    # =========================================================================
-
-    async def close(self) -> None:
-        """Close all connections and release resources.
-
-        Always call this when done with the agent.
-        """
-        self._short_term.close()
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        await self.close()
-        return False
-
-    # =========================================================================
     # Stats & Info
     # =========================================================================
 

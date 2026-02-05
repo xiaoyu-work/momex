@@ -41,8 +41,6 @@ async def main():
     response = await agent.chat("What's the weather today?")
     # NOT stored to long-term memory (temporary query)
 
-    await agent.close()
-
 asyncio.run(main())
 ```
 
@@ -85,8 +83,6 @@ for msg in history:
 
 # Clear history
 agent.clear_history()
-
-await agent.close()
 ```
 
 ### End Session with Summary
@@ -100,15 +96,6 @@ await agent.chat("I prefer Python over Java")
 # End session - optionally save summary to long-term memory
 summary = await agent.end_session(save_summary=True)
 print(summary)  # "Bob works at Google and prefers Python"
-```
-
-### Context Manager
-
-```python
-async with Agent("user:xiaoyuzhang", config) as agent:
-    response = await agent.chat("Hello!")
-    print(response.content)
-# Connection closed automatically
 ```
 
 ### Custom System Prompt
@@ -138,7 +125,6 @@ agent = Agent(
 | `cleanup_expired_sessions()` | Remove old sessions |
 | `stats()` | Get short-term stats |
 | `await stats_async()` | Get full stats (short + long term) |
-| `await close()` | Close connections |
 
 ### ChatResponse
 

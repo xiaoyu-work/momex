@@ -39,8 +39,6 @@ async def main():
     r = await agent.chat("What's my name?")
     print(r.content)  # "Your name is Xiaoyu"
 
-    await agent.close()
-
 asyncio.run(main())
 ```
 
