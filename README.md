@@ -29,7 +29,7 @@ async def main():
         llm=LLMConfig(
             provider="openai",
             model="gpt-4o",
-            api_key="sk-xxx",  # or use MOMEX_LLM_API_KEY env var
+            api_key="sk-xxx",
         ),
     )
 
