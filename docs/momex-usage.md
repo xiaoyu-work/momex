@@ -150,14 +150,16 @@ Momex is fully async. All operations use `async/await`:
 
 ```python
 import asyncio
-from momex import Memory, MomexConfig
+from momex import Memory, MomexConfig, LLMConfig
 
 async def main():
     # Configure LLM once (required)
-    # Use MOMEX_API_KEY env var for the key
     MomexConfig.set_default(
-        provider="openai",
-        model="gpt-4o",
+        llm=LLMConfig(
+            provider="openai",
+            model="gpt-4o",
+            api_key="sk-xxx",  # or use MOMEX_LLM_API_KEY env var
+        ),
     )
 
     memory = Memory(collection="user:xiaoyuzhang")
@@ -352,25 +354,75 @@ manager.rename("user:old", "user:new")
 
 ## Configuration
 
-Momex supports two storage backends:
-- **SQLite** (default): Local file-based storage, one database per collection
-- **PostgreSQL**: Shared database for multi-instance deployment
+Configuration has three parts:
+- **LLM**: Required for knowledge extraction and query answering
+- **Embedding**: Optional, auto-inferred from LLM for OpenAI/Azure
+- **Storage**: SQLite (default) or PostgreSQL
 
-### SQLite Configuration (Default)
+### Basic Configuration
 
 ```python
-from momex import Memory, MomexConfig
+from momex import Memory, MomexConfig, LLMConfig
+
+# Configure with code
+config = MomexConfig(
+    llm=LLMConfig(
+        provider="openai",
+        model="gpt-4o",
+        api_key="sk-xxx",
+    ),
+)
+
+memory = Memory(collection="user:xiaoyuzhang", config=config)
+```
+
+### Global Default
+
+```python
+from momex import Memory, MomexConfig, LLMConfig
 
 # Set global default once
-# Use MOMEX_API_KEY env var for the key
 MomexConfig.set_default(
-    provider="openai",
-    model="gpt-4o",
-    storage_path="./my_data",  # Optional, default: "./momex_data"
+    llm=LLMConfig(
+        provider="openai",
+        model="gpt-4o",
+        api_key="sk-xxx",
+    ),
 )
 
 # Then use Memory without passing config
 memory = Memory(collection="user:xiaoyuzhang")
+```
+
+### From Environment Variables
+
+```python
+from momex import Memory, MomexConfig
+
+# Load from MOMEX_* environment variables
+config = MomexConfig.from_env()
+memory = Memory(collection="user:xiaoyuzhang", config=config)
+```
+
+### Separate LLM and Embedding
+
+For non-OpenAI LLMs, you need to configure embedding separately:
+
+```python
+from momex import MomexConfig, LLMConfig, EmbeddingConfig
+
+# Anthropic LLM + OpenAI Embedding
+config = MomexConfig(
+    llm=LLMConfig(
+        provider="anthropic",
+        model="claude-sonnet-4-20250514",
+        api_key="sk-ant-xxx",
+    ),
+    embedding=EmbeddingConfig(
+        provider="openai",
+        api_key="sk-xxx",
+    ),
+)
 ```
 
 ### PostgreSQL Configuration
@@ -386,55 +438,49 @@ pip install momex[postgres]
 ```
 
 ```python
-from momex import Memory, MomexConfig, PostgresConfig
+from momex import MomexConfig, LLMConfig, StorageConfig
 
-MomexConfig.set_default(
-    provider="openai",
-    model="gpt-4o",
-    backend="postgres",
-    postgres=PostgresConfig(
-        url="postgresql://user:password@localhost:5432/momex",
-        pool_min=2,
-        pool_max=10,
-    )
+config = MomexConfig(
+    llm=LLMConfig(
+        provider="openai",
+        model="gpt-4o",
+        api_key="sk-xxx",
+    ),
+    storage=StorageConfig(
+        backend="postgres",
+        postgres_url="postgresql://user:password@localhost:5432/momex",
+        postgres_pool_min=2,
+        postgres_pool_max=10,
+    ),
 )
-
-memory = Memory(collection="user:xiaoyuzhang")
 ```
 
 ### YAML Configuration
 
-**SQLite (config_sqlite.yaml):**
+**config.yaml:**
 ```yaml
-backend: sqlite
-storage_path: ./momex_data
+llm:
+  provider: openai
+  model: gpt-4o
+  api_key: sk-xxx  # or use MOMEX_LLM_API_KEY env var
+  temperature: 0.0
 
-provider: openai
-model: gpt-4o
+# embedding: (optional, auto-inferred for OpenAI/Azure)
+#   provider: openai
+#   model: text-embedding-3-small
+#   api_key: sk-xxx
+
+storage:
+  backend: sqlite  # or postgres
+  path: ./momex_data
+  # postgres_url: postgresql://user:password@localhost:5432/momex
+  # postgres_schema: optional schema for collection isolation
 ```
-
-**PostgreSQL (config_postgres.yaml):**
-```yaml
-backend: postgres
-
-postgres:
-  url: postgresql://user:password@localhost:5432/momex
-  # schema: optional schema for collection isolation
-  pool_min: 2
-  pool_max: 10
-```
-
-If `schema` is not provided, Momex derives one from the collection name by
-lowercasing and replacing non-alphanumeric characters with `_`. Different
-collection names can map to the same schema (e.g., `a-b` and `a_b`), so set an
-explicit schema if you need strict isolation.
 
 **Load from YAML:**
 ```python
-config = MomexConfig.from_yaml("config_postgres.yaml")
-MomexConfig._default = config  # Set as global default
-
-memory = Memory(collection="user:xiaoyuzhang")
+config = MomexConfig.from_yaml("config.yaml")
+memory = Memory(collection="user:xiaoyuzhang", config=config)
 ```
 
 **Save to YAML:**
@@ -442,63 +488,52 @@ memory = Memory(collection="user:xiaoyuzhang")
 config.to_yaml("my_config.yaml")
 ```
 
-### LLM Configuration
-
-LLM is required. Supports **OpenAI**, **Azure**, **Anthropic**, **DeepSeek**, **Qwen**.
-
-```python
-from momex import MomexConfig
-
-# OpenAI
-MomexConfig.set_default(provider="openai", model="gpt-4o")
-
-# Azure OpenAI
-MomexConfig.set_default(provider="azure", model="gpt-4o", api_base="https://xxx.openai.azure.com")
-
-# Anthropic
-MomexConfig.set_default(provider="anthropic", model="claude-sonnet-4-20250514")
-
-# DeepSeek
-MomexConfig.set_default(provider="deepseek", model="deepseek-chat")
-
-# Qwen (Alibaba Cloud)
-MomexConfig.set_default(provider="qwen", model="qwen-plus")
-```
-
-**YAML Configuration:**
-```yaml
-provider: openai  # openai, azure, anthropic, deepseek, qwen
-model: gpt-4o
-# api_base: https://xxx.openai.azure.com  # Required for Azure
-temperature: 0.0
-```
-
 ### Environment Variables
+
+See [Environment Variables](env-vars.md) for full documentation.
+
+**LLM (required):**
 
 | Variable | Description |
 |----------|-------------|
-| `MOMEX_BACKEND` | `sqlite` or `postgres` |
+| `MOMEX_LLM_PROVIDER` | LLM provider: `openai`, `azure`, `anthropic`, `deepseek`, `qwen` |
+| `MOMEX_LLM_MODEL` | Model name |
+| `MOMEX_LLM_API_KEY` | API key |
+| `MOMEX_LLM_API_BASE` | Base URL (required for Azure) |
+
+**Embedding (optional):**
+
+| Variable | Description |
+|----------|-------------|
+| `MOMEX_EMBEDDING_PROVIDER` | Embedding provider: `openai`, `azure` |
+| `MOMEX_EMBEDDING_MODEL` | Model name (default: `text-embedding-3-small`) |
+| `MOMEX_EMBEDDING_API_KEY` | API key (defaults to LLM key if same provider) |
+
+**Storage:**
+
+| Variable | Description |
+|----------|-------------|
+| `MOMEX_STORAGE_BACKEND` | `sqlite` or `postgres` |
 | `MOMEX_STORAGE_PATH` | SQLite storage directory |
-| `MOMEX_POSTGRES_URL` | PostgreSQL connection URL |
-| `MOMEX_POSTGRES_SCHEMA` | Optional schema for collection isolation |
-| `MOMEX_PROVIDER` | LLM provider: `openai`, `azure`, `anthropic`, `deepseek`, `qwen` |
-| `MOMEX_MODEL` | LLM model name |
-| `MOMEX_API_KEY` | LLM API key |
-| `MOMEX_API_BASE` | LLM API base URL (required for Azure) |
+| `MOMEX_STORAGE_POSTGRES_URL` | PostgreSQL connection URL |
+| `MOMEX_STORAGE_POSTGRES_SCHEMA` | Schema for collection isolation |
 
 ```bash
-# SQLite
-export MOMEX_STORAGE_PATH=./my_data
+# OpenAI (simplest)
+export MOMEX_LLM_PROVIDER=openai
+export MOMEX_LLM_MODEL=gpt-4o
+export MOMEX_LLM_API_KEY=sk-xxx
+
+# Anthropic + OpenAI Embedding
+export MOMEX_LLM_PROVIDER=anthropic
+export MOMEX_LLM_MODEL=claude-sonnet-4-20250514
+export MOMEX_LLM_API_KEY=sk-ant-xxx
+export MOMEX_EMBEDDING_PROVIDER=openai
+export MOMEX_EMBEDDING_API_KEY=sk-xxx
 
 # PostgreSQL
-export MOMEX_BACKEND=postgres
-export MOMEX_POSTGRES_URL=postgresql://user:pass@localhost:5432/momex
-
-# LLM
-export MOMEX_PROVIDER=openai
-export MOMEX_MODEL=gpt-4o
-export MOMEX_API_KEY=sk-xxx
-# export MOMEX_API_BASE=https://xxx.openai.azure.com  # Required for Azure
+export MOMEX_STORAGE_BACKEND=postgres
+export MOMEX_STORAGE_POSTGRES_URL=postgresql://user:pass@localhost:5432/momex
 ```
 
 ## API Reference

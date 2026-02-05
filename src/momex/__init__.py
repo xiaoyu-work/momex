@@ -16,14 +16,16 @@ Logging:
 
 Example:
     >>> import asyncio
-    >>> from momex import Memory, MomexConfig
+    >>> from momex import Memory, MomexConfig, LLMConfig
     >>>
     >>> async def main():
     ...     # Configure LLM (required)
     ...     config = MomexConfig(
-    ...         provider="openai",  # openai, azure, anthropic, deepseek, qwen
-    ...         model="gpt-4o",
-    ...         # api_key via MOMEX_API_KEY env var
+    ...         llm=LLMConfig(
+    ...             provider="openai",  # openai, azure, anthropic, deepseek, qwen
+    ...             model="gpt-4o",
+    ...             api_key="sk-xxx",  # or use MOMEX_LLM_API_KEY env var
+    ...         ),
     ...     )
     ...
     ...     # Create memory
@@ -38,28 +40,24 @@ Example:
     >>> asyncio.run(main())
 
 Configuration:
-    LLM and embedding models can be configured via code, YAML, or
-    environment variables. The same LLM config is used for both TypeAgent
-    (knowledge extraction) and Momex (contradiction detection).
-
-    Supported providers: openai, azure, anthropic, deepseek, qwen
+    Supported LLM providers: openai, azure, anthropic, deepseek, qwen
+    Supported embedding providers: openai, azure
 
     Code:
-        config = MomexConfig(provider="openai", model="gpt-4o", api_key="sk-xxx")
+        config = MomexConfig(
+            llm=LLMConfig(provider="openai", model="gpt-4o", api_key="sk-xxx"),
+        )
 
     YAML:
         config = MomexConfig.from_yaml("config.yaml")
 
     Environment variables:
-        export MOMEX_PROVIDER=openai
-        export MOMEX_MODEL=gpt-4o
-        export MOMEX_API_KEY=sk-xxx
-        export MOMEX_EMBEDDING_MODEL=text-embedding-3-small
+        config = MomexConfig.from_env()
 """
 
 import logging
 
-from .config import MomexConfig, PostgresConfig
+from .config import MomexConfig, LLMConfig, EmbeddingConfig, StorageConfig
 from .exceptions import (
     CollectionNotFoundError,
     ConfigurationError,
@@ -84,7 +82,9 @@ __all__ = [
     "Memory",
     "MemoryManager",
     "MomexConfig",
-    "PostgresConfig",
+    "LLMConfig",
+    "EmbeddingConfig",
+    "StorageConfig",
     # Data classes
     "AddResult",
     "SearchItem",

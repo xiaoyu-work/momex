@@ -289,18 +289,18 @@ class Memory:
         # Use collection name as part of table prefix or schema
         # For now, we'll use a single database with collection stored in metadata
         schema = (
-            self.config.postgres.schema
-            if self.config.postgres.schema
+            self.config.storage.postgres_schema
+            if self.config.storage.postgres_schema
             else _collection_to_schema(self.collection)
         )
 
         storage_provider = await PostgresStorageProvider.create(
-            connection_string=self.config.postgres.url,
+            connection_string=self.config.storage.postgres_url,
             message_type=ConversationMessage,
             message_text_index_settings=message_text_index_settings,
             related_term_index_settings=related_term_index_settings,
-            min_pool_size=self.config.postgres.pool_min,
-            max_pool_size=self.config.postgres.pool_max,
+            min_pool_size=self.config.storage.postgres_pool_min,
+            max_pool_size=self.config.storage.postgres_pool_max,
             schema=schema,
             metadata=ConversationMetadata(
                 name_tag=self.collection,
@@ -887,7 +887,7 @@ Response:"""
         For PostgreSQL: returns the connection URL.
         """
         if self.config.is_postgres:
-            return self.config.postgres.url
+            return self.config.storage.postgres_url
         return str(_collection_to_db_path(
             self.collection,
             self.config.storage_path,

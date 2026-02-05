@@ -1,4 +1,13 @@
-"""Momex configuration module."""
+"""Momex configuration module.
+
+Provides structured configuration for LLM, embedding, and storage settings.
+Supports code-based configuration, YAML files, and environment variables.
+
+Environment variables use the MOMEX_ prefix with nested structure:
+- LLM: MOMEX_LLM_PROVIDER, MOMEX_LLM_MODEL, MOMEX_LLM_API_KEY, MOMEX_LLM_API_BASE
+- Embedding: MOMEX_EMBEDDING_PROVIDER, MOMEX_EMBEDDING_MODEL, MOMEX_EMBEDDING_API_KEY
+- Storage: MOMEX_STORAGE_BACKEND, MOMEX_STORAGE_PATH, MOMEX_STORAGE_POSTGRES_URL
+"""
 
 from __future__ import annotations
 
@@ -11,28 +20,88 @@ from .exceptions import ConfigurationError
 
 
 @dataclass
-class PostgresConfig:
-    """PostgreSQL configuration.
+class LLMConfig:
+    """LLM configuration.
 
     Attributes:
-        url: PostgreSQL connection URL.
-        pool_min: Minimum connections in pool.
-        pool_max: Maximum connections in pool.
-        schema: Optional schema name to isolate collections.
+        provider: LLM provider (openai, azure, anthropic, deepseek, qwen).
+        model: Model name (e.g., "gpt-4o", "claude-sonnet-4-20250514").
+        api_key: API key for the provider.
+        api_base: Base URL (required for Azure).
+        temperature: Temperature for responses (default: 0.0).
     """
 
-    url: str = ""
-    pool_min: int = 2
-    pool_max: int = 10
-    schema: str = ""
+    provider: str = "openai"
+    model: str = ""
+    api_key: str = ""
+    api_base: str = ""
+    temperature: float = 0.0
 
-    def __post_init__(self) -> None:
-        env_url = os.getenv("MOMEX_POSTGRES_URL")
-        if env_url and not self.url:
-            self.url = env_url
-        env_schema = os.getenv("MOMEX_POSTGRES_SCHEMA")
-        if env_schema and not self.schema:
-            self.schema = env_schema
+    def to_typeagent_config(self):
+        """Convert to TypeAgent LLMConfig."""
+        from typeagent.llm import LLMConfig as TALLMConfig
+
+        return TALLMConfig(
+            provider=self.provider,
+            model=self.model,
+            api_key=self.api_key,
+            api_base=self.api_base,
+            temperature=self.temperature,
+        )
+
+    def create_llm(self):
+        """Create TypeAgent LLM instance."""
+        from typeagent.llm import create_llm
+
+        return create_llm(self.to_typeagent_config())
+
+
+@dataclass
+class EmbeddingConfig:
+    """Embedding model configuration.
+
+    Attributes:
+        provider: Embedding provider (openai, azure). Only OpenAI-compatible providers supported.
+        model: Model name (e.g., "text-embedding-3-small").
+        api_key: API key. If None, attempts to reuse from LLM config.
+        api_base: Base URL for the embedding API.
+        dimensions: Optional embedding dimension override.
+    """
+
+    provider: str = "openai"
+    model: str = "text-embedding-3-small"
+    api_key: str = ""
+    api_base: str = ""
+    dimensions: int | None = None
+
+
+@dataclass
+class StorageConfig:
+    """Storage configuration.
+
+    Attributes:
+        backend: Storage backend (sqlite, postgres).
+        path: SQLite storage directory (default: "./momex_data").
+        postgres_url: PostgreSQL connection URL.
+        postgres_schema: PostgreSQL schema name for collection isolation.
+        postgres_pool_min: Minimum pool connections (default: 2).
+        postgres_pool_max: Maximum pool connections (default: 10).
+    """
+
+    backend: Literal["sqlite", "postgres"] = "sqlite"
+    path: str = "./momex_data"
+    postgres_url: str = ""
+    postgres_schema: str = ""
+    postgres_pool_min: int = 2
+    postgres_pool_max: int = 10
+
+    @property
+    def is_postgres(self) -> bool:
+        return self.backend == "postgres"
+
+    @property
+    def is_sqlite(self) -> bool:
+        return self.backend == "sqlite"
 
 
 @dataclass
@@ -41,94 +110,223 @@ class MomexConfig:
 
     Example:
         config = MomexConfig(
-            provider="openai",
-            model="gpt-4o",
-            embedding_model="text-embedding-3-small",
+            llm=LLMConfig(
+                provider="openai",
+                model="gpt-4o",
+                api_key="sk-xxx",
+            ),
         )
+
+        # Anthropic LLM + OpenAI Embedding
+        config = MomexConfig(
+            llm=LLMConfig(
+                provider="anthropic",
+                model="claude-sonnet-4-20250514",
+                api_key="sk-ant-xxx",
+            ),
+            embedding=EmbeddingConfig(
+                provider="openai",
+                api_key="sk-xxx",
+            ),
+        )
+
+        # From environment variables
+        config = MomexConfig.from_env()
+
+        # From YAML file
+        config = MomexConfig.from_yaml("config.yaml")
     """
 
     # Class-level default
     _default: "MomexConfig | None" = None
 
-    # LLM (required)
-    provider: str = ""  # openai, azure, anthropic, deepseek, qwen
-    model: str = ""
-    api_key: str = ""
-    api_base: str = ""  # Required for Azure
-    temperature: float = 0.0
-
-    # Embeddings (optional - API keys via env vars)
-    embedding_model: str = ""
-    embedding_size: int | None = None
-    embedding_endpoint_envvar: str = ""
-
-    # Storage
-    backend: Literal["sqlite", "postgres"] = "sqlite"
-    storage_path: str = "./momex_data"  # SQLite only
-    postgres: PostgresConfig = field(default_factory=PostgresConfig)
-
-    def __post_init__(self) -> None:
-        # Env var overrides
-        if env := os.getenv("MOMEX_BACKEND"):
-            if env in ("sqlite", "postgres"):
-                self.backend = env  # type: ignore
-        if env := os.getenv("MOMEX_STORAGE_PATH"):
-            self.storage_path = env
-
-    def validate(self) -> None:
-        """Validate configuration."""
-        # LLM env var fallbacks
-        if not self.provider:
-            self.provider = os.getenv("MOMEX_PROVIDER", "openai")
-        if not self.model:
-            self.model = os.getenv("MOMEX_MODEL", "")
-        if not self.api_key:
-            self.api_key = os.getenv("MOMEX_API_KEY", "")
-        if not self.api_base:
-            self.api_base = os.getenv("MOMEX_API_BASE", "")
-
-        # Embedding env var fallbacks
-        if not self.embedding_model:
-            self.embedding_model = os.getenv("MOMEX_EMBEDDING_MODEL", "")
-        if self.embedding_size is None:
-            env_size = os.getenv("MOMEX_EMBEDDING_SIZE", "")
-            if env_size:
-                try:
-                    self.embedding_size = int(env_size)
-                except ValueError as exc:
-                    raise ConfigurationError(
-                        message="embedding_size must be an integer",
-                        suggestion="Set MOMEX_EMBEDDING_SIZE to an integer value",
-                    ) from exc
-        if not self.embedding_endpoint_envvar:
-            self.embedding_endpoint_envvar = os.getenv(
-                "MOMEX_EMBEDDING_ENDPOINT_ENVVAR", ""
-            )
-
-        if not self.model:
-            raise ConfigurationError(
-                message="model is required",
-                suggestion="Set model in MomexConfig or MOMEX_MODEL env var",
-            )
-        if not self.api_key:
-            raise ConfigurationError(
-                message="api_key is required",
-                suggestion="Set api_key in MomexConfig or MOMEX_API_KEY env var",
-            )
-        if self.provider == "azure" and not self.api_base:
-            raise ConfigurationError(
-                message="api_base is required for Azure",
-                suggestion="Set api_base in MomexConfig or MOMEX_API_BASE env var",
-            )
-        if self.backend == "postgres" and not self.postgres.url:
-            raise ConfigurationError(
-                message="postgres.url is required",
-                suggestion="Set postgres url or MOMEX_POSTGRES_URL env var",
-            )
+    llm: LLMConfig = field(default_factory=LLMConfig)
+    embedding: EmbeddingConfig | None = None
+    storage: StorageConfig = field(default_factory=StorageConfig)
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> MomexConfig:
-        """Load from YAML file."""
+    def from_env(cls) -> "MomexConfig":
+        """Load configuration from MOMEX_* environment variables.
+
+        Environment variables:
+            LLM:
+                MOMEX_LLM_PROVIDER - Provider (openai, azure, anthropic, deepseek, qwen)
+                MOMEX_LLM_MODEL - Model name (required)
+                MOMEX_LLM_API_KEY - API key (required)
+                MOMEX_LLM_API_BASE - Base URL (required for Azure)
+                MOMEX_LLM_TEMPERATURE - Temperature (default: 0.0)
+
+            Embedding (optional, auto-inferred if not set):
+                MOMEX_EMBEDDING_PROVIDER - Provider (openai, azure)
+                MOMEX_EMBEDDING_MODEL - Model name
+                MOMEX_EMBEDDING_API_KEY - API key (defaults to LLM key if compatible)
+                MOMEX_EMBEDDING_API_BASE - Base URL
+                MOMEX_EMBEDDING_DIMENSIONS - Embedding dimensions
+
+            Storage:
+                MOMEX_STORAGE_BACKEND - Backend (sqlite, postgres)
+                MOMEX_STORAGE_PATH - SQLite storage path
+                MOMEX_STORAGE_POSTGRES_URL - PostgreSQL URL
+                MOMEX_STORAGE_POSTGRES_SCHEMA - PostgreSQL schema
+        """
+        # LLM config
+        llm = LLMConfig(
+            provider=os.getenv("MOMEX_LLM_PROVIDER", "openai"),
+            model=os.getenv("MOMEX_LLM_MODEL", ""),
+            api_key=os.getenv("MOMEX_LLM_API_KEY", ""),
+            api_base=os.getenv("MOMEX_LLM_API_BASE", ""),
+            temperature=float(os.getenv("MOMEX_LLM_TEMPERATURE", "0.0")),
+        )
+
+        # Embedding config (optional)
+        embedding = None
+        if os.getenv("MOMEX_EMBEDDING_PROVIDER"):
+            embedding = EmbeddingConfig(
+                provider=os.getenv("MOMEX_EMBEDDING_PROVIDER", "openai"),
+                model=os.getenv("MOMEX_EMBEDDING_MODEL", "text-embedding-3-small"),
+                api_key=os.getenv("MOMEX_EMBEDDING_API_KEY", ""),
+                api_base=os.getenv("MOMEX_EMBEDDING_API_BASE", ""),
+                dimensions=int(os.getenv("MOMEX_EMBEDDING_DIMENSIONS", "0")) or None,
+            )
+
+        # Storage config
+        backend = os.getenv("MOMEX_STORAGE_BACKEND", "sqlite")
+        if backend not in ("sqlite", "postgres"):
+            backend = "sqlite"
+
+        storage = StorageConfig(
+            backend=backend,  # type: ignore
+            path=os.getenv("MOMEX_STORAGE_PATH", "./momex_data"),
+            postgres_url=os.getenv("MOMEX_STORAGE_POSTGRES_URL", ""),
+            postgres_schema=os.getenv("MOMEX_STORAGE_POSTGRES_SCHEMA", ""),
+        )
+
+        return cls(llm=llm, embedding=embedding, storage=storage)
+
+    def validate(self) -> None:
+        """Validate configuration.
+
+        Raises:
+            ConfigurationError: If configuration is invalid.
+        """
+        if not self.llm.model:
+            raise ConfigurationError(
+                message="LLM model is required",
+                suggestion="Set llm.model in MomexConfig or use MomexConfig.from_env()",
+            )
+        if not self.llm.api_key:
+            raise ConfigurationError(
+                message="LLM API key is required",
+                suggestion="Set llm.api_key in MomexConfig or use MomexConfig.from_env()",
+            )
+        if self.llm.provider == "azure" and not self.llm.api_base:
+            raise ConfigurationError(
+                message="LLM api_base is required for Azure",
+                suggestion="Set llm.api_base in MomexConfig",
+            )
+        if self.storage.is_postgres and not self.storage.postgres_url:
+            raise ConfigurationError(
+                message="PostgreSQL URL is required",
+                suggestion="Set storage.postgres_url in MomexConfig",
+            )
+
+    def get_embedding_config(self) -> EmbeddingConfig:
+        """Get embedding configuration, auto-inferring if not explicitly set.
+
+        If embedding is not configured:
+        - For OpenAI/Azure LLM: reuse LLM credentials
+        - For other providers: raise error (embedding must be configured separately)
+
+        Returns:
+            EmbeddingConfig with resolved settings.
+
+        Raises:
+            ConfigurationError: If embedding cannot be auto-inferred.
+        """
+        if self.embedding:
+            cfg = EmbeddingConfig(
+                provider=self.embedding.provider,
+                model=self.embedding.model,
+                api_key=self.embedding.api_key,
+                api_base=self.embedding.api_base,
+                dimensions=self.embedding.dimensions,
+            )
+            # If embedding API key not set, try to reuse LLM key if providers match
+            if not cfg.api_key and cfg.provider == self.llm.provider:
+                cfg.api_key = self.llm.api_key
+                if not cfg.api_base:
+                    cfg.api_base = self.llm.api_base
+            return cfg
+
+        # Auto-infer from LLM config
+        if self.llm.provider in ("openai", "azure"):
+            return EmbeddingConfig(
+                provider=self.llm.provider,
+                api_key=self.llm.api_key,
+                api_base=self.llm.api_base,
+            )
+        else:
+            raise ConfigurationError(
+                message=f"LLM provider '{self.llm.provider}' doesn't support embeddings",
+                suggestion="Set embedding config with MOMEX_EMBEDDING_* env vars or embedding parameter",
+            )
+
+    def create_embedding_model(self):
+        """Create TypeAgent embedding model.
+
+        Returns:
+            AsyncEmbeddingModel instance.
+        """
+        from typeagent.aitools.embeddings import AsyncEmbeddingModel
+
+        cfg = self.get_embedding_config()
+
+        # Set API keys for the embedding model (it reads from env vars)
+        if cfg.api_key:
+            if cfg.provider == "azure":
+                if not os.getenv("AZURE_OPENAI_API_KEY"):
+                    os.environ["AZURE_OPENAI_API_KEY"] = cfg.api_key
+            else:
+                if not os.getenv("OPENAI_API_KEY"):
+                    os.environ["OPENAI_API_KEY"] = cfg.api_key
+
+        return AsyncEmbeddingModel(
+            embedding_size=cfg.dimensions,
+            model_name=cfg.model or None,
+            endpoint_envvar=None,
+        )
+
+    def create_llm(self):
+        """Create TypeAgent LLM instance."""
+        return self.llm.create_llm()
+
+    def get_llm_config(self):
+        """Get TypeAgent LLMConfig."""
+        return self.llm.to_typeagent_config()
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "MomexConfig":
+        """Load from YAML file.
+
+        YAML format:
+            llm:
+              provider: openai
+              model: gpt-4o
+              api_key: sk-xxx  # or use env var
+              api_base: ""  # required for azure
+              temperature: 0.0
+
+            embedding:  # optional
+              provider: openai
+              model: text-embedding-3-small
+              api_key: ""  # defaults to llm.api_key if same provider
+
+            storage:
+              backend: sqlite  # or postgres
+              path: ./momex_data
+              postgres_url: ""
+              postgres_schema: ""
+        """
         import yaml
 
         path = Path(path)
@@ -138,48 +336,84 @@ class MomexConfig:
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
-        # Parse nested postgres config
-        postgres = None
-        if "postgres" in data:
-            postgres = PostgresConfig(**data.pop("postgres"))
+        # Parse LLM config
+        llm_data = data.get("llm", {})
+        llm = LLMConfig(
+            provider=llm_data.get("provider", "openai"),
+            model=llm_data.get("model", ""),
+            api_key=llm_data.get("api_key", ""),
+            api_base=llm_data.get("api_base", ""),
+            temperature=float(llm_data.get("temperature", 0.0)),
+        )
 
-        config = cls(**{k: v for k, v in data.items() if v is not None})
-        if postgres:
-            config.postgres = postgres
+        # Parse embedding config (optional)
+        embedding = None
+        if "embedding" in data:
+            emb_data = data["embedding"]
+            embedding = EmbeddingConfig(
+                provider=emb_data.get("provider", "openai"),
+                model=emb_data.get("model", "text-embedding-3-small"),
+                api_key=emb_data.get("api_key", ""),
+                api_base=emb_data.get("api_base", ""),
+                dimensions=emb_data.get("dimensions"),
+            )
 
-        return config
+        # Parse storage config
+        storage_data = data.get("storage", {})
+        backend = storage_data.get("backend", "sqlite")
+        if backend not in ("sqlite", "postgres"):
+            backend = "sqlite"
+
+        storage = StorageConfig(
+            backend=backend,  # type: ignore
+            path=storage_data.get("path", "./momex_data"),
+            postgres_url=storage_data.get("postgres_url", ""),
+            postgres_schema=storage_data.get("postgres_schema", ""),
+            postgres_pool_min=storage_data.get("postgres_pool_min", 2),
+            postgres_pool_max=storage_data.get("postgres_pool_max", 10),
+        )
+
+        return cls(llm=llm, embedding=embedding, storage=storage)
 
     def to_yaml(self, path: str | Path) -> None:
         """Save to YAML file."""
         import yaml
 
         data: dict = {
-            "provider": self.provider,
-            "model": self.model,
-            "api_key": self.api_key,
-            "temperature": self.temperature,
-            "backend": self.backend,
+            "llm": {
+                "provider": self.llm.provider,
+                "model": self.llm.model,
+                "api_key": self.llm.api_key,
+                "temperature": self.llm.temperature,
+            }
         }
 
-        if self.embedding_model:
-            data["embedding_model"] = self.embedding_model
-        if self.embedding_size is not None:
-            data["embedding_size"] = self.embedding_size
-        if self.embedding_endpoint_envvar:
-            data["embedding_endpoint_envvar"] = self.embedding_endpoint_envvar
+        if self.llm.api_base:
+            data["llm"]["api_base"] = self.llm.api_base
 
-        if self.api_base:
-            data["api_base"] = self.api_base
-
-        if self.backend == "sqlite":
-            data["storage_path"] = self.storage_path
-        else:
-            data["postgres"] = {
-                "url": self.postgres.url,
-                "pool_min": self.postgres.pool_min,
-                "pool_max": self.postgres.pool_max,
-                "schema": self.postgres.schema,
+        if self.embedding:
+            data["embedding"] = {
+                "provider": self.embedding.provider,
+                "model": self.embedding.model,
             }
+            if self.embedding.api_key:
+                data["embedding"]["api_key"] = self.embedding.api_key
+            if self.embedding.api_base:
+                data["embedding"]["api_base"] = self.embedding.api_base
+            if self.embedding.dimensions:
+                data["embedding"]["dimensions"] = self.embedding.dimensions
+
+        data["storage"] = {
+            "backend": self.storage.backend,
+        }
+        if self.storage.is_sqlite:
+            data["storage"]["path"] = self.storage.path
+        else:
+            data["storage"]["postgres_url"] = self.storage.postgres_url
+            if self.storage.postgres_schema:
+                data["storage"]["postgres_schema"] = self.storage.postgres_schema
+            data["storage"]["postgres_pool_min"] = self.storage.postgres_pool_min
+            data["storage"]["postgres_pool_max"] = self.storage.postgres_pool_max
 
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -187,9 +421,27 @@ class MomexConfig:
             yaml.safe_dump(data, f, default_flow_style=False)
 
     @classmethod
-    def set_default(cls, **kwargs) -> "MomexConfig":
-        """Set global default configuration."""
-        cls._default = cls(**kwargs)
+    def set_default(
+        cls,
+        llm: LLMConfig | None = None,
+        embedding: EmbeddingConfig | None = None,
+        storage: StorageConfig | None = None,
+    ) -> "MomexConfig":
+        """Set global default configuration.
+
+        Args:
+            llm: LLM configuration (required).
+            embedding: Embedding configuration (optional, auto-inferred).
+            storage: Storage configuration (optional, defaults to SQLite).
+
+        Returns:
+            The configured MomexConfig instance.
+        """
+        cls._default = cls(
+            llm=llm or LLMConfig(),
+            embedding=embedding,
+            storage=storage or StorageConfig(),
+        )
         return cls._default
 
     @classmethod
@@ -204,45 +456,15 @@ class MomexConfig:
         """Clear global default configuration."""
         cls._default = None
 
+    # Convenience properties for backward compatibility in internal code
     @property
     def is_postgres(self) -> bool:
-        return self.backend == "postgres"
+        return self.storage.is_postgres
 
     @property
     def is_sqlite(self) -> bool:
-        return self.backend == "sqlite"
+        return self.storage.is_sqlite
 
-    def get_llm_config(self):
-        """Get TypeAgent LLMConfig."""
-        from typeagent.llm import LLMConfig
-        return LLMConfig(
-            provider=self.provider,
-            model=self.model,
-            api_key=self.api_key,
-            api_base=self.api_base,
-            temperature=self.temperature,
-        )
-
-    def create_embedding_model(self):
-        """Create TypeAgent embedding model."""
-        from typeagent.aitools.embeddings import AsyncEmbeddingModel
-
-        # AsyncEmbeddingModel reads API key from env vars, so set them if we have a key
-        if self.api_key and not os.getenv("OPENAI_API_KEY") and not os.getenv("AZURE_OPENAI_API_KEY"):
-            if self.provider == "azure":
-                os.environ["AZURE_OPENAI_API_KEY"] = self.api_key
-            else:
-                os.environ["OPENAI_API_KEY"] = self.api_key
-
-        model_name = self.embedding_model or None
-        endpoint_envvar = self.embedding_endpoint_envvar or None
-        return AsyncEmbeddingModel(
-            embedding_size=self.embedding_size,
-            model_name=model_name,
-            endpoint_envvar=endpoint_envvar,
-        )
-
-    def create_llm(self):
-        """Create TypeAgent LLM instance."""
-        from typeagent.llm import create_llm
-        return create_llm(self.get_llm_config())
+    @property
+    def storage_path(self) -> str:
+        return self.storage.path

@@ -1,76 +1,134 @@
 # Environment Variables
 
-No LLM-using application today works without API tokens and/or other
-authentication secrets. These are almost always passed via environment
-variables.
+Load configuration from environment variables using `MomexConfig.from_env()`:
 
-Typeagent currently supports two families of environment variables:
+```python
+from momex import MomexConfig
 
-- Those for (public) OpenAI servers.
-- Those for the Azure OpenAI service.
+config = MomexConfig.from_env()
+```
 
-## OPENAI environment variables
+## LLM Configuration
 
-The (public) OpenAI environment variables include the following:
+Required for knowledge extraction and query answering:
 
-### Required:
+| Variable | Description |
+|----------|-------------|
+| `MOMEX_LLM_PROVIDER` | LLM provider: `openai`, `azure`, `anthropic`, `deepseek`, `qwen` |
+| `MOMEX_LLM_MODEL` | Model name (e.g., `gpt-4o`, `claude-sonnet-4-20250514`) |
+| `MOMEX_LLM_API_KEY` | API key for the LLM provider |
+| `MOMEX_LLM_API_BASE` | Base URL (required for Azure) |
+| `MOMEX_LLM_TEMPERATURE` | Temperature for responses (default: `0.0`) |
 
-- `OPENAI_API_KEY`: Your secret API key that you get from the
-  [OpenAI dashboard](https://platform.openai.com/api-keys).
-- `OPENAI_MODEL`: An environment variable introduced by
-  [TypeChat](https://microsoft.github.io/TypeChat/docs/examples/)
-  indicating the model to use (e.g.`gpt-4o`).
+Example:
+```bash
+export MOMEX_LLM_PROVIDER=openai
+export MOMEX_LLM_MODEL=gpt-4o
+export MOMEX_LLM_API_KEY=sk-xxx
+```
 
-### Optional:
+## Embedding Configuration
 
-- `OPENAI_BASE_URL`: The URL for an OpenAI-compatible embedding server,
-  e.g. [Infinity](https://github.com/michaelfeil/infinity). With this
-  option `OPENAI_API_KEY` also needs to be set, but can be any value.
-- `OPENAI_ENDPOINT`: The URL for an server compatible with the OpenAI
-  Chat Completions API. Make sure the `OPENAI_MODEL` variable matches
-  with the deployed model name, e.g. 'llama:3.2:1b'
+Optional. If not set, embeddings are auto-inferred from LLM config (works for OpenAI/Azure).
 
-## Azure OpenAI environment variables
+| Variable | Description |
+|----------|-------------|
+| `MOMEX_EMBEDDING_PROVIDER` | Embedding provider: `openai`, `azure` |
+| `MOMEX_EMBEDDING_MODEL` | Model name (default: `text-embedding-3-small`) |
+| `MOMEX_EMBEDDING_API_KEY` | API key (defaults to LLM key if same provider) |
+| `MOMEX_EMBEDDING_API_BASE` | Base URL for embedding API |
+| `MOMEX_EMBEDDING_DIMENSIONS` | Optional embedding dimension override |
 
-If you are using the OpenAI service hosted by Azure, you need different
-environment variables, starting with:
+Example (using Anthropic LLM with OpenAI embeddings):
+```bash
+# LLM
+export MOMEX_LLM_PROVIDER=anthropic
+export MOMEX_LLM_MODEL=claude-sonnet-4-20250514
+export MOMEX_LLM_API_KEY=sk-ant-xxx
 
-- `AZURE_OPENAI_API_KEY`: Your Azure OpenAI API key (or in some cases `identity`).
-- `AZURE_OPENAI_ENDPOINT`: The full URL of the Azure OpenAI REST API
-  (e.g. `https://YOUR_RESOURCE_NAME.openai.azure.com/openai/deployments/YOUR_DEPLOYMENT_NAME/chat/completions?api-version=2023-05-15`).
-- `AZURE_OPENAI_ENDPOINT_EMBEDDING`:
-  The full URL of the Azure OpenAI REST API for embeddings
-  (e.g. `https://YOUR_RESOURCE_NAME.openai.azure.com/openai/deployments/YOUR_EMBEDDING_DEPLOYMENT_NAME/embeddings?api-version=2024-08-01-preview`).
+# Embedding (required because Anthropic doesn't support embeddings)
+export MOMEX_EMBEDDING_PROVIDER=openai
+export MOMEX_EMBEDDING_API_KEY=sk-xxx
+```
 
-If you use Azure OpenAI you will know where to get these
-(or ask your sysadmin).
+## Storage Configuration
 
-## Conflicts
+| Variable | Description |
+|----------|-------------|
+| `MOMEX_STORAGE_BACKEND` | Storage backend: `sqlite` (default), `postgres` |
+| `MOMEX_STORAGE_PATH` | SQLite storage directory (default: `./momex_data`) |
+| `MOMEX_STORAGE_POSTGRES_URL` | PostgreSQL connection URL |
+| `MOMEX_STORAGE_POSTGRES_SCHEMA` | PostgreSQL schema name for collection isolation |
 
-If you set both `OPENAI_API_KEY` and `AZURE_OPENAI_API_KEY`,
-`OPENAI_API_KEY` will win.
+Example (SQLite):
+```bash
+export MOMEX_STORAGE_PATH=./my_data
+```
 
-## Momex convenience variables
+Example (PostgreSQL):
+```bash
+export MOMEX_STORAGE_BACKEND=postgres
+export MOMEX_STORAGE_POSTGRES_URL=postgresql://user:pass@localhost:5432/momex
+```
 
-Momex can also read embedding configuration from environment variables:
+## Complete Examples
 
-- `MOMEX_EMBEDDING_MODEL`: Embedding model name (e.g. `text-embedding-3-small`).
-- `MOMEX_EMBEDDING_SIZE`: Optional embedding dimension override.
-- `MOMEX_EMBEDDING_ENDPOINT_ENVVAR`: Optional env var name that holds the
-  embedding endpoint URL (defaults to `AZURE_OPENAI_ENDPOINT_EMBEDDING`).
+### OpenAI (simplest)
+```bash
+export MOMEX_LLM_PROVIDER=openai
+export MOMEX_LLM_MODEL=gpt-4o
+export MOMEX_LLM_API_KEY=sk-xxx
+# Embedding auto-inferred from LLM config
+```
 
-PostgreSQL configuration can also use environment variables:
+### Azure OpenAI
+```bash
+export MOMEX_LLM_PROVIDER=azure
+export MOMEX_LLM_MODEL=gpt-4o
+export MOMEX_LLM_API_KEY=xxx
+export MOMEX_LLM_API_BASE=https://xxx.openai.azure.com
+# Embedding auto-inferred from LLM config
+```
 
-- `MOMEX_POSTGRES_URL`: PostgreSQL connection URL.
-- `MOMEX_POSTGRES_SCHEMA`: Optional schema name to isolate a collection.
+### Anthropic + OpenAI Embedding
+```bash
+export MOMEX_LLM_PROVIDER=anthropic
+export MOMEX_LLM_MODEL=claude-sonnet-4-20250514
+export MOMEX_LLM_API_KEY=sk-ant-xxx
 
-Note: avoid storing API keys in YAML files; prefer environment variables.
+export MOMEX_EMBEDDING_PROVIDER=openai
+export MOMEX_EMBEDDING_API_KEY=sk-xxx
+```
 
-## Other ways to specify environment variables
+### DeepSeek + OpenAI Embedding
+```bash
+export MOMEX_LLM_PROVIDER=deepseek
+export MOMEX_LLM_MODEL=deepseek-chat
+export MOMEX_LLM_API_KEY=xxx
 
-It is recommended to put your environment variables in a file named
-`.env` in the current or parent directory.
-To pick up these variables, call `typeagent.aitools.utils.load_dotenv()`
-at the start of your program (before calling any typeagent functions).
-(For simplicity this is not shown in
-[Getting Started](getting-started.md).)
+export MOMEX_EMBEDDING_PROVIDER=openai
+export MOMEX_EMBEDDING_API_KEY=sk-xxx
+```
+
+## Loading from .env File
+
+It is recommended to put your environment variables in a file named `.env`:
+
+```bash
+# .env
+MOMEX_LLM_PROVIDER=openai
+MOMEX_LLM_MODEL=gpt-4o
+MOMEX_LLM_API_KEY=sk-xxx
+```
+
+Momex automatically loads `.env` files from the current or parent directory.
+
+## TypeAgent Environment Variables
+
+For advanced use cases, TypeAgent also supports these environment variables:
+
+- `OPENAI_API_KEY` - Used by embedding model if MOMEX_EMBEDDING_API_KEY not set
+- `AZURE_OPENAI_API_KEY` - Used by Azure embedding model
+- `OPENAI_MODEL` - Legacy TypeChat model setting
+
+Momex environment variables take precedence over TypeAgent variables.

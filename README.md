@@ -22,13 +22,15 @@ pip install momex
 
 ```python
 import asyncio
-from momex import Agent, MomexConfig
+from momex import Agent, MomexConfig, LLMConfig
 
 async def main():
     config = MomexConfig(
-        provider="openai",
-        model="gpt-4o",
-        # api_key via MOMEX_API_KEY env var
+        llm=LLMConfig(
+            provider="openai",
+            model="gpt-4o",
+            api_key="sk-xxx",  # or use MOMEX_LLM_API_KEY env var
+        ),
     )
 
     agent = Agent("user:xiaoyuzhang", config)

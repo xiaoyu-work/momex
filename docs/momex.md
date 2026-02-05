@@ -32,10 +32,12 @@ The simplest way to use Momex. Just call `chat()` and memory is handled automati
 
 ```python
 import asyncio
-from momex import Agent, MomexConfig
+from momex import Agent, MomexConfig, LLMConfig
 
 async def main():
-    config = MomexConfig(provider="openai", model="gpt-4o")
+    config = MomexConfig(
+        llm=LLMConfig(provider="openai", model="gpt-4o", api_key="sk-xxx"),
+    )
 
     xiaoyuzhang = Agent("user:xiaoyuzhang", config)
     gvanrossum = Agent("user:gvanrossum", config)

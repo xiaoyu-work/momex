@@ -99,7 +99,7 @@ class MemoryManager:
         import asyncpg
         from typeagent.storage.postgres.schema import quote_ident
 
-        conn = await asyncpg.connect(self.config.postgres.url)
+        conn = await asyncpg.connect(self.config.storage.postgres_url)
         try:
             schemas = await conn.fetch(
                 """
@@ -201,12 +201,12 @@ class MemoryManager:
         from .memory import _collection_to_schema
 
         schema = (
-            self.config.postgres.schema
-            if self.config.postgres.schema
+            self.config.storage.postgres_schema
+            if self.config.storage.postgres_schema
             else _collection_to_schema(collection)
         )
 
-        conn = await asyncpg.connect(self.config.postgres.url)
+        conn = await asyncpg.connect(self.config.storage.postgres_url)
         try:
             exists = await conn.fetchval(
                 "SELECT 1 FROM pg_namespace WHERE nspname = $1",
