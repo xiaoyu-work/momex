@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "momex"
-version = "0.1.0"
+version = "0.1.1"
 description = "Memory system for AI agents with Structured RAG, built on TypeAgent"
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "MIT"
