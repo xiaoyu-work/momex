@@ -63,6 +63,7 @@ Documentation = "https://github.com/xiaoyu-work/typeagent-py/tree/main/docs/mome
 
 [tool.uv.build-backend]
 module-root = "src"
+packages = ["momex", "typeagent"]
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
