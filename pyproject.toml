@@ -1,6 +1,6 @@
 [build-system]
-requires = ["uv_build>=0.9.10,<0.10.0"]
-build-backend = "uv_build"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "momex"
@@ -61,9 +61,8 @@ postgres = [
 GitHub = "https://github.com/xiaoyu-work/typeagent-py"
 Documentation = "https://github.com/xiaoyu-work/typeagent-py/tree/main/docs/momex.md"
 
-[tool.uv.build-backend]
-module-root = "src"
-packages = ["momex", "typeagent"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/momex", "src/typeagent"]
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
