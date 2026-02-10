@@ -172,8 +172,11 @@ class AsyncEmbeddingModel:
             if api_version:
                 self.azure_api_version = api_version
 
-        if azure_api_key != os.getenv("AZURE_OPENAI_API_KEY"):
-            # If we got a token from identity, store the provider for refresh
+        if azure_api_key.lower() == "identity" or (
+            os.getenv("AZURE_OPENAI_API_KEY", "").lower() == "identity"
+            and azure_api_key != os.getenv("AZURE_OPENAI_API_KEY")
+        ):
+            # Only use token provider if key was explicitly "identity"
             self.azure_token_provider = get_shared_token_provider()
 
         self.async_client = AsyncAzureOpenAI(
