@@ -183,8 +183,13 @@ def quote_ident(name: str) -> str:
 
 
 def format_search_path(schema: str) -> str:
-    """Format search_path with a preferred schema and public fallback."""
-    return f'{quote_ident(schema)}, public'
+    """Format search_path with a preferred schema, public, and extensions.
+
+    The 'extensions' schema is included for Supabase compatibility where
+    pgvector is installed there. PostgreSQL silently ignores non-existent
+    schemas in search_path, so this is safe for all environments.
+    """
+    return f'{quote_ident(schema)}, public, extensions'
 
 
 async def _index_exists(conn, index_name: str) -> bool:
