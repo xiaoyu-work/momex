@@ -152,7 +152,7 @@ class ConversationBase(
             # Mark source IDs as ingested (will be rolled back on error)
             if source_ids:
                 for source_id in source_ids:
-                    storage.mark_source_ingested(source_id)
+                    await storage.mark_source_ingested(source_id)
 
             start_points = IndexingStartPoints(
                 message_count=await self.messages.size(),
@@ -178,14 +178,9 @@ class ConversationBase(
             )
 
             # Update the updated_at timestamp
-            if hasattr(storage, '_update_conversation_timestamps_async'):
-                await storage._update_conversation_timestamps_async(
-                    updated_at=datetime.now(timezone.utc)
-                )
-            else:
-                storage.update_conversation_timestamps(
-                    updated_at=datetime.now(timezone.utc)
-                )
+            await storage.update_conversation_timestamps(
+                updated_at=datetime.now(timezone.utc)
+            )
 
             return result
 

@@ -220,30 +220,29 @@ class PostgresMessageTextIndex(IMessageTextEmbeddingIndex):
         """Generate an embedding for the given text."""
         return await self._vectorbase.get_embedding(text)
 
-    def lookup_by_embedding(
+    async def lookup_by_embedding(
         self,
         text_embedding: NormalizedEmbedding,
         max_matches: int | None = None,
         threshold_score: float | None = None,
         predicate: typing.Callable[[interfaces.MessageOrdinal], bool] | None = None,
     ) -> list[interfaces.ScoredMessageOrdinal]:
-        """Look up messages by embedding (sync version - uses asyncio.run)."""
-        import asyncio
-        scored_locations = asyncio.get_event_loop().run_until_complete(
-            self._lookup_by_embedding(text_embedding, max_matches, threshold_score, predicate)
+        """Look up messages by embedding."""
+        scored_locations = await self._lookup_by_embedding(
+            text_embedding, max_matches, threshold_score, predicate
         )
         return self._scored_locations_to_message_ordinals(scored_locations, max_matches)
 
-    def lookup_in_subset_by_embedding(
+    async def lookup_in_subset_by_embedding(
         self,
         text_embedding: NormalizedEmbedding,
         ordinals_to_search: list[interfaces.MessageOrdinal],
         max_matches: int | None = None,
         threshold_score: float | None = None,
     ) -> list[interfaces.ScoredMessageOrdinal]:
-        """Look up messages in a subset by embedding (synchronous version)."""
+        """Look up messages in a subset by embedding."""
         ordinals_set = set(ordinals_to_search)
-        return self.lookup_by_embedding(
+        return await self.lookup_by_embedding(
             text_embedding,
             max_matches,
             threshold_score,

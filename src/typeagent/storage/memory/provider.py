@@ -104,71 +104,34 @@ class MemoryStorageProvider[TMessage: IMessage](IStorageProvider[TMessage]):
         """Close the storage provider."""
         pass
 
-    def get_conversation_metadata(self) -> ConversationMetadata:
-        """Get conversation metadata.
-
-        For in-memory storage, returns the metadata provided during initialization
-        or an empty ConversationMetadata instance if none was provided.
-        """
+    async def get_conversation_metadata(self) -> ConversationMetadata:
+        """Get conversation metadata."""
         return self._metadata
 
-    def set_conversation_metadata(self, **kwds: str | list[str] | None) -> None:
-        """Set conversation metadata (no-op for in-memory storage).
-
-        This method exists for API compatibility with SqliteStorageProvider
-        but does nothing since in-memory storage doesn't persist metadata.
-
-        Args:
-            **kwds: Metadata keys and values (ignored)
-        """
+    async def set_conversation_metadata(self, **kwds: str | list[str] | None) -> None:
+        """Set conversation metadata (no-op for in-memory storage)."""
         pass
 
-    def update_conversation_timestamps(
+    async def update_conversation_timestamps(
         self,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
     ) -> None:
-        """Update conversation timestamps (no-op for in-memory storage).
-
-        This method exists for API compatibility with SqliteStorageProvider
-        but does nothing since in-memory storage doesn't persist metadata.
-
-        Args:
-            created_at: Optional creation timestamp (ignored)
-            updated_at: Optional last updated timestamp (ignored)
-        """
+        """Update conversation timestamps (no-op for in-memory storage)."""
         pass
 
-    def is_source_ingested(self, source_id: str) -> bool:
-        """Check if a source has already been ingested.
-
-        Args:
-            source_id: External source identifier (email ID, file path, etc.)
-
-        Returns:
-            True if the source has been ingested, False otherwise.
-        """
+    async def is_source_ingested(self, source_id: str) -> bool:
+        """Check if a source has already been ingested."""
         return source_id in self._ingested_sources
 
-    def get_source_status(self, source_id: str) -> str | None:
-        """Get the ingestion status of a source.
-
-        Args:
-            source_id: External source identifier (email ID, file path, etc.)
-
-        Returns:
-            The ingestion status if the source has been ingested, None otherwise.
-        """
+    async def get_source_status(self, source_id: str) -> str | None:
+        """Get the ingestion status of a source."""
         if source_id in self._ingested_sources:
             return STATUS_INGESTED
         return None
 
-    def mark_source_ingested(
+    async def mark_source_ingested(
         self, source_id: str, status: str = STATUS_INGESTED
     ) -> None:
-        """Mark a source as ingested.
-
-        Args:
-            source_id: External source identifier (email ID, file path, etc.)
-        """
+        """Mark a source as ingested."""
         self._ingested_sources.add(source_id)

@@ -509,14 +509,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         if data.get("messageIndexData"):
             await self.message_text_index.deserialize(data["messageIndexData"])
 
-    def get_conversation_metadata(self) -> ConversationMetadata:
-        """Get conversation metadata (sync version - use get_conversation_metadata_async)."""
-        import asyncio
-        return asyncio.get_event_loop().run_until_complete(
-            self.get_conversation_metadata_async()
-        )
-
-    async def get_conversation_metadata_async(self) -> ConversationMetadata:
+    async def get_conversation_metadata(self) -> ConversationMetadata:
         """Get conversation metadata."""
         async with self.pool.acquire() as conn:
             await self._set_search_path(conn)
@@ -582,32 +575,18 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
                 extra=extra if extra else None,
             )
 
-    def set_conversation_metadata(self, **kwds: str | list[str] | None) -> None:
-        """Set or update conversation metadata (sync version)."""
-        import asyncio
-        asyncio.get_event_loop().run_until_complete(
-            set_conversation_metadata(
-                self.pool, schema=self.schema if self._pgbouncer else None, **kwds
-            )
+    async def set_conversation_metadata(self, **kwds: str | list[str] | None) -> None:
+        """Set or update conversation metadata."""
+        await set_conversation_metadata(
+            self.pool, schema=self.schema if self._pgbouncer else None, **kwds
         )
 
-    def update_conversation_timestamps(
+    async def update_conversation_timestamps(
         self,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
     ) -> None:
         """Update conversation timestamps."""
-        import asyncio
-        asyncio.get_event_loop().run_until_complete(
-            self._update_conversation_timestamps_async(created_at, updated_at)
-        )
-
-    async def _update_conversation_timestamps_async(
-        self,
-        created_at: datetime | None = None,
-        updated_at: datetime | None = None,
-    ) -> None:
-        """Update conversation timestamps (async version)."""
         from ...knowpro.universal_message import format_timestamp_utc
 
         metadata_kwds: dict[str, str] = {}
@@ -621,22 +600,12 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
                 self.pool, schema=self.schema if self._pgbouncer else None, **metadata_kwds
             )
 
-    def get_db_version(self) -> int:
+    async def get_db_version(self) -> int:
         """Get the database schema version."""
-        import asyncio
-        return asyncio.get_event_loop().run_until_complete(
-            get_db_schema_version(self.pool)
-        )
+        return await get_db_schema_version(self.pool)
 
-    def is_source_ingested(self, source_id: str) -> bool:
+    async def is_source_ingested(self, source_id: str) -> bool:
         """Check if a source has already been ingested."""
-        import asyncio
-        return asyncio.get_event_loop().run_until_complete(
-            self._is_source_ingested_async(source_id)
-        )
-
-    async def _is_source_ingested_async(self, source_id: str) -> bool:
-        """Check if a source has already been ingested (async)."""
         async with self.pool.acquire() as conn:
             await self._set_search_path(conn)
             row = await conn.fetchrow(
@@ -645,15 +614,8 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             )
             return row is not None and row[0] == STATUS_INGESTED
 
-    def get_source_status(self, source_id: str) -> str | None:
+    async def get_source_status(self, source_id: str) -> str | None:
         """Get the ingestion status of a source."""
-        import asyncio
-        return asyncio.get_event_loop().run_until_complete(
-            self._get_source_status_async(source_id)
-        )
-
-    async def _get_source_status_async(self, source_id: str) -> str | None:
-        """Get the ingestion status of a source (async)."""
         async with self.pool.acquire() as conn:
             await self._set_search_path(conn)
             row = await conn.fetchrow(
@@ -662,19 +624,10 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             )
             return row[0] if row else None
 
-    def mark_source_ingested(
+    async def mark_source_ingested(
         self, source_id: str, status: str = STATUS_INGESTED
     ) -> None:
         """Mark a source as ingested."""
-        import asyncio
-        asyncio.get_event_loop().run_until_complete(
-            self._mark_source_ingested_async(source_id, status)
-        )
-
-    async def _mark_source_ingested_async(
-        self, source_id: str, status: str = STATUS_INGESTED
-    ) -> None:
-        """Mark a source as ingested (async)."""
         async with self.pool.acquire() as conn:
             await self._set_search_path(conn)
             await conn.execute(

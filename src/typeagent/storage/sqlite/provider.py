@@ -460,7 +460,7 @@ class SqliteStorageProvider[TMessage: interfaces.IMessage](
         if data.get("messageIndexData"):
             await self._message_text_index.deserialize(data["messageIndexData"])
 
-    def get_conversation_metadata(self) -> ConversationMetadata:
+    async def get_conversation_metadata(self) -> ConversationMetadata:
         """Get conversation metadata."""
         cursor = self.db.cursor()
 
@@ -548,37 +548,16 @@ class SqliteStorageProvider[TMessage: interfaces.IMessage](
             extra=extra if extra else None,
         )
 
-    def set_conversation_metadata(self, **kwds: str | list[str] | None) -> None:
-        """Set or update conversation metadata key-value pairs.
-
-        Args:
-            **kwds: Metadata keys and values where:
-                - str | int value: Sets a single key-value pair (replaces existing)
-                - list[str | int] value: Sets multiple values for the same key
-                - None value: Deletes all rows for the given key
-
-        Example:
-            provider.set_conversation_metadata(
-                name_tag="my_conversation",
-                schema_version="1",
-                created_at="2024-01-01T00:00:00Z",
-                tag=["python", "ai"],  # Multiple tags
-                custom_field="value"
-            )
-        """
+    async def set_conversation_metadata(self, **kwds: str | list[str] | None) -> None:
+        """Set or update conversation metadata key-value pairs."""
         _set_conversation_metadata(self.db, **kwds)
 
-    def update_conversation_timestamps(
+    async def update_conversation_timestamps(
         self,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
     ) -> None:
-        """Update conversation timestamps.
-
-        Args:
-            created_at: Optional creation timestamp
-            updated_at: Optional last updated timestamp
-        """
+        """Update conversation timestamps."""
         from ...knowpro.universal_message import format_timestamp_utc
 
         # Check if any metadata exists
@@ -621,17 +600,8 @@ class SqliteStorageProvider[TMessage: interfaces.IMessage](
         """Get the database schema version."""
         return get_db_schema_version(self.db)
 
-    def is_source_ingested(self, source_id: str) -> bool:
-        """Check if a source has already been ingested.
-
-        This is a read-only operation that can be called outside of a transaction.
-
-        Args:
-            source_id: External source identifier (email ID, file path, etc.)
-
-        Returns:
-            True if the source has been ingested, False otherwise.
-        """
+    async def is_source_ingested(self, source_id: str) -> bool:
+        """Check if a source has already been ingested."""
         cursor = self.db.cursor()
         cursor.execute(
             "SELECT status FROM IngestedSources WHERE source_id = ?", (source_id,)
@@ -639,15 +609,8 @@ class SqliteStorageProvider[TMessage: interfaces.IMessage](
         row = cursor.fetchone()
         return row is not None and row[0] == STATUS_INGESTED
 
-    def get_source_status(self, source_id: str) -> str | None:
-        """Get the ingestion status of a source.
-
-        Args:
-            source_id: External source identifier (email ID, file path, etc.)
-
-        Returns:
-            The status string if the source exists, or None if it hasn't been ingested.
-        """
+    async def get_source_status(self, source_id: str) -> str | None:
+        """Get the ingestion status of a source."""
         cursor = self.db.cursor()
         cursor.execute(
             "SELECT status FROM IngestedSources WHERE source_id = ?", (source_id,)
@@ -655,18 +618,10 @@ class SqliteStorageProvider[TMessage: interfaces.IMessage](
         row = cursor.fetchone()
         return row[0] if row else None
 
-    def mark_source_ingested(
+    async def mark_source_ingested(
         self, source_id: str, status: str = STATUS_INGESTED
     ) -> None:
-        """Mark a source as ingested.
-
-        This performs an INSERT but does NOT commit. It should be called within
-        a transaction context (e.g., inside `async with storage_provider:`).
-        The commit happens when the transaction context exits successfully.
-
-        Args:
-            source_id: External source identifier (email ID, file path, etc.)
-        """
+        """Mark a source as ingested."""
         cursor = self.db.cursor()
         cursor.execute(
             "INSERT OR REPLACE INTO IngestedSources (source_id, status) VALUES (?, ?)",

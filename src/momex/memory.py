@@ -176,18 +176,11 @@ class Memory:
 
     async def _get_conversation_metadata(self):
         storage = self._conversation_required().storage_provider
-        if hasattr(storage, "get_conversation_metadata_async"):
-            return await storage.get_conversation_metadata_async()
-        return storage.get_conversation_metadata()
+        return await storage.get_conversation_metadata()
 
     async def _set_conversation_metadata(self, **kwds: str | list[str] | None) -> None:
         storage = self._conversation_required().storage_provider
-        if self.config.is_postgres and hasattr(storage, "pool"):
-            from typeagent.storage.postgres.schema import set_conversation_metadata
-
-            await set_conversation_metadata(storage.pool, **kwds)
-        else:
-            storage.set_conversation_metadata(**kwds)
+        await storage.set_conversation_metadata(**kwds)
 
     async def _load_deleted_semref_ids(self) -> set[int]:
         if self._deleted_semref_ids is not None:
