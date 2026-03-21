@@ -1,6 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+import asyncio
 from collections.abc import Callable
 from typing import cast, TypeGuard
 
@@ -235,9 +236,11 @@ class QueryCompiler:
             else False
         )
         if not exact_match:
-            await self.resolve_related_terms(self.all_search_terms, True)
-            await self.resolve_related_terms(self.all_predicate_search_terms, False)
-            await self.resolve_related_terms(self.all_scope_search_terms, False)
+            await asyncio.gather(
+                self.resolve_related_terms(self.all_search_terms, True),
+                self.resolve_related_terms(self.all_predicate_search_terms, False),
+                self.resolve_related_terms(self.all_scope_search_terms, False),
+            )
 
         return GroupSearchResultsExpr(query)
 

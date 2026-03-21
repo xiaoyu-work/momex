@@ -563,51 +563,83 @@ class Memory:
         if deleted_ids:
             search_results = self._filter_search_results(search_results, deleted_ids)
 
+        # Collect all ordinals first for batch fetching
+        semref_requests: list[tuple[int, float]] = []  # (ordinal, score)
+        msg_requests: list[tuple[int, float]] = []  # (ordinal, score)
+
         for search_result in search_results:
-            # Process knowledge matches
             for _, matches in search_result.knowledge_matches.items():
                 for scored in matches.semantic_ref_matches[:limit]:
-                    sem_ref = await conversation.semantic_refs.get_item(
-                        scored.semantic_ref_ordinal
-                    )
-                    if sem_ref is None:
-                        continue
-
-                    knowledge = sem_ref.knowledge
-                    k_type = knowledge.knowledge_type  # Use native type
-
-                    # Format text
-                    if isinstance(knowledge, kplib.ConcreteEntity):
-                        text = knowledge.name
-                        if knowledge.type:
-                            text += f" (type: {', '.join(knowledge.type)})"
-                        if knowledge.facets:
-                            facets = [f"{f.name}: {f.value}" for f in knowledge.facets if f.value]
-                            if facets:
-                                text += f" [{'; '.join(facets)}]"
-                    elif isinstance(knowledge, kplib.Action):
-                        parts = []
-                        if knowledge.subject_entity_name:
-                            parts.append(knowledge.subject_entity_name)
-                        parts.extend(knowledge.verbs)
-                        if knowledge.object_entity_name:
-                            parts.append(knowledge.object_entity_name)
-                        text = " ".join(parts)
-                    elif isinstance(knowledge, Topic):
-                        text = knowledge.text
-                    else:
-                        text = str(knowledge)
-
-                    items.append(SearchItem(
-                        type=k_type,
-                        text=text,
-                        score=scored.score,
-                        raw=sem_ref,
-                    ))
-
-            # Process message matches
+                    semref_requests.append((scored.semantic_ref_ordinal, scored.score))
             for msg_match in search_result.message_matches[:limit]:
-                msg = await conversation.messages.get_item(msg_match.message_ordinal)
+                msg_requests.append((msg_match.message_ordinal, msg_match.score))
+
+        # Batch fetch SemanticRefs
+        if semref_requests:
+            ordinals = [o for o, _ in semref_requests]
+            try:
+                sem_refs = await conversation.semantic_refs.get_multiple(ordinals)
+                sem_ref_map = dict(zip(ordinals, sem_refs))
+            except (IndexError, KeyError):
+                sem_ref_map = {}
+                for o in ordinals:
+                    try:
+                        sem_ref_map[o] = await conversation.semantic_refs.get_item(o)
+                    except (IndexError, KeyError):
+                        pass
+
+            for ordinal, score in semref_requests:
+                sem_ref = sem_ref_map.get(ordinal)
+                if sem_ref is None:
+                    continue
+
+                knowledge = sem_ref.knowledge
+                k_type = knowledge.knowledge_type
+
+                if isinstance(knowledge, kplib.ConcreteEntity):
+                    text = knowledge.name
+                    if knowledge.type:
+                        text += f" (type: {', '.join(knowledge.type)})"
+                    if knowledge.facets:
+                        facets = [f"{f.name}: {f.value}" for f in knowledge.facets if f.value]
+                        if facets:
+                            text += f" [{'; '.join(facets)}]"
+                elif isinstance(knowledge, kplib.Action):
+                    parts = []
+                    if knowledge.subject_entity_name:
+                        parts.append(knowledge.subject_entity_name)
+                    parts.extend(knowledge.verbs)
+                    if knowledge.object_entity_name:
+                        parts.append(knowledge.object_entity_name)
+                    text = " ".join(parts)
+                elif isinstance(knowledge, Topic):
+                    text = knowledge.text
+                else:
+                    text = str(knowledge)
+
+                items.append(SearchItem(
+                    type=k_type,
+                    text=text,
+                    score=score,
+                    raw=sem_ref,
+                ))
+
+        # Batch fetch Messages
+        if msg_requests:
+            msg_ordinals = [o for o, _ in msg_requests]
+            try:
+                msgs = await conversation.messages.get_multiple(msg_ordinals)
+                msg_map = dict(zip(msg_ordinals, msgs))
+            except (IndexError, KeyError):
+                msg_map = {}
+                for o in msg_ordinals:
+                    try:
+                        msg_map[o] = await conversation.messages.get_item(o)
+                    except (IndexError, KeyError):
+                        pass
+
+            for ordinal, score in msg_requests:
+                msg = msg_map.get(ordinal)
                 if msg is None:
                     continue
 
@@ -616,7 +648,7 @@ class Memory:
                 items.append(SearchItem(
                     type="message",
                     text=text,
-                    score=msg_match.score,
+                    score=score,
                     raw=msg,
                 ))
 

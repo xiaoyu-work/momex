@@ -241,12 +241,35 @@ class PostgresRelatedTermsFuzzy(interfaces.ITermToRelatedTermsFuzzy):
         max_hits: int | None = None,
         min_score: float | None = None,
     ) -> list[list[interfaces.Term]]:
-        """Look up multiple terms at once."""
-        results = []
-        for text in texts:
-            term_results = await self.lookup_term(text, max_hits, min_score)
-            results.append(term_results)
-        return results
+        """Look up multiple terms at once using batch embedding."""
+        if not texts:
+            return []
+
+        max_hits = max_hits or 10
+        min_score = min_score or 0.0
+
+        # Batch: generate all embeddings in one API call
+        embeddings = await self._vector_base.get_embeddings(texts)
+
+        # Batch: query DB for all terms in one connection
+        async with self.pool.acquire() as conn:
+            results = []
+            for emb in embeddings:
+                emb_str = serialize_embedding(emb)
+                rows = await conn.fetch(
+                    """
+                    SELECT term, 1 - (term_embedding <=> $1) as score
+                    FROM RelatedTermsFuzzy
+                    WHERE 1 - (term_embedding <=> $1) >= $2
+                    ORDER BY term_embedding <=> $1
+                    LIMIT $3
+                    """,
+                    emb_str, min_score, max_hits,
+                )
+                results.append([
+                    interfaces.Term(row[0], row[1]) for row in rows
+                ])
+            return results
 
     def serialize(self) -> interfaces.TextEmbeddingIndexData:
         """Serialize the fuzzy index data."""

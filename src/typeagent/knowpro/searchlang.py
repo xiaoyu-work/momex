@@ -691,6 +691,11 @@ def datetime_from_date_time(date_time: DateTime) -> Datetime:
     return dt
 
 
+# LRU cache for LLM query translations (avoids repeated API calls for same query)
+_query_translation_cache: dict[str, "SearchQuery"] = {}
+_QUERY_CACHE_MAX_SIZE = 128
+
+
 # TODO: Move to searchquerytranslator.py?
 async def search_query_from_language(
     conversation: IConversation,
@@ -698,13 +703,25 @@ async def search_query_from_language(
     query_text: str,
     model_instructions: list[typechat.PromptSection] | None = None,
 ) -> typechat.Result[SearchQuery]:
+    # Check cache first
+    cache_key = query_text.strip().lower()
+    if cache_key in _query_translation_cache:
+        return typechat.Success(_query_translation_cache[cache_key])
+
     time_range = await get_time_range_prompt_section_for_conversation(conversation)
     prompt_preamble: list[typechat.PromptSection] = []
     if model_instructions:
         prompt_preamble.extend(model_instructions)
     if time_range:
         prompt_preamble.append(time_range)
-    # print("[" * 50)
-    # print(translator.schema_str)
-    # print("]" * 50)
-    return await translator.translate(query_text, prompt_preamble=prompt_preamble)
+    result = await translator.translate(query_text, prompt_preamble=prompt_preamble)
+
+    # Cache successful translations
+    if isinstance(result, typechat.Success):
+        if len(_query_translation_cache) >= _QUERY_CACHE_MAX_SIZE:
+            # Evict oldest entry
+            oldest = next(iter(_query_translation_cache))
+            del _query_translation_cache[oldest]
+        _query_translation_cache[cache_key] = result.value
+
+    return result
