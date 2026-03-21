@@ -51,19 +51,35 @@ class PgBouncerPoolWrapper:
 
 
 class _PgBouncerAcquireContext:
-    """Context manager for acquiring a connection with search_path set."""
+    """Context manager for acquiring a connection with search_path set.
+
+    Uses an explicit transaction so pgbouncer (transaction-pooling mode)
+    pins the backend connection for the entire acquire/release scope.
+    Without this, SET and subsequent queries may hit different backends.
+    """
 
     def __init__(self, pool: asyncpg.Pool, search_path: str):
         self._pool = pool
         self._search_path = search_path
         self._conn = None
+        self._tr = None
 
     async def __aenter__(self):
         self._conn = await self._pool.acquire()
-        await self._conn.execute(f"SET search_path TO {self._search_path}")
+        self._tr = self._conn.transaction()
+        await self._tr.start()
+        await self._conn.execute(f"SET LOCAL search_path TO {self._search_path}")
         return self._conn
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self._tr:
+            try:
+                if exc_type:
+                    await self._tr.rollback()
+                else:
+                    await self._tr.commit()
+            except Exception:
+                pass
         if self._conn:
             await self._pool.release(self._conn)
 
@@ -136,7 +152,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
     async def _set_search_path(self, conn) -> None:
         """Set search_path for the connection if schema is configured.
 
-        This is needed for pgbouncer mode where session-level settings don't persist.
+        Uses SET LOCAL so it works within pgbouncer transaction-pooling mode.
         """
         if self.schema and self._pgbouncer:
             from .schema import format_search_path
