@@ -47,8 +47,6 @@ async def main():
 asyncio.run(main())
 ```
 
-Momex is a **memory layer**, not a chatbot. Plug it into any agent framework (LangChain, PydanticAI, your own) to give your agent long-term memory.
-
 See [docs/momex.md](docs/momex.md) for full documentation.
 
 ---

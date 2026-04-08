@@ -57,7 +57,6 @@ Configuration:
 
 import logging
 
-from .agent import Agent, ChatResponse
 from .config import EmbeddingConfig, LLMConfig, MomexConfig, StorageConfig
 from .exceptions import (
     CollectionNotFoundError,
@@ -75,10 +74,7 @@ from .query import query, search, stats
 from .short_term import Message, SessionInfo, ShortTermMemory
 
 __all__ = [
-    # High-level API (Level 1)
-    "Agent",
-    "ChatResponse",
-    # Core classes (Level 2)
+    # Core classes
     "Memory",
     "MemoryManager",
     "MomexConfig",
