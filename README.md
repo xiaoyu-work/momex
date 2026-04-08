@@ -36,13 +36,13 @@ async def main():
     await memory.add("My name is Xiaoyu, I love Python programming")
 
     # Search — returns structured results you can feed to your own agent
-    results = await memory.search("What programming languages?")
+    results = await memory.search("Python")
     for item in results:
         print(f"[{item.type}] {item.text}")
 
     # Query — returns an LLM-generated answer
-    answer = await memory.query("What does the user like?")
-    print(answer)  # "The user likes Python programming."
+    answer = await memory.query("What does the user love?")
+    print(answer)  # "The user loves Python programming."
 
 asyncio.run(main())
 ```

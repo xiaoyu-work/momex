@@ -42,7 +42,7 @@ async def main():
     print(f"A: {answer}")
 
     # Query across collections (prefix query)
-    answer = await query("momex:engineering", "What programming languages do people use?")
+    answer = await query("momex:engineering", "What does the user like?")
     print(f"A: {answer}")
 
 asyncio.run(main())
