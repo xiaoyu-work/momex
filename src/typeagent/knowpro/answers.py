@@ -1,9 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-import logging
+import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
+import logging
 from typing import Any
 
 import black
@@ -12,7 +13,12 @@ import typechat
 
 logger = logging.getLogger(__name__)
 
-from .answer_context_schema import AnswerContext, RelevantAction, RelevantKnowledge, RelevantMessage
+from .answer_context_schema import (
+    AnswerContext,
+    RelevantAction,
+    RelevantKnowledge,
+    RelevantMessage,
+)
 from .answer_response_schema import AnswerResponse
 from .collections import get_top_k, Scored
 from .interfaces import (
@@ -55,11 +61,16 @@ async def generate_answers(
     orig_query_text: str,
     options: AnswerContextOptions | None = None,
 ) -> tuple[list[AnswerResponse], AnswerResponse]:  # (all answers, combined answer)
-    all_answers: list[AnswerResponse] = []
+    # Generate answers for all search results in parallel
+    all_answers = await asyncio.gather(
+        *[
+            generate_answer(translator, result, conversation, options)
+            for result in search_results
+        ]
+    )
+
     good_answers: list[str] = []
-    for result in search_results:
-        answer = await generate_answer(translator, result, conversation, options)
-        all_answers.append(answer)
+    for answer in all_answers:
         match answer.type:
             case "Answered":
                 assert answer.answer is not None, "Answered answer must not be None"
@@ -71,7 +82,7 @@ async def generate_answers(
             case _:
                 assert False, f"Unexpected answer type: {answer.type}"
     if len(all_answers) == 1:
-        return all_answers, all_answers[0]
+        return list(all_answers), all_answers[0]
     combined_answer: AnswerResponse | None = None
     if len(good_answers) >= 2:
         combined_answer = await combine_answers(
@@ -83,7 +94,7 @@ async def generate_answers(
         combined_answer = AnswerResponse(
             type="NoAnswer", why_no_answer="No good answers found."
         )
-    return all_answers, combined_answer
+    return list(all_answers), combined_answer
 
 
 async def generate_answer[TMessage: IMessage, TIndex: ITermToSemanticRefIndex](
@@ -188,7 +199,9 @@ async def make_context[TMessage: IMessage, TIndex: ITermToSemanticRefIndex](
                 # Build entity map for linking
                 for rel_entity in context.entities:
                     if isinstance(rel_entity.knowledge, ConcreteEntity):
-                        entity_map[rel_entity.knowledge.name.lower()] = rel_entity.knowledge
+                        entity_map[rel_entity.knowledge.name.lower()] = (
+                            rel_entity.knowledge
+                        )
             case "action":
                 all_actions = await get_relevant_actions_for_answer(
                     conversation,
@@ -208,7 +221,11 @@ async def make_context[TMessage: IMessage, TIndex: ITermToSemanticRefIndex](
     if context.entities:
         related_actions = await find_actions_for_entities(
             conversation,
-            [e.knowledge for e in context.entities if isinstance(e.knowledge, ConcreteEntity)],
+            [
+                e.knowledge
+                for e in context.entities
+                if isinstance(e.knowledge, ConcreteEntity)
+            ],
             entity_map,
         )
         # Merge and deduplicate actions
@@ -419,8 +436,12 @@ async def get_relevant_actions_for_answer(
             subject=merged.subject,
             verbs=merged.verbs,
             object=merged.object,
-            subject_entity=entity_map.get(merged.subject.lower()) if merged.subject else None,
-            object_entity=entity_map.get(merged.object.lower()) if merged.object else None,
+            subject_entity=(
+                entity_map.get(merged.subject.lower()) if merged.subject else None
+            ),
+            object_entity=(
+                entity_map.get(merged.object.lower()) if merged.object else None
+            ),
         )
 
         # Add time range if available
@@ -445,9 +466,15 @@ def merge_scored_actions(
         assert isinstance(scored_action.item.knowledge, Action)
         action = scored_action.item.knowledge
 
-        subject = action.subject_entity_name if action.subject_entity_name != "none" else None
+        subject = (
+            action.subject_entity_name if action.subject_entity_name != "none" else None
+        )
         obj = action.object_entity_name if action.object_entity_name != "none" else None
-        indirect_obj = action.indirect_object_entity_name if action.indirect_object_entity_name != "none" else None
+        indirect_obj = (
+            action.indirect_object_entity_name
+            if action.indirect_object_entity_name != "none"
+            else None
+        )
 
         # Create a key for merging
         key = f"{subject}|{','.join(action.verbs)}|{obj}"
@@ -486,7 +513,9 @@ async def find_actions_for_entities(
     we also find all actions related to that entity.
     """
     assert conversation.semantic_refs is not None, "Semantic refs must not be None"
-    assert conversation.secondary_indexes is not None, "Secondary indexes must not be None"
+    assert (
+        conversation.secondary_indexes is not None
+    ), "Secondary indexes must not be None"
 
     property_index = conversation.secondary_indexes.property_to_semantic_ref_index
     entity_names = {e.name.lower() for e in entities}
@@ -498,12 +527,16 @@ async def find_actions_for_entities(
         # Search for actions where this entity is the subject
         subject_matches = await property_index.lookup_property("subject", entity_name)
         if subject_matches:
-            related_action_ordinals.update(m.semantic_ref_ordinal for m in subject_matches)
+            related_action_ordinals.update(
+                m.semantic_ref_ordinal for m in subject_matches
+            )
 
         # Search for actions where this entity is the object
         object_matches = await property_index.lookup_property("object", entity_name)
         if object_matches:
-            related_action_ordinals.update(m.semantic_ref_ordinal for m in object_matches)
+            related_action_ordinals.update(
+                m.semantic_ref_ordinal for m in object_matches
+            )
 
     if not related_action_ordinals:
         return []
@@ -517,7 +550,9 @@ async def find_actions_for_entities(
             continue
 
         action = semantic_ref.knowledge
-        subject = action.subject_entity_name if action.subject_entity_name != "none" else None
+        subject = (
+            action.subject_entity_name if action.subject_entity_name != "none" else None
+        )
         obj = action.object_entity_name if action.object_entity_name != "none" else None
 
         relevant_action = RelevantAction(
