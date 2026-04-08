@@ -42,13 +42,38 @@ asyncio.run(main())
 
 ## search() and search_by_embedding()
 
-- `search()` → Returns `list[SearchItem]` for you to process (requires LLM for query translation)
-- `search_by_embedding()` → Same as `search()` but uses embedding similarity only (no LLM needed)
+- `search()` → Hybrid search (structured RAG + embedding), returns `list[SearchItem]`
+- `search_by_embedding()` → Embedding similarity only (no LLM needed), returns `list[SearchItem]`
 
-Use `search()` when you want raw results (e.g., as context for your own LLM).
+Both return the same `SearchItem` structure:
+
+```python
+@dataclass
+class SearchItem:
+    type: str              # "entity", "action", "topic", or "message"
+    text: str              # Human-readable description
+    score: float           # Relevance score
+    raw: Any               # Original TypeAgent object (SemanticRef or Message)
+    timestamp: str | None  # When the memory was recorded (UTC, ISO format)
+    valid_from: str | None # Memory active start date (if set)
+    valid_to: str | None   # Memory expiration date (if set)
+```
+
+Example output:
+
+```python
+results = await memory.search("Python")
+# [
+#   SearchItem(type="entity", text="Python (type: programming_language)", score=100.0, timestamp="2026-04-08T16:47:28Z", ...),
+#   SearchItem(type="action", text="user like Python", score=10.0, timestamp="2026-04-08T16:47:28Z", ...),
+#   SearchItem(type="message", text="I like Python programming", score=10.0, timestamp="2026-04-08T16:47:28Z", ...),
+# ]
+```
+
+Use `search()` when you want structured results as context for your own agent/LLM.
 Use `search_by_embedding()` as a fast fallback when the LLM is unavailable.
 
-Both `search()` and `search_by_embedding()` automatically filter out expired memories (those past their `valid_to` date). Pass `include_expired=True` to include them.
+Both automatically filter out expired memories (those past their `valid_to` date). Pass `include_expired=True` to include them.
 
 ## Short-Term Memory
 
