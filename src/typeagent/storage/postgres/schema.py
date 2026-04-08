@@ -189,7 +189,7 @@ def format_search_path(schema: str) -> str:
     pgvector is installed there. PostgreSQL silently ignores non-existent
     schemas in search_path, so this is safe for all environments.
     """
-    return f'{quote_ident(schema)}, public, extensions'
+    return f"{quote_ident(schema)}, public, extensions"
 
 
 async def _index_exists(conn, index_name: str) -> bool:
@@ -294,9 +294,7 @@ async def set_conversation_metadata(
             await conn.execute(f"SET search_path TO {format_search_path(schema)}")
         for key, value in kwds.items():
             # Delete existing rows for this key
-            await conn.execute(
-                "DELETE FROM ConversationMetadata WHERE key = $1", key
-            )
+            await conn.execute("DELETE FROM ConversationMetadata WHERE key = $1", key)
 
             if value is None:
                 continue
@@ -304,10 +302,12 @@ async def set_conversation_metadata(
                 for v in value:
                     await conn.execute(
                         "INSERT INTO ConversationMetadata (key, value) VALUES ($1, $2)",
-                        key, str(v)
+                        key,
+                        str(v),
                     )
             else:
                 await conn.execute(
                     "INSERT INTO ConversationMetadata (key, value) VALUES ($1, $2)",
-                    key, str(value)
+                    key,
+                    str(value),
                 )

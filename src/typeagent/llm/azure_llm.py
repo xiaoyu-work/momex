@@ -17,6 +17,7 @@ class AzureLLM(LLMBase):
 
     def _init_client(self):
         from openai import AsyncAzureOpenAI
+
         self._client = AsyncAzureOpenAI(
             api_key=self.config.api_key,
             azure_endpoint=self.config.api_base,

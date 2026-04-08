@@ -12,8 +12,8 @@ Environment variables use the MOMEX_ prefix with nested structure:
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 from typing import Literal
 

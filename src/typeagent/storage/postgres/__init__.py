@@ -3,17 +3,17 @@
 
 """PostgreSQL storage provider for TypeAgent."""
 
-from .provider import PostgresStorageProvider
 from .collections import PostgresMessageCollection, PostgresSemanticRefCollection
-from .semrefindex import PostgresTermToSemanticRefIndex
-from .propindex import PostgresPropertyIndex
-from .timestampindex import PostgresTimestampToTextRangeIndex
 from .messageindex import PostgresMessageTextIndex
+from .propindex import PostgresPropertyIndex
+from .provider import PostgresStorageProvider
 from .reltermsindex import (
-    PostgresRelatedTermsIndex,
     PostgresRelatedTermsAliases,
     PostgresRelatedTermsFuzzy,
+    PostgresRelatedTermsIndex,
 )
+from .semrefindex import PostgresTermToSemanticRefIndex
+from .timestampindex import PostgresTimestampToTextRangeIndex
 
 __all__ = [
     "PostgresStorageProvider",

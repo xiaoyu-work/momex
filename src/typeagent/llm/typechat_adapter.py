@@ -37,9 +37,11 @@ class TypeChatLLMAdapter(typechat.TypeChatLanguageModel):
             # Convert PromptSection list to string if needed
             if isinstance(prompt, list):
                 prompt_text = "\n".join(
-                    f"{section.get('role', 'user')}: {section.get('content', '')}"
-                    if isinstance(section, dict)
-                    else str(section)
+                    (
+                        f"{section.get('role', 'user')}: {section.get('content', '')}"
+                        if isinstance(section, dict)
+                        else str(section)
+                    )
                     for section in prompt
                 )
             else:
@@ -52,7 +54,9 @@ class TypeChatLLMAdapter(typechat.TypeChatLanguageModel):
             return typechat.Failure(str(e))
 
 
-def create_typechat_model_from_config(config: LLMConfig) -> typechat.TypeChatLanguageModel:
+def create_typechat_model_from_config(
+    config: LLMConfig,
+) -> typechat.TypeChatLanguageModel:
     """Create a TypeChat language model from LLMConfig.
 
     Args:

@@ -20,6 +20,7 @@ class LLMConfig:
         temperature: Temperature for responses.
         max_tokens: Maximum tokens for responses.
     """
+
     provider: str = "openai"
     model: str = ""
     api_key: str = ""
@@ -31,6 +32,7 @@ class LLMConfig:
 @dataclass
 class LLMResponse:
     """Response from LLM."""
+
     content: str
     raw: Any = None  # Original response object
 

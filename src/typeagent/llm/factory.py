@@ -5,7 +5,6 @@
 
 from .base import LLMBase, LLMConfig
 
-
 # Provider name to class mapping
 _PROVIDER_CLASSES: dict[str, type[LLMBase]] = {}
 
@@ -16,10 +15,10 @@ def _load_providers():
     if _PROVIDER_CLASSES:
         return
 
-    from .openai_llm import OpenAILLM
-    from .azure_llm import AzureLLM
     from .anthropic_llm import AnthropicLLM
+    from .azure_llm import AzureLLM
     from .deepseek_llm import DeepSeekLLM
+    from .openai_llm import OpenAILLM
     from .qwen_llm import QwenLLM
 
     _PROVIDER_CLASSES = {

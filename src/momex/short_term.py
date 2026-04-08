@@ -23,15 +23,15 @@ Example:
 
 from __future__ import annotations
 
-import re
-import sqlite3
-import uuid
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal, Any, Generator
+import re
+import sqlite3
+from typing import Any, Generator, Literal
+import uuid
 
 from .config import MomexConfig
 
@@ -365,8 +365,7 @@ class ShortTermMemory:
     def _init_db(self) -> None:
         """Initialize database schema."""
         with self._get_db() as conn:
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS ShortTermMessages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id TEXT NOT NULL,
@@ -374,20 +373,15 @@ class ShortTermMemory:
                     content TEXT NOT NULL,
                     timestamp TEXT NOT NULL
                 )
-                """
-            )
-            conn.execute(
-                """
+                """)
+            conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_stm_session
                 ON ShortTermMessages(session_id)
-                """
-            )
-            conn.execute(
-                """
+                """)
+            conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_stm_timestamp
                 ON ShortTermMessages(timestamp)
-                """
-            )
+                """)
             conn.commit()
 
     def _load_from_db(self) -> None:

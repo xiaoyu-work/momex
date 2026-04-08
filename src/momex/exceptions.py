@@ -78,7 +78,8 @@ class CollectionNotFoundError(MomexError):
             message=message or f"Collection '{collection}' not found.",
             error_code="MOMEX_101",
             details={"collection": collection},
-            suggestion=suggestion or "Check the collection name or use MemoryManager.list_collections() to see available collections.",
+            suggestion=suggestion
+            or "Check the collection name or use MemoryManager.list_collections() to see available collections.",
         )
 
 
@@ -104,7 +105,8 @@ class MemoryNotFoundError(MomexError):
             message=message or f"Memory with ID '{memory_id}' not found.",
             error_code="MOMEX_102",
             details=details,
-            suggestion=suggestion or "Check the memory ID or use search() to find memories.",
+            suggestion=suggestion
+            or "Check the memory ID or use search() to find memories.",
         )
 
 
@@ -132,7 +134,8 @@ class ConfigurationError(MomexError):
             message=message,
             error_code="MOMEX_201",
             details=details,
-            suggestion=suggestion or "Check your configuration file or environment variables.",
+            suggestion=suggestion
+            or "Check your configuration file or environment variables.",
         )
 
 
@@ -223,7 +226,8 @@ class LLMError(MomexError):
             message=message,
             error_code="MOMEX_502",
             details=details,
-            suggestion=suggestion or "Check your LLM configuration (OPENAI_API_KEY, OPENAI_MODEL).",
+            suggestion=suggestion
+            or "Check your LLM configuration (OPENAI_API_KEY, OPENAI_MODEL).",
         )
 
 

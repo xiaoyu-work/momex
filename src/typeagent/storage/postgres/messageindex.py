@@ -71,7 +71,9 @@ class PostgresMessageTextIndex(IMessageTextEmbeddingIndex):
                     VALUES ($1, $2, $3)
                     ON CONFLICT (msg_id, chunk_ordinal) DO UPDATE SET embedding = $3
                     """,
-                    msg_ord, chunk_ord, embedding_str,
+                    msg_ord,
+                    chunk_ord,
+                    embedding_str,
                 )
             if not self._vector_index_ready:
                 self._vector_index_ready = await ensure_message_text_embedding_index(
@@ -145,7 +147,9 @@ class PostgresMessageTextIndex(IMessageTextEmbeddingIndex):
                 ORDER BY embedding <=> $1
                 LIMIT $3
                 """,
-                embedding_str, min_score, max_matches,
+                embedding_str,
+                min_score,
+                max_matches,
             )
 
             scored_locations = []
@@ -257,13 +261,11 @@ class PostgresMessageTextIndex(IMessageTextEmbeddingIndex):
     async def serialize(self) -> interfaces.MessageTextIndexData:
         """Serialize the message text index."""
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
+            rows = await conn.fetch("""
                 SELECT msg_id, chunk_ordinal, embedding
                 FROM MessageTextIndex
                 ORDER BY msg_id, chunk_ordinal
-                """
-            )
+                """)
 
             text_locations = []
             embeddings_list = []
@@ -312,7 +314,9 @@ class PostgresMessageTextIndex(IMessageTextEmbeddingIndex):
             if embeddings is None:
                 return
 
-            for text_location, embedding in zip(text_locations, embeddings, strict=True):
+            for text_location, embedding in zip(
+                text_locations, embeddings, strict=True
+            ):
                 msg_id = text_location["messageOrdinal"]
                 chunk_ordinal = text_location["chunkOrdinal"]
                 embedding_str = serialize_embedding(embedding)
@@ -322,7 +326,9 @@ class PostgresMessageTextIndex(IMessageTextEmbeddingIndex):
                     INSERT INTO MessageTextIndex (msg_id, chunk_ordinal, embedding)
                     VALUES ($1, $2, $3)
                     """,
-                    msg_id, chunk_ordinal, embedding_str,
+                    msg_id,
+                    chunk_ordinal,
+                    embedding_str,
                 )
 
     async def clear(self) -> None:

@@ -68,7 +68,9 @@ class ModelWrapper(typechat.TypeChatLanguageModel):
         return await self.base_model.complete(prompt)
 
 
-def create_typechat_model(config: "LLMConfig | None" = None) -> typechat.TypeChatLanguageModel:
+def create_typechat_model(
+    config: "LLMConfig | None" = None,
+) -> typechat.TypeChatLanguageModel:
     """Create a TypeChat language model.
 
     Args:
@@ -84,6 +86,7 @@ def create_typechat_model(config: "LLMConfig | None" = None) -> typechat.TypeCha
     if config is not None:
         # Use our LLM abstraction with TypeChat adapter
         from ..llm import create_typechat_model_from_config
+
         return create_typechat_model_from_config(config)
 
     # Legacy: fall back to environment variables

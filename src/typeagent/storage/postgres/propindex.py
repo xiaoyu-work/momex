@@ -61,7 +61,10 @@ class PostgresPropertyIndex(interfaces.IPropertyToSemanticRefIndex):
                 INSERT INTO PropertyIndex (prop_name, value_str, score, semref_id)
                 VALUES ($1, $2, $3, $4)
                 """,
-                property_name, value, score, semref_id,
+                property_name,
+                value,
+                score,
+                semref_id,
             )
 
     async def clear(self) -> None:
@@ -87,13 +90,11 @@ class PostgresPropertyIndex(interfaces.IPropertyToSemanticRefIndex):
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT semref_id, score FROM PropertyIndex WHERE prop_name = $1 AND value_str = $2",
-                property_name, value,
+                property_name,
+                value,
             )
 
-            results = [
-                ScoredSemanticRefOrdinal(row[0], row[1])
-                for row in rows
-            ]
+            results = [ScoredSemanticRefOrdinal(row[0], row[1]) for row in rows]
 
             return results if results else None
 
@@ -102,7 +103,8 @@ class PostgresPropertyIndex(interfaces.IPropertyToSemanticRefIndex):
         async with self.pool.acquire() as conn:
             await conn.execute(
                 "DELETE FROM PropertyIndex WHERE prop_name = $1 AND semref_id = $2",
-                prop_name, semref_id,
+                prop_name,
+                semref_id,
             )
 
     async def remove_all_for_semref(self, semref_id: int) -> None:

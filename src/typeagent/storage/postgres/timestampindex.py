@@ -45,7 +45,8 @@ class PostgresTimestampToTextRangeIndex(interfaces.ITimestampToTextRangeIndex):
         async with self.pool.acquire() as conn:
             result = await conn.execute(
                 "UPDATE Messages SET start_timestamp = $1 WHERE msg_id = $2",
-                _to_datetime(timestamp), message_ordinal,
+                _to_datetime(timestamp),
+                message_ordinal,
             )
             return "UPDATE 1" in result
 
@@ -72,19 +73,22 @@ class PostgresTimestampToTextRangeIndex(interfaces.ITimestampToTextRangeIndex):
                     WHERE start_timestamp >= $1 AND start_timestamp <= $2
                     ORDER BY msg_id
                     """,
-                    _to_datetime(start_timestamp), _to_datetime(end_timestamp),
+                    _to_datetime(start_timestamp),
+                    _to_datetime(end_timestamp),
                 )
 
             results = []
             for row in rows:
                 msg_id, timestamp = row[0], row[1]
                 text_range = interfaces.TextRange(
-                    start=interfaces.TextLocation(message_ordinal=msg_id, chunk_ordinal=0)
+                    start=interfaces.TextLocation(
+                        message_ordinal=msg_id, chunk_ordinal=0
+                    )
                 )
                 results.append(
                     interfaces.TimestampedTextRange(
                         range=text_range,
-                        timestamp=timestamp.isoformat() if timestamp else None
+                        timestamp=timestamp.isoformat() if timestamp else None,
                     )
                 )
 
@@ -98,15 +102,24 @@ class PostgresTimestampToTextRangeIndex(interfaces.ITimestampToTextRangeIndex):
             for message_ordinal, timestamp_str in message_timestamps:
                 await conn.execute(
                     "UPDATE Messages SET start_timestamp = $1 WHERE msg_id = $2",
-                    _to_datetime(timestamp_str), message_ordinal,
+                    _to_datetime(timestamp_str),
+                    message_ordinal,
                 )
 
     async def lookup_range(
         self, date_range: interfaces.DateRange
     ) -> list[interfaces.TimestampedTextRange]:
         """Lookup messages in a date range."""
-        start_dt = date_range.start if isinstance(date_range.start, datetime) else _to_datetime(str(date_range.start))
-        end_dt = date_range.end if isinstance(date_range.end, datetime) else _to_datetime(str(date_range.end)) if date_range.end else None
+        start_dt = (
+            date_range.start
+            if isinstance(date_range.start, datetime)
+            else _to_datetime(str(date_range.start))
+        )
+        end_dt = (
+            date_range.end
+            if isinstance(date_range.end, datetime)
+            else _to_datetime(str(date_range.end)) if date_range.end else None
+        )
 
         async with self.pool.acquire() as conn:
             if end_dt is None:
@@ -127,7 +140,8 @@ class PostgresTimestampToTextRangeIndex(interfaces.ITimestampToTextRangeIndex):
                     WHERE start_timestamp >= $1 AND start_timestamp < $2
                     ORDER BY msg_id
                     """,
-                    start_dt, end_dt,
+                    start_dt,
+                    end_dt,
                 )
 
             results = []
@@ -140,7 +154,7 @@ class PostgresTimestampToTextRangeIndex(interfaces.ITimestampToTextRangeIndex):
                 results.append(
                     interfaces.TimestampedTextRange(
                         timestamp=timestamp.isoformat() if timestamp else None,
-                        range=text_range
+                        range=text_range,
                     )
                 )
 

@@ -3,8 +3,8 @@
 
 from __future__ import annotations  # TODO: Avoid
 
-import logging
 from collections.abc import AsyncIterable, Callable
+import logging
 
 from typechat import Failure
 

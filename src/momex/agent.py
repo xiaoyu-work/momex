@@ -25,13 +25,13 @@ Example:
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
+import json
 from typing import Any
 
 from .config import MomexConfig
 from .memory import Memory
-from .short_term import ShortTermMemory, Message
+from .short_term import Message, ShortTermMemory
 
 
 @dataclass

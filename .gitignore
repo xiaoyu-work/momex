@@ -49,3 +49,6 @@ momex_data/
 test.py
 test_postgres.py
 test_memory.py
+
+# LongMemEval benchmark
+/longmemeval_bench/

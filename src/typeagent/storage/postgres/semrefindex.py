@@ -56,7 +56,8 @@ class PostgresTermToSemanticRefIndex(interfaces.ITermToSemanticRefIndex):
                 VALUES ($1, $2)
                 ON CONFLICT DO NOTHING
                 """,
-                term, semref_id,
+                term,
+                semref_id,
             )
 
         return term
@@ -68,7 +69,8 @@ class PostgresTermToSemanticRefIndex(interfaces.ITermToSemanticRefIndex):
         async with self.pool.acquire() as conn:
             await conn.execute(
                 "DELETE FROM SemanticRefIndex WHERE term = $1 AND semref_id = $2",
-                term, semantic_ref_ordinal,
+                term,
+                semantic_ref_ordinal,
             )
 
     async def lookup_term(
@@ -99,7 +101,9 @@ class PostgresTermToSemanticRefIndex(interfaces.ITermToSemanticRefIndex):
                 "SELECT term, semref_id FROM SemanticRefIndex ORDER BY term, semref_id"
             )
 
-            term_to_semrefs: dict[str, list[interfaces.ScoredSemanticRefOrdinalData]] = {}
+            term_to_semrefs: dict[
+                str, list[interfaces.ScoredSemanticRefOrdinalData]
+            ] = {}
             for row in rows:
                 term, semref_id = row[0], row[1]
                 if term not in term_to_semrefs:
@@ -136,7 +140,8 @@ class PostgresTermToSemanticRefIndex(interfaces.ITermToSemanticRefIndex):
                             VALUES ($1, $2)
                             ON CONFLICT DO NOTHING
                             """,
-                            term, semref_id,
+                            term,
+                            semref_id,
                         )
 
     def _prepare_term(self, term: str) -> str:

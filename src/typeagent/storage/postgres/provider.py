@@ -35,6 +35,7 @@ class PgBouncerPoolWrapper:
         self._pool = pool
         self._schema = schema
         from .schema import format_search_path
+
         self._search_path = format_search_path(schema)
 
     def acquire(self):
@@ -129,7 +130,9 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             )
         else:
             self.message_text_index_settings = message_text_index_settings
-            base_embedding_settings = message_text_index_settings.embedding_index_settings
+            base_embedding_settings = (
+                message_text_index_settings.embedding_index_settings
+            )
 
         if related_term_index_settings is None:
             self.related_term_index_settings = RelatedTermIndexSettings(
@@ -156,6 +159,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         """
         if self.schema and self._pgbouncer:
             from .schema import format_search_path
+
             await conn.execute(f"SET search_path TO {format_search_path(self.schema)}")
 
     async def initialize(self) -> None:
@@ -167,7 +171,9 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             return
 
         # Get embedding size for schema creation
-        embedding_size = self.message_text_index_settings.embedding_index_settings.embedding_size
+        embedding_size = (
+            self.message_text_index_settings.embedding_index_settings.embedding_size
+        )
 
         # Initialize database schema
         await init_db_schema(self.pool, embedding_size, schema=self.schema)
@@ -233,9 +239,12 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         # For pgbouncer mode with schema, create the schema first before creating pool
         if pgbouncer and schema:
             from .schema import quote_ident
+
             temp_conn = await asyncpg.connect(connection_string, statement_cache_size=0)
             try:
-                await temp_conn.execute(f"CREATE SCHEMA IF NOT EXISTS {quote_ident(schema)}")
+                await temp_conn.execute(
+                    f"CREATE SCHEMA IF NOT EXISTS {quote_ident(schema)}"
+                )
             finally:
                 await temp_conn.close()
 
@@ -251,6 +260,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             # For pgbouncer, we need to set search_path on each connection via init
             if schema:
                 from .schema import format_search_path
+
                 search_path = format_search_path(schema)
 
                 async def init_connection(conn):
@@ -261,7 +271,10 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             # For non-pgbouncer, use server_settings (session-level)
             if schema:
                 from .schema import format_search_path
-                pool_kwargs["server_settings"] = {"search_path": format_search_path(schema)}
+
+                pool_kwargs["server_settings"] = {
+                    "search_path": format_search_path(schema)
+                }
 
         pool = await asyncpg.create_pool(
             connection_string,
@@ -572,8 +585,13 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             tags = metadata_dict.get("tag")
 
             standard_keys = {
-                "name_tag", "schema_version", "created_at", "updated_at",
-                "tag", "embedding_size", "embedding_name",
+                "name_tag",
+                "schema_version",
+                "created_at",
+                "updated_at",
+                "tag",
+                "embedding_size",
+                "embedding_name",
             }
             extra = {}
             for key, values in metadata_dict.items():
@@ -613,7 +631,9 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
 
         if metadata_kwds:
             await set_conversation_metadata(
-                self.pool, schema=self.schema if self._pgbouncer else None, **metadata_kwds
+                self.pool,
+                schema=self.schema if self._pgbouncer else None,
+                **metadata_kwds,
             )
 
     async def get_db_version(self) -> int:
@@ -652,5 +672,6 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
                 VALUES ($1, $2)
                 ON CONFLICT (source_id) DO UPDATE SET status = $2
                 """,
-                source_id, status,
+                source_id,
+                status,
             )

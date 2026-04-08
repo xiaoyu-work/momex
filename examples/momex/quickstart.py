@@ -15,6 +15,7 @@ Run:
 """
 
 import asyncio
+
 from momex import Memory
 
 
@@ -31,10 +32,14 @@ async def main():
     # ===========================================
     print("\n--- Adding memories ---")
     result = await memory.add("I like Python programming")
-    print(f"Added: {result.messages_added} messages, {result.entities_extracted} semantic refs")
+    print(
+        f"Added: {result.messages_added} messages, {result.entities_extracted} semantic refs"
+    )
 
     result = await memory.add("Project deadline is Friday")
-    print(f"Added: {result.messages_added} messages, {result.entities_extracted} semantic refs")
+    print(
+        f"Added: {result.messages_added} messages, {result.entities_extracted} semantic refs"
+    )
 
     # ===========================================
     # Add from conversation
@@ -47,7 +52,9 @@ async def main():
     ]
 
     result = await memory.add(conversation)
-    print(f"Added: {result.messages_added} messages, {result.entities_extracted} semantic refs")
+    print(
+        f"Added: {result.messages_added} messages, {result.entities_extracted} semantic refs"
+    )
 
     # ===========================================
     # Search - returns structured results

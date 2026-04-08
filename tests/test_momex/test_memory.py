@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from momex import AddResult, Memory, MomexConfig, MemoryManager
+from momex import AddResult, Memory, MemoryManager, MomexConfig
 
 
 class TestMomexConfig:

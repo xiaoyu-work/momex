@@ -8,6 +8,7 @@ Prerequisites:
 """
 
 import asyncio
+
 from momex import Memory, MomexConfig
 
 
@@ -21,11 +22,26 @@ async def main():
 
     # Simulate a conversation
     conversation = [
-        {"role": "user", "content": "Hi, my name is Xiaoyu and I'm a software engineer."},
-        {"role": "assistant", "content": "Nice to meet you, Xiaoyu! What kind of software do you work on?"},
-        {"role": "user", "content": "I mainly work on Python backend services. I love using FastAPI."},
-        {"role": "assistant", "content": "FastAPI is great! Do you have any other interests?"},
-        {"role": "user", "content": "Yes, I enjoy hiking on weekends and I'm learning Japanese."},
+        {
+            "role": "user",
+            "content": "Hi, my name is Xiaoyu and I'm a software engineer.",
+        },
+        {
+            "role": "assistant",
+            "content": "Nice to meet you, Xiaoyu! What kind of software do you work on?",
+        },
+        {
+            "role": "user",
+            "content": "I mainly work on Python backend services. I love using FastAPI.",
+        },
+        {
+            "role": "assistant",
+            "content": "FastAPI is great! Do you have any other interests?",
+        },
+        {
+            "role": "user",
+            "content": "Yes, I enjoy hiking on weekends and I'm learning Japanese.",
+        },
     ]
 
     print("Processing conversation...")
@@ -36,7 +52,9 @@ async def main():
 
     # Store memories from conversation
     result = await memory.add(conversation)
-    print(f"\nAdded {result.messages_added} messages, extracted {result.entities_extracted} semantic refs")
+    print(
+        f"\nAdded {result.messages_added} messages, extracted {result.entities_extracted} semantic refs"
+    )
 
     # Search for structured results
     print("\n--- Search results ---")
@@ -62,16 +80,24 @@ async def main():
     print("=" * 50)
 
     followup_conversation = [
-        {"role": "user", "content": "I've switched to using Django now instead of FastAPI."},
+        {
+            "role": "user",
+            "content": "I've switched to using Django now instead of FastAPI.",
+        },
         {"role": "assistant", "content": "Interesting! What made you switch?"},
-        {"role": "user", "content": "The project needed more built-in features. Also, I passed my JLPT N3 exam!"},
+        {
+            "role": "user",
+            "content": "The project needed more built-in features. Also, I passed my JLPT N3 exam!",
+        },
     ]
 
     for msg in followup_conversation:
         print(f"{msg['role'].capitalize()}: {msg['content']}")
 
     result = await memory.add(followup_conversation)
-    print(f"\nAdded {result.messages_added} messages, extracted {result.entities_extracted} semantic refs")
+    print(
+        f"\nAdded {result.messages_added} messages, extracted {result.entities_extracted} semantic refs"
+    )
 
     # Query updated memories
     print("\n--- Querying updated memories ---")

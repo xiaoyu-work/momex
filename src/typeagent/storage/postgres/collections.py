@@ -46,12 +46,10 @@ class PostgresMessageCollection[TMessage: interfaces.IMessage](
 
     async def _async_iterator(self) -> typing.AsyncGenerator[TMessage, None]:
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
+            rows = await conn.fetch("""
                 SELECT chunks, chunk_uri, start_timestamp, tags, metadata, extra
                 FROM Messages ORDER BY msg_id
-                """
-            )
+                """)
             for row in rows:
                 message = self._deserialize_message_from_row(row)
                 yield message
@@ -80,7 +78,9 @@ class PostgresMessageCollection[TMessage: interfaces.IMessage](
         # Build a JSON object using camelCase.
         message_data = extra_json if extra_json else {}
         message_data["textChunks"] = chunks_json if chunks_json else []
-        message_data["timestamp"] = start_timestamp.isoformat() if start_timestamp else None
+        message_data["timestamp"] = (
+            start_timestamp.isoformat() if start_timestamp else None
+        )
         message_data["tags"] = tags_json if tags_json else []
         message_data["metadata"] = metadata_json if metadata_json else {}
 
@@ -143,7 +143,8 @@ class PostgresMessageCollection[TMessage: interfaces.IMessage](
                 SELECT chunks, chunk_uri, start_timestamp, tags, metadata, extra
                 FROM Messages WHERE msg_id >= $1 AND msg_id < $2 ORDER BY msg_id
                 """,
-                start, stop,
+                start,
+                stop,
             )
             return [self._deserialize_message_from_row(row) for row in rows]
 
@@ -182,8 +183,11 @@ class PostgresMessageCollection[TMessage: interfaces.IMessage](
                 INSERT INTO Messages (msg_id, chunks, chunk_uri, start_timestamp, tags, metadata, extra)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 """,
-                msg_id, json.dumps(chunks) if chunks else None, chunk_uri,
-                start_timestamp, json.dumps(tags) if tags else None,
+                msg_id,
+                json.dumps(chunks) if chunks else None,
+                chunk_uri,
+                start_timestamp,
+                json.dumps(tags) if tags else None,
                 json.dumps(metadata) if metadata else None,
                 json.dumps(extra) if extra else None,
             )
@@ -208,8 +212,11 @@ class PostgresMessageCollection[TMessage: interfaces.IMessage](
                     INSERT INTO Messages (msg_id, chunks, chunk_uri, start_timestamp, tags, metadata, extra)
                     VALUES ($1, $2, $3, $4, $5, $6, $7)
                     """,
-                    msg_id, json.dumps(chunks) if chunks else None, chunk_uri,
-                    start_timestamp, json.dumps(tags) if tags else None,
+                    msg_id,
+                    json.dumps(chunks) if chunks else None,
+                    chunk_uri,
+                    start_timestamp,
+                    json.dumps(tags) if tags else None,
                     json.dumps(metadata) if metadata else None,
                     json.dumps(extra) if extra else None,
                 )
@@ -277,12 +284,10 @@ class PostgresSemanticRefCollection(interfaces.ISemanticRefCollection):
 
     async def __aiter__(self) -> typing.AsyncGenerator[interfaces.SemanticRef, None]:
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
+            rows = await conn.fetch("""
                 SELECT semref_id, range_json, knowledge_type, knowledge_json
                 FROM SemanticRefs ORDER BY semref_id
-                """
-            )
+                """)
             for row in rows:
                 yield self._deserialize_semantic_ref_from_row(row)
 
@@ -311,7 +316,8 @@ class PostgresSemanticRefCollection(interfaces.ISemanticRefCollection):
                 FROM SemanticRefs WHERE semref_id >= $1 AND semref_id < $2
                 ORDER BY semref_id
                 """,
-                start, stop,
+                start,
+                stop,
             )
             return [self._deserialize_semantic_ref_from_row(row) for row in rows]
 
@@ -333,7 +339,9 @@ class PostgresSemanticRefCollection(interfaces.ISemanticRefCollection):
                 arg,
             )
             rowdict = {row["semref_id"]: row for row in rows}
-            return [self._deserialize_semantic_ref_from_row(rowdict[ordl]) for ordl in arg]
+            return [
+                self._deserialize_semantic_ref_from_row(rowdict[ordl]) for ordl in arg
+            ]
 
     async def append(self, item: interfaces.SemanticRef) -> None:
         semref_id, range_json, knowledge_type, knowledge_json = (
@@ -345,7 +353,10 @@ class PostgresSemanticRefCollection(interfaces.ISemanticRefCollection):
                 INSERT INTO SemanticRefs (semref_id, range_json, knowledge_type, knowledge_json)
                 VALUES ($1, $2, $3, $4)
                 """,
-                semref_id, json.dumps(range_json), knowledge_type, json.dumps(knowledge_json),
+                semref_id,
+                json.dumps(range_json),
+                knowledge_type,
+                json.dumps(knowledge_json),
             )
 
     async def extend(self, items: typing.Iterable[interfaces.SemanticRef]) -> None:
@@ -363,5 +374,8 @@ class PostgresSemanticRefCollection(interfaces.ISemanticRefCollection):
                     INSERT INTO SemanticRefs (semref_id, range_json, knowledge_type, knowledge_json)
                     VALUES ($1, $2, $3, $4)
                     """,
-                    semref_id, json.dumps(range_json), knowledge_type, json.dumps(knowledge_json),
+                    semref_id,
+                    json.dumps(range_json),
+                    knowledge_type,
+                    json.dumps(knowledge_json),
                 )

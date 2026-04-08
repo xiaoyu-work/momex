@@ -134,7 +134,9 @@ async def ingest_podcast(
         if verbose:
             logger.info(
                 "Indexed messages %d to %d in %.1f seconds",
-                i, i + len(batch) - 1, t1 - t0,
+                i,
+                i + len(batch) - 1,
+                t1 - t0,
             )
 
     return pod

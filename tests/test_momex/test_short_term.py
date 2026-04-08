@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from momex import ShortTermMemory, Message, SessionInfo, MomexConfig
+from momex import Message, MomexConfig, SessionInfo, ShortTermMemory
 
 
 class TestMessage:
@@ -64,7 +64,9 @@ class TestShortTermMemory:
         """Test initialization with existing session ID."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = MomexConfig(storage_path=tmpdir)
-            with ShortTermMemory("test:user", config, session_id="my-session-123") as stm:
+            with ShortTermMemory(
+                "test:user", config, session_id="my-session-123"
+            ) as stm:
                 assert stm.session_id == "my-session-123"
 
     def test_add_message(self):

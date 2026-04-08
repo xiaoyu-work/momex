@@ -44,7 +44,8 @@ class PostgresRelatedTermsAliases(interfaces.ITermToRelatedTerms):
                     VALUES ($1, $2)
                     ON CONFLICT DO NOTHING
                     """,
-                    text, related_term.text,
+                    text,
+                    related_term.text,
                 )
 
     async def remove_term(self, text: str) -> None:
@@ -67,7 +68,8 @@ class PostgresRelatedTermsAliases(interfaces.ITermToRelatedTerms):
             for alias in related_terms:
                 await conn.execute(
                     "INSERT INTO RelatedTermsAliases (term, alias) VALUES ($1, $2)",
-                    term, alias,
+                    term,
+                    alias,
                 )
 
     async def size(self) -> int:
@@ -131,7 +133,8 @@ class PostgresRelatedTermsAliases(interfaces.ITermToRelatedTerms):
                         alias = term_data["text"]
                         await conn.execute(
                             "INSERT INTO RelatedTermsAliases (term, alias) VALUES ($1, $2)",
-                            term, alias,
+                            term,
+                            alias,
                         )
 
 
@@ -175,13 +178,12 @@ class PostgresRelatedTermsFuzzy(interfaces.ITermToRelatedTermsFuzzy):
                 ORDER BY term_embedding <=> $1
                 LIMIT $3
                 """,
-                embedding_str, min_score, max_hits,
+                embedding_str,
+                min_score,
+                max_hits,
             )
 
-            results = [
-                interfaces.Term(row[0], row[1])
-                for row in rows
-            ]
+            results = [interfaces.Term(row[0], row[1]) for row in rows]
             return results
 
     async def remove_term(self, term: str) -> None:
@@ -204,9 +206,7 @@ class PostgresRelatedTermsFuzzy(interfaces.ITermToRelatedTermsFuzzy):
 
     async def get_terms(self) -> list[str]:
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT term FROM RelatedTermsFuzzy ORDER BY term"
-            )
+            rows = await conn.fetch("SELECT term FROM RelatedTermsFuzzy ORDER BY term")
             return [row[0] for row in rows]
 
     async def add_terms(self, texts: list[str]) -> None:
@@ -227,7 +227,8 @@ class PostgresRelatedTermsFuzzy(interfaces.ITermToRelatedTermsFuzzy):
                     VALUES ($1, $2)
                     ON CONFLICT (term) DO UPDATE SET term_embedding = $2
                     """,
-                    term, embedding_str,
+                    term,
+                    embedding_str,
                 )
                 self._added_terms.add(term)
             if not self._vector_index_ready:
@@ -264,11 +265,11 @@ class PostgresRelatedTermsFuzzy(interfaces.ITermToRelatedTermsFuzzy):
                     ORDER BY term_embedding <=> $1
                     LIMIT $3
                     """,
-                    emb_str, min_score, max_hits,
+                    emb_str,
+                    min_score,
+                    max_hits,
                 )
-                results.append([
-                    interfaces.Term(row[0], row[1]) for row in rows
-                ])
+                results.append([interfaces.Term(row[0], row[1]) for row in rows])
             return results
 
     def serialize(self) -> interfaces.TextEmbeddingIndexData:
@@ -291,7 +292,9 @@ class PostgresRelatedTermsFuzzy(interfaces.ITermToRelatedTermsFuzzy):
                 embedding = deserialize_embedding(embedding_str)
                 embeddings.append(embedding)
 
-            embeddings_array = np.array(embeddings, dtype=np.float32) if embeddings else None
+            embeddings_array = (
+                np.array(embeddings, dtype=np.float32) if embeddings else None
+            )
 
             return interfaces.TextEmbeddingIndexData(
                 textItems=text_items,
@@ -321,7 +324,8 @@ class PostgresRelatedTermsFuzzy(interfaces.ITermToRelatedTermsFuzzy):
                         VALUES ($1, $2)
                         ON CONFLICT (term) DO UPDATE SET term_embedding = $2
                         """,
-                        text, embedding_str,
+                        text,
+                        embedding_str,
                     )
                     self._added_terms.add(text)
 

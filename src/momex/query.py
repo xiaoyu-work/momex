@@ -38,7 +38,11 @@ async def query(
     results = await search(prefix, question, limit=20, config=config)
 
     import sys
-    print(f"[DEBUG query] prefix={prefix!r}, results={len(results)} collections", file=sys.stderr)
+
+    print(
+        f"[DEBUG query] prefix={prefix!r}, results={len(results)} collections",
+        file=sys.stderr,
+    )
     for coll, items in results:
         print(f"[DEBUG query]   {coll}: {len(items)} items", file=sys.stderr)
 
@@ -46,11 +50,13 @@ async def query(
         return "No relevant memories found."
 
     # Build context from search results
-    context = "\n".join([
-        f"- [{coll}] ({item.type}): {item.text}"
-        for coll, items in results
-        for item in items
-    ])
+    context = "\n".join(
+        [
+            f"- [{coll}] ({item.type}): {item.text}"
+            for coll, items in results
+            for item in items
+        ]
+    )
 
     print(f"[DEBUG query] context length: {len(context)}", file=sys.stderr)
 
@@ -58,8 +64,9 @@ async def query(
         return "No relevant memories found."
 
     # Use LLM to answer the question
-    from typeagent.knowpro import convknowledge
     import typechat
+
+    from typeagent.knowpro import convknowledge
 
     model = convknowledge.create_typechat_model()
     prompt = f"""Based on the following memories from different people/collections, answer the question.

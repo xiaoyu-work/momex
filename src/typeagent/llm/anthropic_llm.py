@@ -17,6 +17,7 @@ class AnthropicLLM(LLMBase):
 
     def _init_client(self):
         from anthropic import AsyncAnthropic
+
         self._client = AsyncAnthropic(api_key=self.config.api_key)
 
     async def chat(

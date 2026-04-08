@@ -1,6 +1,7 @@
 """Momex Configuration Example."""
 
 import asyncio
+
 from momex import Memory, MomexConfig
 
 

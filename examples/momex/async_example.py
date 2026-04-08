@@ -11,6 +11,7 @@ Prerequisites:
 """
 
 import asyncio
+
 from momex import Memory
 
 
@@ -31,7 +32,9 @@ async def main():
 
     results = await asyncio.gather(*tasks)
     for i, result in enumerate(results):
-        print(f"  Added item {i + 1}: {result.messages_added} messages, {result.entities_extracted} refs")
+        print(
+            f"  Added item {i + 1}: {result.messages_added} messages, {result.entities_extracted} refs"
+        )
 
     # Query asynchronously
     print("\n--- Async Queries ---")

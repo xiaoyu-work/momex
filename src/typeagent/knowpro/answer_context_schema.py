@@ -42,7 +42,9 @@ class RelevantAction:
 
     subject: Annotated[
         str | None,
-        Doc("The entity performing the action (e.g., 'xiaoyuzhang' in 'xiaoyuzhang likes Python')"),
+        Doc(
+            "The entity performing the action (e.g., 'xiaoyuzhang' in 'xiaoyuzhang likes Python')"
+        ),
     ]
     verbs: Annotated[
         list[str],
@@ -50,7 +52,9 @@ class RelevantAction:
     ]
     object: Annotated[
         str | None,
-        Doc("The entity receiving the action (e.g., 'Python' in 'xiaoyuzhang likes Python')"),
+        Doc(
+            "The entity receiving the action (e.g., 'Python' in 'xiaoyuzhang likes Python')"
+        ),
     ]
     subject_entity: Annotated[
         Any | None,

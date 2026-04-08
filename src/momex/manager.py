@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import re
 import shutil
-from pathlib import Path
 from typing import Any
 
 from .config import MomexConfig
@@ -17,7 +17,7 @@ def _collection_to_path(collection: str) -> Path:
     Converts "user:xiaoyuzhang" to Path("user/xiaoyuzhang") for cross-platform compatibility.
     """
     parts = collection.split(":")
-    sanitized = [re.sub(r'[<>"|?*:\\]', '_', part) for part in parts]
+    sanitized = [re.sub(r'[<>"|?*:\\]', "_", part) for part in parts]
     return Path(*sanitized)
 
 
@@ -86,7 +86,9 @@ class MemoryManager:
                 # Filter by prefix if specified
                 if prefix is None:
                     collections.append(collection_name)
-                elif collection_name == prefix or collection_name.startswith(prefix + ":"):
+                elif collection_name == prefix or collection_name.startswith(
+                    prefix + ":"
+                ):
                     collections.append(collection_name)
 
         return sorted(collections)
@@ -97,18 +99,17 @@ class MemoryManager:
             return self.list_collections(prefix=prefix)
 
         import asyncpg
+
         from typeagent.storage.postgres.schema import quote_ident
 
         conn = await asyncpg.connect(self.config.storage.postgres_url)
         try:
-            schemas = await conn.fetch(
-                """
+            schemas = await conn.fetch("""
                 SELECT nspname
                 FROM pg_namespace
                 WHERE nspname NOT LIKE 'pg_%'
                   AND nspname <> 'information_schema'
-                """
-            )
+                """)
 
             collections: list[str] = []
             for row in schemas:
@@ -139,7 +140,11 @@ class MemoryManager:
                         names = [name_tag]
 
                 for name in names:
-                    if prefix is None or name == prefix or name.startswith(prefix + ":"):
+                    if (
+                        prefix is None
+                        or name == prefix
+                        or name.startswith(prefix + ":")
+                    ):
                         collections.append(name)
 
             return sorted(set(collections))
@@ -175,8 +180,7 @@ class MemoryManager:
             except RuntimeError:
                 return asyncio.run(self.delete_async(collection))
             raise RuntimeError(
-                "PostgreSQL backend requires async delete. "
-                "Use await delete_async()."
+                "PostgreSQL backend requires async delete. " "Use await delete_async()."
             )
 
         collection_dir = self._get_collection_dir(collection)
@@ -197,7 +201,9 @@ class MemoryManager:
             return self.delete(collection)
 
         import asyncpg
+
         from typeagent.storage.postgres.schema import quote_ident
+
         from .memory import _collection_to_schema
 
         schema = (

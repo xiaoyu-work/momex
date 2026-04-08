@@ -9,6 +9,7 @@ Prerequisites:
 """
 
 import asyncio
+
 from momex import Memory, MemoryManager, MomexConfig, query
 
 
@@ -39,11 +40,17 @@ async def main():
 
     # Query with different scopes
     print("\n--- Query single person (Xiaoyuzhang) ---")
-    answer = await query("momex:engineering:xiaoyuzhang", "What is Xiaoyuzhang working on?", config=config)
+    answer = await query(
+        "momex:engineering:xiaoyuzhang",
+        "What is Xiaoyuzhang working on?",
+        config=config,
+    )
     print(f"Answer: {answer}")
 
     print("\n--- Query engineering team ---")
-    answer = await query("momex:engineering", "What are the team members working on?", config=config)
+    answer = await query(
+        "momex:engineering", "What are the team members working on?", config=config
+    )
     print(f"Answer: {answer}")
 
     print("\n--- Query entire momex ---")

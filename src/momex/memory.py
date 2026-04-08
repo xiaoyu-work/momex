@@ -6,13 +6,13 @@ indexing system (SemanticRefs, TermIndex) rather than text+embedding search.
 
 from __future__ import annotations
 
-import hashlib
-import json
-import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
+import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+import re
+from typing import Any, TYPE_CHECKING
 
 from .config import MomexConfig
 from .exceptions import LLMError
@@ -23,8 +23,6 @@ if TYPE_CHECKING:
         MessageTextIndexSettings,
         RelatedTermIndexSettings,
     )
-
-
 
 
 DELETED_SEMREFS_METADATA_KEY = "momex_deleted_semrefs"
@@ -59,7 +57,7 @@ def _collection_to_db_path(collection: str, base_path: str, db_name: str) -> Pat
     """
     parts = collection.split(":")
     # Sanitize each part for invalid characters (Windows forbidden chars)
-    sanitized = [re.sub(r'[<>"|?*:\\]', '_', part) for part in parts]
+    sanitized = [re.sub(r'[<>"|?*:\\]', "_", part) for part in parts]
     return Path(base_path) / Path(*sanitized) / db_name
 
 
@@ -121,10 +119,12 @@ class Memory:
         """Load environment variables from .env file."""
         try:
             from typeagent.aitools.utils import load_dotenv
+
             load_dotenv()
         except ImportError:
             try:
                 from dotenv import load_dotenv
+
                 load_dotenv()
             except ImportError:
                 pass
@@ -135,8 +135,8 @@ class Memory:
             return
 
         from typeagent.knowpro.conversation_base import ConversationBase
-        from typeagent.knowpro.convsettings import ConversationSettings
         from typeagent.knowpro.convknowledge import set_llm_config
+        from typeagent.knowpro.convsettings import ConversationSettings
 
         # Validate config before use
         self.config.validate()
@@ -213,7 +213,9 @@ class Memory:
 
     async def _store_deleted_semref_ids(self, deleted_ids: set[int]) -> None:
         serialized = json.dumps(sorted(deleted_ids))
-        await self._set_conversation_metadata(**{DELETED_SEMREFS_METADATA_KEY: serialized})
+        await self._set_conversation_metadata(
+            **{DELETED_SEMREFS_METADATA_KEY: serialized}
+        )
 
     def _filter_search_results(
         self,
@@ -275,8 +277,8 @@ class Memory:
         related_term_index_settings: RelatedTermIndexSettings,
     ):
         """Create PostgreSQL storage provider."""
-        from typeagent.knowpro.universal_message import ConversationMessage
         from typeagent.knowpro.interfaces import ConversationMetadata
+        from typeagent.knowpro.universal_message import ConversationMessage
         from typeagent.storage.postgres import PostgresStorageProvider
 
         # Use collection name as part of table prefix or schema
@@ -348,10 +350,14 @@ class Memory:
         # Detect and remove contradictions before adding
         contradictions_removed = 0
         if infer and detect_contradictions:
-            content_text = messages if isinstance(messages, str) else " ".join(
-                m.get("content", "") for m in messages
+            content_text = (
+                messages
+                if isinstance(messages, str)
+                else " ".join(m.get("content", "") for m in messages)
             )
-            contradictions_removed = await self._detect_and_remove_contradictions(content_text)
+            contradictions_removed = await self._detect_and_remove_contradictions(
+                content_text
+            )
 
         from typeagent.knowpro.universal_message import (
             ConversationMessage,
@@ -406,11 +412,15 @@ class Memory:
             old_setting = (
                 conversation_obj.settings.semantic_ref_index_settings.auto_extract_knowledge
             )
-            conversation_obj.settings.semantic_ref_index_settings.auto_extract_knowledge = False
+            conversation_obj.settings.semantic_ref_index_settings.auto_extract_knowledge = (
+                False
+            )
             try:
                 result = await conversation_obj.add_messages_with_indexing(ta_messages)
             finally:
-                conversation_obj.settings.semantic_ref_index_settings.auto_extract_knowledge = old_setting
+                conversation_obj.settings.semantic_ref_index_settings.auto_extract_knowledge = (
+                    old_setting
+                )
 
             return AddResult(
                 messages_added=result.messages_added,
@@ -437,9 +447,16 @@ class Memory:
         await self._ensure_initialized()
         conversation = self._conversation_required()
 
-        from typeagent.knowpro import answers, answer_response_schema, convknowledge, searchlang, search_query_schema
-        from typeagent.aitools import utils
         import typechat
+
+        from typeagent.aitools import utils
+        from typeagent.knowpro import (
+            answer_response_schema,
+            answers,
+            convknowledge,
+            search_query_schema,
+            searchlang,
+        )
 
         try:
             if conversation._query_translator is None:
@@ -477,7 +494,9 @@ class Memory:
             search_results = result.value
             deleted_ids = await self._load_deleted_semref_ids()
             if deleted_ids:
-                search_results = self._filter_search_results(search_results, deleted_ids)
+                search_results = self._filter_search_results(
+                    search_results, deleted_ids
+                )
 
             answer_options = answers.AnswerContextOptions(
                 entities_top_k=50, topics_top_k=50, messages_top_k=20, chunking=None
@@ -521,10 +540,16 @@ class Memory:
         await self._ensure_initialized()
         conversation = self._conversation_required()
 
-        from typeagent.knowpro import searchlang, convknowledge, search_query_schema, kplib
-        from typeagent.knowpro.interfaces import Topic
-        from typeagent.aitools import utils
         import typechat
+
+        from typeagent.aitools import utils
+        from typeagent.knowpro import (
+            convknowledge,
+            kplib,
+            search_query_schema,
+            searchlang,
+        )
+        from typeagent.knowpro.interfaces import Topic
 
         # Initialize query translator if needed
         if conversation._query_translator is None:
@@ -601,7 +626,9 @@ class Memory:
                     if knowledge.type:
                         text += f" (type: {', '.join(knowledge.type)})"
                     if knowledge.facets:
-                        facets = [f"{f.name}: {f.value}" for f in knowledge.facets if f.value]
+                        facets = [
+                            f"{f.name}: {f.value}" for f in knowledge.facets if f.value
+                        ]
                         if facets:
                             text += f" [{'; '.join(facets)}]"
                 elif isinstance(knowledge, kplib.Action):
@@ -617,12 +644,14 @@ class Memory:
                 else:
                     text = str(knowledge)
 
-                items.append(SearchItem(
-                    type=k_type,
-                    text=text,
-                    score=score,
-                    raw=sem_ref,
-                ))
+                items.append(
+                    SearchItem(
+                        type=k_type,
+                        text=text,
+                        score=score,
+                        raw=sem_ref,
+                    )
+                )
 
         # Batch fetch Messages
         if msg_requests:
@@ -643,14 +672,20 @@ class Memory:
                 if msg is None:
                     continue
 
-                text = " ".join(msg.text_chunks) if hasattr(msg, 'text_chunks') else str(msg)
+                text = (
+                    " ".join(msg.text_chunks)
+                    if hasattr(msg, "text_chunks")
+                    else str(msg)
+                )
 
-                items.append(SearchItem(
-                    type="message",
-                    text=text,
-                    score=score,
-                    raw=msg,
-                ))
+                items.append(
+                    SearchItem(
+                        type="message",
+                        text=text,
+                        score=score,
+                        raw=msg,
+                    )
+                )
 
         # Sort by score and limit
         items.sort(key=lambda x: x.score, reverse=True)
@@ -685,7 +720,7 @@ class Memory:
         # Collect IDs to delete
         semref_ids = []
         for item in results:
-            if item.type != "message" and hasattr(item.raw, 'semantic_ref_ordinal'):
+            if item.type != "message" and hasattr(item.raw, "semantic_ref_ordinal"):
                 semref_ids.append(item.raw.semantic_ref_ordinal)
 
         if not semref_ids:
@@ -784,7 +819,7 @@ Response:"""
             semref_ids = []
             for idx in indices:
                 item = results[idx]
-                if item.type != "message" and hasattr(item.raw, 'semantic_ref_ordinal'):
+                if item.type != "message" and hasattr(item.raw, "semantic_ref_ordinal"):
                     semref_ids.append(item.raw.semantic_ref_ordinal)
 
             if semref_ids:
@@ -861,9 +896,15 @@ Response:"""
             "collection": self.collection,
             "messages": [
                 {
-                    "text": " ".join(m.text_chunks) if hasattr(m, 'text_chunks') else str(m),
-                    "speaker": m.metadata.speaker if hasattr(m, 'metadata') and hasattr(m.metadata, 'speaker') else None,
-                    "timestamp": m.timestamp if hasattr(m, 'timestamp') else None,
+                    "text": (
+                        " ".join(m.text_chunks) if hasattr(m, "text_chunks") else str(m)
+                    ),
+                    "speaker": (
+                        m.metadata.speaker
+                        if hasattr(m, "metadata") and hasattr(m.metadata, "speaker")
+                        else None
+                    ),
+                    "timestamp": m.timestamp if hasattr(m, "timestamp") else None,
                 }
                 for m in messages
             ],
@@ -873,24 +914,32 @@ Response:"""
         for sr in semrefs:
             k = sr.knowledge
             if isinstance(k, kplib.ConcreteEntity):
-                data["knowledge"].append({
-                    "type": "entity",
-                    "name": k.name,
-                    "types": k.type,
-                    "facets": [{"name": f.name, "value": f.value} for f in (k.facets or [])],
-                })
+                data["knowledge"].append(
+                    {
+                        "type": "entity",
+                        "name": k.name,
+                        "types": k.type,
+                        "facets": [
+                            {"name": f.name, "value": f.value} for f in (k.facets or [])
+                        ],
+                    }
+                )
             elif isinstance(k, kplib.Action):
-                data["knowledge"].append({
-                    "type": "action",
-                    "verbs": k.verbs,
-                    "subject": k.subject_entity_name,
-                    "object": k.object_entity_name,
-                })
+                data["knowledge"].append(
+                    {
+                        "type": "action",
+                        "verbs": k.verbs,
+                        "subject": k.subject_entity_name,
+                        "object": k.object_entity_name,
+                    }
+                )
             else:
-                data["knowledge"].append({
-                    "type": "other",
-                    "text": str(k),
-                })
+                data["knowledge"].append(
+                    {
+                        "type": "other",
+                        "text": str(k),
+                    }
+                )
 
         try:
             with open(path, "w", encoding="utf-8") as f:
@@ -914,11 +963,13 @@ Response:"""
         """
         if self.config.is_postgres:
             return self.config.storage.postgres_url
-        return str(_collection_to_db_path(
-            self.collection,
-            self.config.storage_path,
-            "memory.db",
-        ))
+        return str(
+            _collection_to_db_path(
+                self.collection,
+                self.config.storage_path,
+                "memory.db",
+            )
+        )
 
     @property
     def is_initialized(self) -> bool:

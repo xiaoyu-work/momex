@@ -91,8 +91,12 @@ class AsyncEmbeddingModel:
 
         # Support both direct parameters and environment variables
         # Direct parameters take precedence
-        openai_api_key = api_key if provider == "openai" else os.getenv("OPENAI_API_KEY")
-        azure_api_key = api_key if provider == "azure" else os.getenv("AZURE_OPENAI_API_KEY")
+        openai_api_key = (
+            api_key if provider == "openai" else os.getenv("OPENAI_API_KEY")
+        )
+        azure_api_key = (
+            api_key if provider == "azure" else os.getenv("AZURE_OPENAI_API_KEY")
+        )
 
         # Determine provider
         if provider == "azure":
@@ -120,13 +124,17 @@ class AsyncEmbeddingModel:
         elif self.use_azure:
             actual_api_key = api_key or azure_api_key
             if not actual_api_key:
-                raise ValueError("Azure API key not provided and AZURE_OPENAI_API_KEY not found in environment.")
+                raise ValueError(
+                    "Azure API key not provided and AZURE_OPENAI_API_KEY not found in environment."
+                )
             with timelog("Using Azure OpenAI"):
                 self._setup_azure(actual_api_key, api_base, api_version, max_retries)
         else:
             actual_api_key = api_key or openai_api_key
             if not actual_api_key:
-                raise ValueError("OpenAI API key not provided and OPENAI_API_KEY not found in environment.")
+                raise ValueError(
+                    "OpenAI API key not provided and OPENAI_API_KEY not found in environment."
+                )
             endpoint = api_base or os.getenv(self.endpoint_envvar)
             with timelog("Using OpenAI"):
                 self.async_client = AsyncOpenAI(
