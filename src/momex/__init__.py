@@ -73,7 +73,6 @@ from .exceptions import (
 from .manager import MemoryManager
 from .memory import AddResult, Memory, SearchItem
 from .query import search, stats
-from .short_term import Message, SessionInfo, ShortTermMemory
 
 __all__ = [
     # Core classes
@@ -86,11 +85,7 @@ __all__ = [
     # Data classes
     "AddResult",
     "SearchItem",
-    # Short-term memory
-    "ShortTermMemory",
-    "Message",
-    "SessionInfo",
-    # Prefix query functions (async)
+    # Prefix search functions (async)
     "search",
     "stats",
     # Exceptions
