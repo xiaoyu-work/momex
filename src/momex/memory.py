@@ -49,6 +49,7 @@ class SearchItem:
     text: str
     score: float
     raw: Any  # Original TypeAgent object (SemanticRef or Message)
+    timestamp: str | None = None  # When the memory was recorded (ISO format)
     valid_from: str | None = None
     valid_to: str | None = None
 
@@ -831,6 +832,16 @@ class Memory:
                 knowledge = sem_ref.knowledge
                 k_type = knowledge.knowledge_type
 
+                # Get timestamp from the source message
+                src_timestamp: str | None = None
+                if hasattr(sem_ref, "range") and sem_ref.range:
+                    src_msg_ord = sem_ref.range.start.message_ordinal
+                    try:
+                        src_msg = await conversation.messages.get_item(src_msg_ord)
+                        src_timestamp = getattr(src_msg, "timestamp", None)
+                    except (IndexError, KeyError):
+                        pass
+
                 if isinstance(knowledge, kplib.ConcreteEntity):
                     text = knowledge.name
                     if knowledge.type:
@@ -860,6 +871,7 @@ class Memory:
                         text=text,
                         score=score,
                         raw=sem_ref,
+                        timestamp=src_timestamp,
                     )
                 )
 
@@ -898,6 +910,7 @@ class Memory:
                         text=text,
                         score=score,
                         raw=msg,
+                        timestamp=getattr(msg, "timestamp", None),
                         valid_from=vf,
                         valid_to=vt,
                     )
@@ -989,6 +1002,7 @@ class Memory:
                         text=text,
                         score=scored.score,
                         raw=msg,
+                        timestamp=getattr(msg, "timestamp", None),
                         valid_from=vf,
                         valid_to=vt,
                     )
