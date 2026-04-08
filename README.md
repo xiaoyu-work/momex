@@ -2,13 +2,13 @@
 
 I've been keeping an eye on this repo for a while. I'm also personally interested in personal assistant agents, and I've been trying to find best practices for memory. Structured RAG is a great design, but since this is an experimental project, the feature set isn't complete yet. So I forked the original repo and added more features, aiming to make it work for more general use cases and projects.
 
-This fork adds **Momex** - a high-level API wrapper for TypeAgent's Structured RAG.
+This fork adds **Momex** - a high-level memory API for AI agents, built on TypeAgent's Structured RAG.
 
 ## What's New
 
-- **Agent API** - High-level chat interface with automatic memory management
+- **Structured memory** - Entity/action/topic extraction via LLM, term-based indexing
 - **Short-term memory** - Session-based conversation history with persistence
-- **Long-term memory** - Structured RAG with entity/action/topic extraction
+- **Embedding fallback** - `search_by_embedding()` for fast similarity search without LLM
 - Multi-tenant support with hierarchical collections (`user:xiaoyuzhang`)
 - PostgreSQL backend with pgvector for production deployment
 
@@ -22,34 +22,32 @@ pip install momex
 
 ```python
 import asyncio
-from momex import Agent, MomexConfig, LLMConfig
+from momex import Memory, MomexConfig, LLMConfig
 
 async def main():
     config = MomexConfig(
-        llm=LLMConfig(
-            provider="openai",
-            model="gpt-4o",
-            api_key="sk-xxx",
-        ),
+        llm=LLMConfig(provider="openai", model="gpt-4o", api_key="sk-xxx"),
     )
 
-    agent = Agent("user:xiaoyuzhang", config)
+    # Create a memory collection
+    memory = Memory(collection="user:xiaoyuzhang", config=config)
 
-    r = await agent.chat("My name is Xiaoyu, I love Python")
-    print(r.content)
+    # Add memories — automatically extracts entities, actions, topics
+    await memory.add("My name is Xiaoyu, I love Python programming")
 
-    r = await agent.chat("What's my name?")
-    print(r.content)  # "Your name is Xiaoyu"
+    # Search — returns structured results you can feed to your own agent
+    results = await memory.search("What programming languages?")
+    for item in results:
+        print(f"[{item.type}] {item.text}")
+
+    # Query — returns an LLM-generated answer
+    answer = await memory.query("What does the user like?")
+    print(answer)  # "The user likes Python programming."
 
 asyncio.run(main())
 ```
 
-## Two API Levels
-
-| Level | API | Description |
-|-------|-----|-------------|
-| **Level 1** | `Agent` | Chat API with automatic memory (recommended) |
-| **Level 2** | `Memory` | Manual control for custom agents |
+Momex is a **memory layer**, not a chatbot. Plug it into any agent framework (LangChain, PydanticAI, your own) to give your agent long-term memory.
 
 See [docs/momex.md](docs/momex.md) for full documentation.
 

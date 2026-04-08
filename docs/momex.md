@@ -1,15 +1,15 @@
 # Momex
 
-Momex is a high-level memory API for AI agents, built on TypeAgent's Structured RAG.
+Momex is a memory layer for AI agents, built on TypeAgent's Structured RAG. It's not a chatbot — it's the memory system you plug into your own agent.
 
 ## Features
 
-- **Agent API**: Simple chat interface with automatic memory management
 - **Collections**: Organize memories by user, team, or purpose
 - **Hierarchical structure**: Use `:` separator for nested organization (e.g., `momex:engineering:xiaoyuzhang`)
 - **Prefix queries**: Query `momex` to search all collections under `momex:*`
 - **Structured knowledge**: Extracts entities, actions, and topics using TypeAgent's KnowledgeExtractor
 - **Term-based indexing**: Fast search using TypeAgent's SemanticRef index
+- **Embedding fallback**: `search_by_embedding()` for similarity search without LLM
 - **Short-term memory**: Session-based conversation history with persistence
 
 ## Documentation
@@ -17,43 +17,7 @@ Momex is a high-level memory API for AI agents, built on TypeAgent's Structured 
 - [Usage Guide](momex-usage.md) - How to use Momex
 - [Design Document](momex-design.md) - Architecture and internals
 
-## Two API Levels
-
-Momex provides two levels of API:
-
-| Level | Class | Description |
-|-------|-------|-------------|
-| **Level 1** | `Agent` | High-level chat API - automatic memory management |
-| **Level 2** | `Memory` | Low-level API - manual control |
-
-## Agent API (Level 1)
-
-The simplest way to use Momex. Just call `chat()` and memory is handled automatically:
-
-```python
-import asyncio
-from momex import Agent, MomexConfig, LLMConfig
-
-async def main():
-    config = MomexConfig(
-        llm=LLMConfig(provider="openai", model="gpt-4o", api_key="sk-xxx"),
-    )
-
-    xiaoyuzhang = Agent("user:xiaoyuzhang", config)
-    gvanrossum = Agent("user:gvanrossum", config)
-
-    # Chat - LLM decides what to remember
-    await xiaoyuzhang.chat("My name is Xiaoyu, I love Python")
-    await gvanrossum.chat("I'm Guido, I prefer Java")
-
-    # Memory persists
-    r = await xiaoyuzhang.chat("What's my name?")
-    print(r.content)  # "Your name is Xiaoyu"
-
-asyncio.run(main())
-```
-
-## Memory API (Level 2) - Quick Example
+## Memory API - Quick Example
 
 ```python
 import asyncio
