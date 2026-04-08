@@ -523,6 +523,9 @@ async def find_actions_for_entities(
     # Find all semantic refs where entity appears as subject or object
     related_action_ordinals: set[int] = set()
 
+    if property_index is None:
+        return []
+
     for entity_name in entity_names:
         # Search for actions where this entity is the subject
         subject_matches = await property_index.lookup_property("subject", entity_name)

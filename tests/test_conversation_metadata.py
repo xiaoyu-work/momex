@@ -3,7 +3,6 @@
 
 """Tests for conversation metadata operations in SQLite storage provider."""
 
-import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import field
 from datetime import datetime, timezone

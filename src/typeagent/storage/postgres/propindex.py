@@ -3,7 +3,7 @@
 
 """PostgreSQL-based property index implementation."""
 
-import asyncpg
+import asyncpg  # type: ignore[import-not-found]
 
 from ...knowpro import interfaces
 from ...knowpro.interfaces import ScoredSemanticRefOrdinal

@@ -6,7 +6,7 @@
 import re
 import unicodedata
 
-import asyncpg
+import asyncpg  # type: ignore[import-not-found]
 
 from ...knowpro import interfaces
 from ...knowpro.interfaces import ScoredSemanticRefOrdinal

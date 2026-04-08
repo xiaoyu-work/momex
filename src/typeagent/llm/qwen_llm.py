@@ -3,7 +3,6 @@
 
 """Qwen LLM implementation (Alibaba Cloud DashScope, OpenAI-compatible)."""
 
-from .base import LLMConfig
 from .openai_llm import OpenAILLM
 
 

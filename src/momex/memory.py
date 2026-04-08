@@ -882,7 +882,7 @@ class Memory:
 
         # Commit for SQLite
         if self.config.is_sqlite and hasattr(storage, "db"):
-            storage.db.commit()
+            storage.db.commit()  # type: ignore[attr-defined]
 
         return deleted_count
 
@@ -973,11 +973,11 @@ Response:"""
         """
         await self._ensure_initialized()
         conversation = self._conversation_required()
-        await conversation.storage_provider.clear()
+        await conversation.storage_provider.clear()  # type: ignore[attr-defined]
 
         # Commit for SQLite (PostgreSQL handles this automatically)
         if self.config.is_sqlite and hasattr(conversation.storage_provider, "db"):
-            conversation.storage_provider.db.commit()
+            conversation.storage_provider.db.commit()  # type: ignore[attr-defined]
 
         self._deleted_semref_ids = set()
         await self._store_deleted_semref_ids(self._deleted_semref_ids)

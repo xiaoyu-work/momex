@@ -3,7 +3,6 @@
 
 """DeepSeek LLM implementation (OpenAI-compatible)."""
 
-from .base import LLMConfig
 from .openai_llm import OpenAILLM
 
 

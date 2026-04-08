@@ -169,12 +169,14 @@ async def ingest_emails(
                 print(f"  Email ID: {source_id}", end="")
 
             # Check if this email was already ingested
-            if source_id and (status := storage_provider.get_source_status(source_id)):
+            if source_id and (
+                status := await storage_provider.get_source_status(source_id)
+            ):
                 skipped_count += 1
                 if verbose:
                     print(f" [Previously {status}, skipping]")
                 async with storage_provider:
-                    storage_provider.mark_source_ingested(str(email_file), status)
+                    await storage_provider.mark_source_ingested(str(email_file), status)
                 continue
             else:
                 if verbose:
@@ -235,7 +237,7 @@ async def ingest_emails(
             qual = e.__class__.__qualname__
             exc_name = qual if mod == "builtins" else f"{mod}.{qual}"
             async with storage_provider:
-                storage_provider.mark_source_ingested(str(email_file), exc_name)
+                await storage_provider.mark_source_ingested(str(email_file), exc_name)
             if verbose:
                 traceback.print_exc(limit=10)
 

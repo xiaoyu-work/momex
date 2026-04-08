@@ -3,14 +3,19 @@
 import asyncio
 
 from momex import Memory, MomexConfig
+from momex.config import EmbeddingConfig, LLMConfig
 
 
 async def main():
     # Configure once (use MOMEX_API_KEY env var for the key)
     MomexConfig.set_default(
-        provider="openai",  # openai, azure, anthropic, deepseek, qwen
-        model="gpt-4o",
-        embedding_model="text-embedding-3-small",
+        llm=LLMConfig(
+            provider="openai",  # openai, azure, anthropic, deepseek, qwen
+            model="gpt-4o",
+        ),
+        embedding=EmbeddingConfig(
+            model="text-embedding-3-small",
+        ),
     )
 
     # Create memory

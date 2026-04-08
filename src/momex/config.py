@@ -385,7 +385,7 @@ class MomexConfig:
         """Save to YAML file."""
         import yaml
 
-        data: dict = {
+        data: dict[str, dict[str, str | int | float | bool]] = {
             "llm": {
                 "provider": self.llm.provider,
                 "model": self.llm.model,

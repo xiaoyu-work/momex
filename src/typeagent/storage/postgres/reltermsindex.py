@@ -3,7 +3,7 @@
 
 """PostgreSQL-based related terms index implementations with pgvector."""
 
-import asyncpg
+import asyncpg  # type: ignore[import-not-found]
 import numpy as np
 
 from ...aitools.vectorbase import TextEmbeddingIndexSettings, VectorBase
@@ -124,7 +124,7 @@ class PostgresRelatedTermsAliases(interfaces.ITermToRelatedTerms):
             if data is None:
                 return
 
-            related_terms = data.get("relatedTerms", [])
+            related_terms = data.get("relatedTerms") or []
 
             for item in related_terms:
                 if item and item.get("termText") and item.get("relatedTerms"):

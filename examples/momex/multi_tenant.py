@@ -11,11 +11,12 @@ Prerequisites:
 import asyncio
 
 from momex import Memory, MemoryManager, MomexConfig, query
+from momex.config import StorageConfig
 
 
 async def main():
     # Configure storage location
-    config = MomexConfig(storage_path="./hierarchical_data")
+    config = MomexConfig(storage=StorageConfig(path="./hierarchical_data"))
 
     print("Creating memories for multiple people...\n")
 

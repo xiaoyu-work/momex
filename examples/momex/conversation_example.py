@@ -10,11 +10,12 @@ Prerequisites:
 import asyncio
 
 from momex import Memory, MomexConfig
+from momex.config import StorageConfig
 
 
 async def main():
     # Configure storage
-    config = MomexConfig(storage_path="./conversation_data")
+    config = MomexConfig(storage=StorageConfig(path="./conversation_data"))
 
     # Create memory for a user
     memory = Memory(collection="user:xiaoyuzhang", config=config)

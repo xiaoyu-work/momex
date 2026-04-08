@@ -5,7 +5,7 @@
 
 import typing
 
-import asyncpg
+import asyncpg  # type: ignore[import-not-found]
 import numpy as np
 
 from ...aitools.embeddings import NormalizedEmbedding

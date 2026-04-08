@@ -5,7 +5,7 @@
 
 from datetime import datetime, timezone
 
-import asyncpg
+import asyncpg  # type: ignore[import-not-found]
 
 from ...aitools.vectorbase import TextEmbeddingIndexSettings
 from ...knowpro import interfaces

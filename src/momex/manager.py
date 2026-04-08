@@ -98,7 +98,7 @@ class MemoryManager:
         if not self.config.is_postgres:
             return self.list_collections(prefix=prefix)
 
-        import asyncpg
+        import asyncpg  # type: ignore[import-not-found]
 
         from typeagent.storage.postgres.schema import quote_ident
 
@@ -200,7 +200,7 @@ class MemoryManager:
         if not self.config.is_postgres:
             return self.delete(collection)
 
-        import asyncpg
+        import asyncpg  # type: ignore[import-not-found]
 
         from typeagent.storage.postgres.schema import quote_ident
 

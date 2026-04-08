@@ -16,7 +16,7 @@ class AnthropicLLM(LLMBase):
         self._init_client()
 
     def _init_client(self):
-        from anthropic import AsyncAnthropic
+        from anthropic import AsyncAnthropic  # type: ignore[import-not-found]
 
         self._client = AsyncAnthropic(api_key=self.config.api_key)
 

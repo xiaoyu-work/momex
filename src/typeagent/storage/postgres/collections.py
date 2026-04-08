@@ -6,7 +6,7 @@
 import json
 import typing
 
-import asyncpg
+import asyncpg  # type: ignore[import-not-found]
 
 from ...knowpro import interfaces, serialization
 
@@ -92,7 +92,7 @@ class PostgresMessageCollection[TMessage: interfaces.IMessage](
 
     def _serialize_message_to_row(self, message: TMessage) -> tuple:
         """Shred a message object into database columns."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         message_data = serialization.serialize_object(message)
 
@@ -253,9 +253,9 @@ class PostgresSemanticRefCollection(interfaces.ISemanticRefCollection):
 
         semantic_ref_data = interfaces.SemanticRefData(
             semanticRefOrdinal=semref_id,
-            range=range_json,
+            range=range_json,  # type: ignore[arg-type]
             knowledgeType=knowledge_type,
-            knowledge=knowledge_json,
+            knowledge=knowledge_json,  # type: ignore[arg-type]
         )
 
         return interfaces.SemanticRef.deserialize(semantic_ref_data)

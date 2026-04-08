@@ -3,9 +3,9 @@
 
 """PostgreSQL-based timestamp index implementation."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 
-import asyncpg
+import asyncpg  # type: ignore[import-not-found]
 
 from ...knowpro import interfaces
 
@@ -88,7 +88,7 @@ class PostgresTimestampToTextRangeIndex(interfaces.ITimestampToTextRangeIndex):
                 results.append(
                     interfaces.TimestampedTextRange(
                         range=text_range,
-                        timestamp=timestamp.isoformat() if timestamp else None,
+                        timestamp=timestamp.isoformat() if timestamp else None,  # type: ignore[arg-type]
                     )
                 )
 
@@ -153,7 +153,7 @@ class PostgresTimestampToTextRangeIndex(interfaces.ITimestampToTextRangeIndex):
                 text_range = interfaces.TextRange(start=text_location, end=None)
                 results.append(
                     interfaces.TimestampedTextRange(
-                        timestamp=timestamp.isoformat() if timestamp else None,
+                        timestamp=timestamp.isoformat() if timestamp else None,  # type: ignore[arg-type]
                         range=text_range,
                     )
                 )
