@@ -1,8 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+import logging
 import os
 
 import typeagent.aitools.utils as utils
@@ -10,22 +10,34 @@ import typeagent.aitools.utils as utils
 
 def test_timelog():
     buf = StringIO()
-    with redirect_stderr(buf):
+    handler = logging.StreamHandler(buf)
+    handler.setLevel(logging.DEBUG)
+    logger = logging.getLogger("typeagent.aitools.utils")
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
         with utils.timelog("test block"):
             pass
-    out = buf.getvalue()
-    assert "test block..." in out
+        out = buf.getvalue()
+        assert "test block..." in out
+    finally:
+        logger.removeHandler(handler)
 
 
 def test_pretty_print():
-    # Use a simple object and check output is formatted by black
     obj = {"a": 1}
     buf = StringIO()
-    with redirect_stdout(buf):
+    handler = logging.StreamHandler(buf)
+    handler.setLevel(logging.INFO)
+    logger = logging.getLogger("typeagent.aitools.utils")
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
         utils.pretty_print(obj)
-    out = buf.getvalue()
-    # Should be valid Python and contain the dict
-    assert out == '{"a": 1}\n', out
+        out = buf.getvalue()
+        assert '{"a": 1}' in out
+    finally:
+        logger.removeHandler(handler)
 
 
 def test_load_dotenv(really_needs_auth):

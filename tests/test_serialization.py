@@ -54,6 +54,7 @@ def test_serialize_object():
         "name": "ExampleEntity",
         "type": ["ExampleType"],
         "facets": None,
+        "aliases": None,
     }
 
 

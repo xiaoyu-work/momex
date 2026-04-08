@@ -5,7 +5,13 @@ import tempfile
 
 import pytest
 
-from momex import AddResult, Memory, MemoryManager, MomexConfig
+from momex import (
+    LLMConfig,
+    Memory,
+    MemoryManager,
+    MomexConfig,
+    StorageConfig,
+)
 
 
 class TestMomexConfig:
@@ -14,19 +20,18 @@ class TestMomexConfig:
     def test_default_config(self):
         """Test default configuration values."""
         config = MomexConfig()
-        assert config.storage_path == "./momex_data"
-        assert config.backend == "sqlite"
+        assert config.storage.path == "./momex_data"
+        assert config.storage.backend == "sqlite"
 
     def test_custom_config(self):
         """Test custom configuration."""
         config = MomexConfig(
-            storage_path="/custom/path",
-            provider="azure",
-            model="gpt-4",
+            storage=StorageConfig(path="/custom/path"),
+            llm=LLMConfig(provider="azure", model="gpt-4"),
         )
-        assert config.storage_path == "/custom/path"
-        assert config.provider == "azure"
-        assert config.model == "gpt-4"
+        assert config.storage.path == "/custom/path"
+        assert config.llm.provider == "azure"
+        assert config.llm.model == "gpt-4"
 
 
 class TestMemory:
@@ -35,7 +40,7 @@ class TestMemory:
     def test_memory_init(self):
         """Test Memory initialization."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
             memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
             assert memory.collection == "momex:engineering:xiaoyuzhang"
             assert "momex" in memory.db_path
@@ -46,7 +51,7 @@ class TestMemory:
     def test_memory_db_path_simple(self):
         """Test Memory with simple collection name (no hierarchy)."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
             memory = Memory(collection="xiaoyuzhang", config=config)
             assert memory.db_path.endswith("memory.db")
             assert "xiaoyuzhang" in memory.db_path
@@ -54,7 +59,7 @@ class TestMemory:
     def test_memory_db_path_hierarchical(self):
         """Test Memory with hierarchical collection name."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
 
             # Two levels
             m1 = Memory(collection="momex:xiaoyuzhang", config=config)
@@ -80,7 +85,7 @@ class TestMemoryManager:
     def test_manager_list_empty(self):
         """Test listing collections when empty."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
             manager = MemoryManager(config=config)
 
             collections = manager.list_collections()
@@ -89,7 +94,7 @@ class TestMemoryManager:
     def test_manager_exists(self):
         """Test checking if collection exists."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
             manager = MemoryManager(config=config)
 
             # Manually create collection
@@ -105,7 +110,7 @@ class TestMemoryManager:
     def test_manager_delete(self):
         """Test deleting a collection."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
             manager = MemoryManager(config=config)
 
             # Create collection
@@ -129,7 +134,7 @@ class TestMemoryManager:
     def test_manager_rename(self):
         """Test renaming a collection."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
             manager = MemoryManager(config=config)
 
             # Create collection
@@ -148,7 +153,7 @@ class TestMemoryManager:
     def test_manager_info(self):
         """Test getting collection info."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
             manager = MemoryManager(config=config)
 
             # Create collection
@@ -166,7 +171,7 @@ class TestMemoryManager:
     def test_manager_list_collections(self):
         """Test listing multiple collections."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
             manager = MemoryManager(config=config)
 
             # Create hierarchical collections
@@ -190,7 +195,7 @@ class TestMemoryManager:
     def test_manager_list_collections_with_prefix(self):
         """Test listing collections with prefix filter."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
             manager = MemoryManager(config=config)
 
             # Create hierarchical collections
@@ -243,30 +248,27 @@ class TestMemoryAsync:
     async def test_add_and_query(self):
         """Test adding and querying memories."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
             memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
 
-            result = await memory.add_async(
-                "Xiaoyuzhang likes cats",
-                speaker="narrator",
-            )
+            result = await memory.add("Xiaoyuzhang likes cats")
             assert result.success
             assert result.messages_added == 1
 
-            answer = await memory.query_async("What does Alice like?")
+            answer = await memory.query("What does Alice like?")
             assert "cat" in answer.lower()
 
     @pytest.mark.skip(reason="Requires LLM API key")
     async def test_search(self):
         """Test searching memories."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
             memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
 
-            await memory.add_async("Alice is a software engineer")
-            await memory.add_async("Bob is a data scientist")
+            await memory.add("Alice is a software engineer")
+            await memory.add("Bob is a data scientist")
 
-            results = await memory.search_async("Alice")
+            results = await memory.search("Alice")
             assert len(results) >= 1
             assert any("Alice" in r.text for r in results)
 
@@ -274,13 +276,13 @@ class TestMemoryAsync:
     async def test_stats(self):
         """Test memory statistics."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
             memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
 
-            await memory.add_async("Test content")
-            stats = await memory.stats_async()
+            await memory.add("Test content")
+            stats = await memory.stats()
 
-            assert "total_memories" in stats
+            assert "total_messages" in stats
             assert stats["collection"] == "momex:engineering:xiaoyuzhang"
 
 
@@ -291,34 +293,34 @@ class TestPrefixQueryAsync:
     @pytest.mark.skip(reason="Requires LLM API key")
     async def test_query_single_collection(self):
         """Test querying a single collection by exact prefix."""
-        from momex import query_async
+        from momex import query
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
 
             # Add memory
             memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
-            await memory.add_async("Xiaoyuzhang likes Python")
+            await memory.add("Xiaoyuzhang likes Python")
 
             # Query exact collection
-            answer = await query_async("momex:engineering:xiaoyuzhang", "What does Alice like?", config=config)
+            answer = await query("momex:engineering:xiaoyuzhang", "What does Alice like?", config=config)
             assert "Python" in answer
 
     @pytest.mark.skip(reason="Requires LLM API key")
     async def test_query_prefix_multiple(self):
         """Test querying multiple collections by prefix."""
-        from momex import query_async
+        from momex import query
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = MomexConfig(storage_path=tmpdir)
+            config = MomexConfig(storage=StorageConfig(path=tmpdir))
 
             # Add memories to different collections
             xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
-            await xiaoyuzhang.add_async("Xiaoyuzhang likes Python")
+            await xiaoyuzhang.add("Xiaoyuzhang likes Python")
 
             gvanrossum = Memory(collection="momex:engineering:gvanrossum", config=config)
-            await gvanrossum.add_async("Bob likes Java")
+            await gvanrossum.add("Bob likes Java")
 
             # Query by prefix - should find both
-            answer = await query_async("momex:engineering", "What programming languages?", config=config)
+            answer = await query("momex:engineering", "What programming languages?", config=config)
             assert "Python" in answer or "Java" in answer
