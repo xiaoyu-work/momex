@@ -136,6 +136,22 @@ Lookup in SemanticRefIndex
     ↓
 Return ConversationSearchResult
     ↓
+Filter expired memories (valid_to < today)
+    ↓
+Wrap as list[SearchItem]
+```
+
+### search_by_embedding() (fallback)
+
+```
+Query text
+    ↓
+MessageTextIndex.lookup_messages()  [No LLM]
+    ↓
+Embedding similarity search
+    ↓
+Filter expired memories (valid_to < today)
+    ↓
 Wrap as list[SearchItem]
 ```
 
@@ -158,13 +174,16 @@ Momex wraps TypeAgent's search results in a simple `SearchItem` dataclass:
 ```python
 @dataclass
 class SearchItem:
-    type: str   # "entity", "action", "topic", "message"
-    text: str   # Formatted text
+    type: str          # "entity", "action", "topic", "message"
+    text: str          # Formatted text
     score: float
-    raw: Any    # Original TypeAgent object
+    raw: Any           # Original TypeAgent object
+    valid_from: str | None  # ISO date: memory is relevant from this date
+    valid_to: str | None    # ISO date: memory expires after this date
 ```
 
 This provides:
 - Friendly text formatting
 - Access to raw TypeAgent objects via `.raw`
 - Type information from TypeAgent's native `knowledge_type`
+- Time window metadata for temporal memories

@@ -269,6 +269,39 @@ You can disable automatic contradiction detection:
 await memory.add("I don't like sushi", detect_contradictions=False)
 ```
 
+### Time-Bound Memories
+
+Add memories that automatically expire. Expired memories are excluded from search results by default:
+
+```python
+async def main():
+    memory = Memory(collection="user:xiaoyuzhang")
+
+    # Memory that expires after a date
+    await memory.add(
+        "Netflix subscription renews May 1 at $15.99",
+        valid_to="2026-05-02",
+    )
+
+    # Memory with a validity window
+    await memory.add(
+        "User has a trip to Tokyo next week",
+        valid_from="2026-04-10",
+        valid_to="2026-04-18",
+    )
+
+    # Permanent memory (default, no expiry)
+    await memory.add("User prefers aisle seats on flights")
+
+    # Search — expired memories are automatically filtered out
+    results = await memory.search("subscription")
+
+    # Include expired memories when needed (e.g., for history)
+    results = await memory.search("subscription", include_expired=True)
+    for item in results:
+        print(f"{item.text} (expires: {item.valid_to})")
+```
+
 ### Explicit Delete (Advanced Users)
 
 For manual control over deletion:
@@ -330,6 +363,23 @@ async def main():
 **query() vs search():**
 - `query()`: Uses LLM to generate a natural language answer
 - `search()`: Returns structured `SearchItem` results for you to process
+
+### Embedding-Only Search (Fallback)
+
+`search_by_embedding()` does pure vector similarity search without any LLM call. Useful as a fallback when the LLM is unavailable, or for low-latency scenarios:
+
+```python
+async def main():
+    memory = Memory(collection="user:xiaoyuzhang")
+
+    # No LLM needed — direct embedding similarity
+    results = await memory.search_by_embedding("programming languages")
+    for item in results:
+        print(f"{item.text} (score={item.score:.2f})")
+
+    # Also supports include_expired
+    results = await memory.search_by_embedding("subscription", include_expired=True)
+```
 
 ### Manage Collections
 
@@ -625,6 +675,7 @@ All methods are async:
 | `await add(messages)` | Add memories (auto-detects contradictions) |
 | `await query(question)` | Query with natural language (LLM answer) |
 | `await search(query, limit=10)` | Search, returns `list[SearchItem]` |
+| `await search_by_embedding(query, limit=10)` | Embedding-only search, no LLM needed |
 | `await delete(query)` | Delete memories matching query (advanced) |
 | `await stats()` | Get memory statistics |
 | `await export(path)` | Export to JSON file |
@@ -634,6 +685,11 @@ All methods are async:
 - `messages`: str or list[dict] - Content to add
 - `infer`: bool (default True) - Use LLM to extract knowledge
 - `detect_contradictions`: bool (default True) - Auto-remove contradicting memories
+- `valid_from`: str or None - ISO date, memory relevant from this date
+- `valid_to`: str or None - ISO date, memory expires after this date
+
+**search() / search_by_embedding() parameters:**
+- `include_expired`: bool (default False) - Include memories past their valid_to date
 
 ### Prefix Query Functions
 
@@ -647,16 +703,18 @@ All functions are async:
 
 ### SearchItem
 
-Returned by `search()`:
+Returned by `search()` and `search_by_embedding()`:
 
 ```python
 results = await memory.search("programming")
 
 for item in results:
-    print(item.type)   # "entity", "action", "topic", or "message"
-    print(item.text)   # Formatted text
-    print(item.score)  # Relevance score
-    print(item.raw)    # Original TypeAgent object (SemanticRef or Message)
+    print(item.type)        # "entity", "action", "topic", or "message"
+    print(item.text)        # Formatted text
+    print(item.score)       # Relevance score
+    print(item.raw)         # Original TypeAgent object (SemanticRef or Message)
+    print(item.valid_from)  # ISO date or None — when memory becomes relevant
+    print(item.valid_to)    # ISO date or None — when memory expires
 ```
 
 **SearchItem.type values** (from TypeAgent's knowledge_type):

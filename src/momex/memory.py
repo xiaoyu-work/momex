@@ -47,6 +47,8 @@ class SearchItem:
     text: str
     score: float
     raw: Any  # Original TypeAgent object (SemanticRef or Message)
+    valid_from: str | None = None
+    valid_to: str | None = None
 
 
 def _collection_to_db_path(collection: str, base_path: str, db_name: str) -> Path:
@@ -312,6 +314,8 @@ class Memory:
         *,
         infer: bool = True,
         detect_contradictions: bool = True,
+        valid_from: str | None = None,
+        valid_to: str | None = None,
     ) -> AddResult:
         """Add memories with TypeAgent's knowledge extraction.
 
@@ -327,6 +331,10 @@ class Memory:
                    If False, add directly without LLM processing.
             detect_contradictions: If True (default), use LLM to detect and remove
                    contradicting memories before adding. Set False to skip this.
+            valid_from: ISO date string (e.g., "2026-04-01"). Memory is only relevant
+                   from this date. None means no start constraint.
+            valid_to: ISO date string (e.g., "2026-05-01"). Memory expires after this
+                   date and will be excluded from search results. None means no expiry.
 
         Returns:
             AddResult with statistics about what was added.
@@ -337,6 +345,13 @@ class Memory:
 
             # Automatically handles contradictions
             await memory.add("I don't like Python anymore")  # Removes old "like Python"
+
+            # Time-bound memory
+            await memory.add(
+                "Netflix subscription renews May 1 at $15.99",
+                valid_from="2026-04-01",
+                valid_to="2026-05-02",
+            )
 
             # Conversation input
             await memory.add([
@@ -372,6 +387,13 @@ class Memory:
 
         # Convert to TypeAgent ConversationMessage format
         ta_messages: list[ConversationMessage] = []
+        # Store time windows as tags so they survive serialization
+        time_tags: list[str] = []
+        if valid_from:
+            time_tags.append(f"valid_from:{valid_from}")
+        if valid_to:
+            time_tags.append(f"valid_to:{valid_to}")
+
         for msg in conversation_messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
@@ -384,6 +406,7 @@ class Memory:
             ta_message = ConversationMessage(
                 text_chunks=[content],
                 metadata=ConversationMessageMeta(speaker=speaker),
+                tags=list(time_tags),
                 timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             )
             ta_messages.append(ta_message)
@@ -523,16 +546,41 @@ class Memory:
                 operation="query",
             ) from e
 
+    @staticmethod
+    def _extract_time_window(msg: Any) -> tuple[str | None, str | None]:
+        """Extract valid_from/valid_to from a message's tags."""
+        tags = getattr(msg, "tags", None) or []
+        valid_from = None
+        valid_to = None
+        for tag in tags:
+            if isinstance(tag, str):
+                if tag.startswith("valid_from:"):
+                    valid_from = tag[len("valid_from:"):]
+                elif tag.startswith("valid_to:"):
+                    valid_to = tag[len("valid_to:"):]
+        return valid_from, valid_to
+
+    @staticmethod
+    def _is_expired(valid_to: str | None) -> bool:
+        """Check if a time window has expired (valid_to < today UTC)."""
+        if not valid_to:
+            return False
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return valid_to < today
+
     async def search(
         self,
         query_text: str,
         limit: int = 10,
+        *,
+        include_expired: bool = False,
     ) -> list[SearchItem]:
         """Search memories using TypeAgent's term-based indexing.
 
         Args:
             query_text: Search query (natural language question or topic).
             limit: Maximum number of results to return.
+            include_expired: If True, include memories past their valid_to date.
 
         Returns:
             List of SearchItem with type, text, score, and raw TypeAgent object.
@@ -672,6 +720,10 @@ class Memory:
                 if msg is None:
                     continue
 
+                vf, vt = self._extract_time_window(msg)
+                if not include_expired and self._is_expired(vt):
+                    continue
+
                 text = (
                     " ".join(msg.text_chunks)
                     if hasattr(msg, "text_chunks")
@@ -684,10 +736,89 @@ class Memory:
                         text=text,
                         score=score,
                         raw=msg,
+                        valid_from=vf,
+                        valid_to=vt,
                     )
                 )
 
         # Sort by score and limit
+        items.sort(key=lambda x: x.score, reverse=True)
+        return items[:limit]
+
+    async def search_by_embedding(
+        self,
+        query_text: str,
+        limit: int = 10,
+        min_score: float = 0.3,
+        *,
+        include_expired: bool = False,
+    ) -> list[SearchItem]:
+        """Embedding-only search without LLM. Used as fallback when structured search fails.
+
+        Directly queries the MessageTextIndex for embedding similarity,
+        bypassing the LLM query translation step entirely.
+
+        Args:
+            query_text: Search query text.
+            limit: Maximum number of results.
+            min_score: Minimum similarity score threshold.
+            include_expired: If True, include memories past their valid_to date.
+
+        Returns:
+            List of SearchItem with type="message".
+        """
+        await self._ensure_initialized()
+        conversation = self._conversation_required()
+
+        # Get the message text index from secondary indexes
+        if (
+            conversation.secondary_indexes is None
+            or conversation.secondary_indexes.message_index is None
+        ):
+            return []
+
+        msg_index = conversation.secondary_indexes.message_index
+
+        try:
+            scored_ordinals = await msg_index.lookup_messages(
+                query_text,
+                max_matches=limit,
+                threshold_score=min_score,
+            )
+        except Exception:
+            return []
+
+        if not scored_ordinals:
+            return []
+
+        # Fetch messages and build SearchItems
+        items: list[SearchItem] = []
+        for scored in scored_ordinals:
+            try:
+                msg = await conversation.messages.get_item(scored.message_ordinal)
+
+                vf, vt = self._extract_time_window(msg)
+                if not include_expired and self._is_expired(vt):
+                    continue
+
+                text = (
+                    " ".join(msg.text_chunks)
+                    if hasattr(msg, "text_chunks")
+                    else str(msg)
+                )
+                items.append(
+                    SearchItem(
+                        type="message",
+                        text=text,
+                        score=scored.score,
+                        raw=msg,
+                        valid_from=vf,
+                        valid_to=vt,
+                    )
+                )
+            except (IndexError, KeyError):
+                continue
+
         items.sort(key=lambda x: x.score, reverse=True)
         return items[:limit]
 

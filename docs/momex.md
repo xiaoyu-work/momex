@@ -86,11 +86,15 @@ asyncio.run(main())
 
 ## search() vs query()
 
-- `search()` → Returns `list[SearchItem]` for you to process
+- `search()` → Returns `list[SearchItem]` for you to process (requires LLM for query translation)
+- `search_by_embedding()` → Same as `search()` but uses embedding similarity only (no LLM needed)
 - `query()` → Returns LLM-generated answer string
 
 Use `search()` when you want raw results (e.g., as context for your own LLM).
+Use `search_by_embedding()` as a fast fallback when the LLM is unavailable.
 Use `query()` for a ready-to-use answer.
+
+Both `search()` and `search_by_embedding()` automatically filter out expired memories (those past their `valid_to` date). Pass `include_expired=True` to include them.
 
 ## Short-Term Memory
 
