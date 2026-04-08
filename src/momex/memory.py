@@ -555,9 +555,9 @@ class Memory:
         for tag in tags:
             if isinstance(tag, str):
                 if tag.startswith("valid_from:"):
-                    valid_from = tag[len("valid_from:"):]
+                    valid_from = tag[len("valid_from:") :]
                 elif tag.startswith("valid_to:"):
-                    valid_to = tag[len("valid_to:"):]
+                    valid_to = tag[len("valid_to:") :]
         return valid_from, valid_to
 
     @staticmethod

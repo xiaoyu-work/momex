@@ -81,7 +81,7 @@ class SqliteMessageTextIndex(IMessageTextEmbeddingIndex):
                 (msg_ord, chunk_ord, serialize_embedding(embedding), index_position)
             )
 
-        # Bulk insert text chunks (without embeddings yet)
+        # Bulk insert into DB
         cursor = self.db.cursor()
         if insertion_data:
             cursor.executemany(
@@ -92,6 +92,9 @@ class SqliteMessageTextIndex(IMessageTextEmbeddingIndex):
                 """,
                 insertion_data,
             )
+
+        # Keep in-memory VectorBase in sync with DB
+        self._vectorbase.add_embeddings(None, embeddings)
 
     async def add_messages(
         self,
