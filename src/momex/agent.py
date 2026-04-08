@@ -7,10 +7,10 @@ Provides a simple chat interface that automatically:
 4. Manages conversation history
 
 Example:
-    >>> from momex import Agent, MomexConfig
+    >>> from momex import Agent, MomexConfig, LLMConfig
     >>>
     >>> async def main():
-    ...     config = MomexConfig(provider="openai", model="gpt-4o")
+    ...     config = MomexConfig(llm=LLMConfig(provider="openai", model="gpt-4o"))
     ...     agent = Agent("user:xiaoyuzhang", config)
     ...
     ...     # Just chat - memory is handled automatically

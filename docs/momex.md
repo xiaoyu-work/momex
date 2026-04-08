@@ -102,30 +102,31 @@ from momex import ShortTermMemory, MomexConfig
 
 config = MomexConfig()
 
-# Create short-term memory (uses context manager for clean connection handling)
-with ShortTermMemory("user:xiaoyuzhang", config) as stm:
-    # Add messages
-    stm.add("Hello, I'm Alice", role="user")
-    stm.add("Nice to meet you!", role="assistant")
+# Create short-term memory
+stm = ShortTermMemory("user:xiaoyuzhang", config)
 
-    # Get recent messages
-    for msg in stm.get(limit=10):
-        print(f"{msg.role}: {msg.content}")
+# Add messages
+stm.add("Hello, I'm Alice", role="user")
+stm.add("Nice to meet you!", role="assistant")
 
-    # Save session_id for later
-    session_id = stm.session_id
+# Get recent messages
+for msg in stm.get(limit=10):
+    print(f"{msg.role}: {msg.content}")
+
+# Save session_id for later
+session_id = stm.session_id
 
 # Resume session after restart
-with ShortTermMemory("user:xiaoyuzhang", config, session_id=session_id) as stm:
-    messages = stm.get_all()  # Previous messages restored
+stm = ShortTermMemory("user:xiaoyuzhang", config, session_id=session_id)
+messages = stm.get_all()  # Previous messages restored
 
-    # List all sessions
-    sessions = stm.list_sessions()
-    for s in sessions:
-        print(f"{s.session_id}: {s.message_count} messages")
+# List all sessions
+sessions = stm.list_sessions()
+for s in sessions:
+    print(f"{s.session_id}: {s.message_count} messages")
 
-    # Start fresh session
-    new_id = stm.new_session()
+# Start fresh session
+new_id = stm.new_session()
 ```
 
 ### Short-Term Memory API
