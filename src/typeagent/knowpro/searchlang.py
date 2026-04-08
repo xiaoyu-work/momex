@@ -358,7 +358,8 @@ class SearchQueryCompiler:
         action_group = SearchTermGroup("or_max") if use_or_max else term_group
         if action_term.action_verbs is not None:
             for verb in action_term.action_verbs.words:
-                self.add_property_term_to_group("topic", verb, action_group)
+                # Use general term search so verbs match actions, not just topics
+                self.add_search_term_to_group(verb, action_group)
         if is_entity_term_list(action_term.actor_entities):
             self.compile_entity_terms_as_search_terms(
                 action_term.actor_entities, action_group
