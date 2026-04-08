@@ -1,11 +1,13 @@
 """Momex Memory - High-level API wrapping TypeAgent's Structured RAG.
 
 This module provides a simplified Memory API that uses TypeAgent's full
-indexing system (SemanticRefs, TermIndex) rather than text+embedding search.
+indexing system (SemanticRefs, TermIndex) combined with embedding similarity
+search for robust hybrid retrieval.
 """
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -454,12 +456,10 @@ class Memory:
             )
 
     async def query(self, question: str) -> str:
-        """Query memories with natural language.
+        """Query memories with natural language using hybrid search.
 
-        Uses TypeAgent's full search pipeline:
-        1. Translate question to structured SearchQuery
-        2. Search term-based indexes
-        3. Generate answer from matched knowledge
+        Runs structured RAG and embedding search in parallel, merges results,
+        then generates an LLM answer from the combined context.
 
         Args:
             question: Natural language question.
@@ -480,6 +480,8 @@ class Memory:
             search_query_schema,
             searchlang,
         )
+        from typeagent.knowpro.interfaces import ScoredMessageOrdinal
+        from typeagent.knowpro.search import ConversationSearchResult
 
         try:
             if conversation._query_translator is None:
@@ -504,22 +506,62 @@ class Memory:
                 max_message_matches=25,
             )
 
-            result = await searchlang.search_conversation_with_language(
+            # Run structured search and embedding search in parallel
+            async def _embedding_ordinals() -> list[ScoredMessageOrdinal]:
+                if (
+                    conversation.secondary_indexes is None
+                    or conversation.secondary_indexes.message_index is None
+                ):
+                    return []
+                try:
+                    return await conversation.secondary_indexes.message_index.lookup_messages(
+                        question, max_matches=10, threshold_score=0.3
+                    )
+                except Exception:
+                    return []
+
+            structured_task = searchlang.search_conversation_with_language(
                 conversation,
                 conversation._query_translator,
                 question,
                 search_options,
             )
 
-            if isinstance(result, typechat.Failure):
-                return f"Search failed: {result.message}"
+            result, embedding_ordinals = await asyncio.gather(
+                structured_task, _embedding_ordinals()
+            )
 
-            search_results = result.value
+            if isinstance(result, typechat.Failure):
+                search_results: list[ConversationSearchResult] = []
+            else:
+                search_results = result.value
+
             deleted_ids = await self._load_deleted_semref_ids()
             if deleted_ids:
                 search_results = self._filter_search_results(
                     search_results, deleted_ids
                 )
+
+            # Inject embedding-found messages into search results
+            if embedding_ordinals:
+                existing_msg_ordinals: set[int] = set()
+                for sr in search_results:
+                    for mm in sr.message_matches:
+                        existing_msg_ordinals.add(mm.message_ordinal)
+
+                new_msg_matches = [
+                    s
+                    for s in embedding_ordinals
+                    if s.message_ordinal not in existing_msg_ordinals
+                ]
+                if new_msg_matches:
+                    search_results.append(
+                        ConversationSearchResult(
+                            message_matches=new_msg_matches,
+                            knowledge_matches={},
+                            raw_query_text=question,
+                        )
+                    )
 
             answer_options = answers.AnswerContextOptions(
                 entities_top_k=50, topics_top_k=50, messages_top_k=20, chunking=None
@@ -575,7 +617,10 @@ class Memory:
         *,
         include_expired: bool = False,
     ) -> list[SearchItem]:
-        """Search memories using TypeAgent's term-based indexing.
+        """Hybrid search: structured term matching + embedding similarity in parallel.
+
+        Runs both search paths concurrently and merges results for better recall
+        without sacrificing precision.
 
         Args:
             query_text: Search query (natural language question or topic).
@@ -586,6 +631,40 @@ class Memory:
             List of SearchItem with type, text, score, and raw TypeAgent object.
         """
         await self._ensure_initialized()
+
+        # Run structured search and embedding search in parallel
+        structured_task = self._search_structured(
+            query_text, limit=limit, include_expired=include_expired
+        )
+        embedding_task = self._search_embedding(
+            query_text, limit=limit, include_expired=include_expired
+        )
+        structured_items, embedding_items = await asyncio.gather(
+            structured_task, embedding_task
+        )
+
+        # Merge: structured results first, then embedding results not already present
+        seen_texts: set[str] = set()
+        merged: list[SearchItem] = []
+        for item in structured_items:
+            seen_texts.add(item.text)
+            merged.append(item)
+        for item in embedding_items:
+            if item.text not in seen_texts:
+                seen_texts.add(item.text)
+                merged.append(item)
+
+        merged.sort(key=lambda x: x.score, reverse=True)
+        return merged[:limit]
+
+    async def _search_structured(
+        self,
+        query_text: str,
+        limit: int = 10,
+        *,
+        include_expired: bool = False,
+    ) -> list[SearchItem]:
+        """Structured RAG search using LLM query translation + term matching."""
         conversation = self._conversation_required()
 
         import typechat
@@ -744,6 +823,21 @@ class Memory:
         # Sort by score and limit
         items.sort(key=lambda x: x.score, reverse=True)
         return items[:limit]
+
+    async def _search_embedding(
+        self,
+        query_text: str,
+        limit: int = 10,
+        *,
+        include_expired: bool = False,
+    ) -> list[SearchItem]:
+        """Internal embedding search. Silently returns empty on failure."""
+        try:
+            return await self.search_by_embedding(
+                query_text, limit=limit, include_expired=include_expired
+            )
+        except Exception:
+            return []
 
     async def search_by_embedding(
         self,
