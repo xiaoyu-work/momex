@@ -4,13 +4,12 @@ Momex is a memory layer for AI agents, built on TypeAgent's Structured RAG. It's
 
 ## Features
 
+- **Hybrid search**: `search()` runs structured RAG + embedding similarity in parallel
 - **Collections**: Organize memories by user, team, or purpose
 - **Hierarchical structure**: Use `:` separator for nested organization (e.g., `momex:engineering:xiaoyuzhang`)
-- **Prefix queries**: Query `momex` to search all collections under `momex:*`
+- **Prefix search**: Search across all collections under a prefix (e.g., `momex:*`)
 - **Structured knowledge**: Extracts entities, actions, and topics using TypeAgent's KnowledgeExtractor
-- **Term-based indexing**: Fast search using TypeAgent's SemanticRef index
-- **Embedding fallback**: `search_by_embedding()` for similarity search without LLM
-- **Short-term memory**: Session-based conversation history with persistence
+- **Embedding-only mode**: `search_by_embedding()` for fast similarity search without LLM
 
 ## Documentation
 

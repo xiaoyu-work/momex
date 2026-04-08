@@ -6,9 +6,9 @@ This fork adds **Momex** - a high-level memory API for AI agents, built on TypeA
 
 ## What's New
 
+- **Hybrid search** - Structured RAG + embedding similarity in parallel for best recall
 - **Structured memory** - Entity/action/topic extraction via LLM, term-based indexing
-- **Hybrid search** - Structured RAG + embedding similarity in parallel
-- **Embedding fallback** - `search_by_embedding()` for fast similarity search without LLM
+- **Embedding-only mode** - `search_by_embedding()` for fast similarity search without LLM
 - Multi-tenant support with hierarchical collections (`user:xiaoyuzhang`)
 - PostgreSQL backend with pgvector for production deployment
 
