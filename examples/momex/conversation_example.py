@@ -63,17 +63,23 @@ async def main():
     for item in results:
         print(f"  [{item.type}] {item.text} (score={item.score:.2f})")
 
-    # Query the memories
-    print("\n--- Querying memories ---")
+    # Search the memories
+    print("\n--- Searching memories ---")
 
-    answer = await memory.query("What is the user's profession?")
-    print(f"Q: What is the user's profession?\nA: {answer}")
+    results = await memory.search("What is the user's profession?")
+    print(f"Q: What is the user's profession?")
+    for item in results:
+        print(f"  [{item.type}] {item.text} (score={item.score:.2f})")
 
-    answer = await memory.query("What are the user's hobbies?")
-    print(f"\nQ: What are the user's hobbies?\nA: {answer}")
+    results = await memory.search("What are the user's hobbies?")
+    print(f"\nQ: What are the user's hobbies?")
+    for item in results:
+        print(f"  [{item.type}] {item.text} (score={item.score:.2f})")
 
-    answer = await memory.query("What framework does the user use?")
-    print(f"\nQ: What framework does the user use?\nA: {answer}")
+    results = await memory.search("What framework does the user use?")
+    print(f"\nQ: What framework does the user use?")
+    for item in results:
+        print(f"  [{item.type}] {item.text} (score={item.score:.2f})")
 
     # Simulate a follow-up conversation
     print("\n" + "=" * 50)
@@ -100,14 +106,18 @@ async def main():
         f"\nAdded {result.messages_added} messages, extracted {result.entities_extracted} semantic refs"
     )
 
-    # Query updated memories
-    print("\n--- Querying updated memories ---")
+    # Search updated memories
+    print("\n--- Searching updated memories ---")
 
-    answer = await memory.query("What Python framework does the user use?")
-    print(f"Q: What Python framework does the user use?\nA: {answer}")
+    results = await memory.search("What Python framework does the user use?")
+    print(f"Q: What Python framework does the user use?")
+    for item in results:
+        print(f"  [{item.type}] {item.text} (score={item.score:.2f})")
 
-    answer = await memory.query("What is the user's Japanese level?")
-    print(f"\nQ: What is the user's Japanese level?\nA: {answer}")
+    results = await memory.search("What is the user's Japanese level?")
+    print(f"\nQ: What is the user's Japanese level?")
+    for item in results:
+        print(f"  [{item.type}] {item.text} (score={item.score:.2f})")
 
     # Show stats
     stats = await memory.stats()

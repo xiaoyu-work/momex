@@ -40,10 +40,6 @@ async def main():
     for item in results:
         print(f"[{item.type}] {item.text}")
 
-    # Query — returns an LLM-generated answer
-    answer = await memory.query("What does the user love?")
-    print(answer)  # "The user loves Python programming."
-
 asyncio.run(main())
 ```
 

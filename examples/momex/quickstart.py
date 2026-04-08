@@ -64,16 +64,15 @@ async def main():
     for item in results:
         print(f"  [{item.type}] {item.text} (score={item.score:.2f})")
 
-    # ===========================================
-    # Query - returns LLM answer
-    # ===========================================
-    print("\n--- Querying memories ---")
+    results = await memory.search("What programming language does the user like?")
+    print(f"Q: What programming language?")
+    for item in results:
+        print(f"  [{item.type}] {item.text} (score={item.score:.2f})")
 
-    answer = await memory.query("What programming language does the user like?")
-    print(f"Q: What programming language?\nA: {answer}")
-
-    answer = await memory.query("What does the user do on weekends?")
-    print(f"\nQ: Weekend activity?\nA: {answer}")
+    results = await memory.search("What does the user do on weekends?")
+    print(f"\nQ: Weekend activity?")
+    for item in results:
+        print(f"  [{item.type}] {item.text} (score={item.score:.2f})")
 
     # ===========================================
     # Stats

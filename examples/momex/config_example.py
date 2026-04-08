@@ -23,8 +23,9 @@ async def main():
 
     # Use it
     await memory.add("I like Python")
-    answer = await memory.query("What do I like?")
-    print(answer)
+    results = await memory.search("What do I like?")
+    for item in results:
+        print(f"[{item.type}] {item.text}")
 
 
 if __name__ == "__main__":

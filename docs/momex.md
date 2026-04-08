@@ -21,7 +21,7 @@ Momex is a memory layer for AI agents, built on TypeAgent's Structured RAG. It's
 
 ```python
 import asyncio
-from momex import Memory, query
+from momex import Memory
 
 async def main():
     # Create memory for a user
@@ -37,26 +37,16 @@ async def main():
     # Output: [action] none like Python (score=10.00)
     #         [message] I like Python programming (score=5.49)
 
-    # Query single collection - returns LLM-generated answer
-    answer = await memory.query("What does the user like?")
-    print(f"A: {answer}")
-
-    # Query across collections (prefix query)
-    answer = await query("momex:engineering", "What does the user like?")
-    print(f"A: {answer}")
-
 asyncio.run(main())
 ```
 
-## search() vs query()
+## search() and search_by_embedding()
 
 - `search()` → Returns `list[SearchItem]` for you to process (requires LLM for query translation)
 - `search_by_embedding()` → Same as `search()` but uses embedding similarity only (no LLM needed)
-- `query()` → Returns LLM-generated answer string
 
 Use `search()` when you want raw results (e.g., as context for your own LLM).
 Use `search_by_embedding()` as a fast fallback when the LLM is unavailable.
-Use `query()` for a ready-to-use answer.
 
 Both `search()` and `search_by_embedding()` automatically filter out expired memories (those past their `valid_to` date). Pass `include_expired=True` to include them.
 

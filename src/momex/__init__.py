@@ -34,8 +34,10 @@ Example:
     ...     # Add memories - TypeAgent extracts entities, actions, topics
     ...     await memory.add("I like Python programming")
     ...
-    ...     # Query
-    ...     answer = await memory.query("What does the user like?")
+    ...     # Search
+    ...     results = await memory.search("What does the user like?")
+    ...     for item in results:
+    ...         print(f"[{item.type}] {item.text}")
     ...
     >>> asyncio.run(main())
 
@@ -70,7 +72,7 @@ from .exceptions import (
 )
 from .manager import MemoryManager
 from .memory import AddResult, Memory, SearchItem
-from .query import query, search, stats
+from .query import search, stats
 from .short_term import Message, SessionInfo, ShortTermMemory
 
 __all__ = [
@@ -89,7 +91,6 @@ __all__ = [
     "Message",
     "SessionInfo",
     # Prefix query functions (async)
-    "query",
     "search",
     "stats",
     # Exceptions

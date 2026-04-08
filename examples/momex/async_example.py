@@ -36,27 +36,29 @@ async def main():
             f"  Added item {i + 1}: {result.messages_added} messages, {result.entities_extracted} refs"
         )
 
-    # Query asynchronously
-    print("\n--- Async Queries ---")
+    # Search asynchronously
+    print("\n--- Async Search ---")
 
-    # Run multiple queries concurrently
-    query_tasks = [
-        memory.query("What programming language does the user like?"),
-        memory.query("What is the user learning?"),
-        memory.query("What framework is used?"),
+    # Run multiple searches concurrently
+    search_tasks = [
+        memory.search("What programming language does the user like?"),
+        memory.search("What is the user learning?"),
+        memory.search("What framework is used?"),
     ]
 
-    answers = await asyncio.gather(*query_tasks)
+    all_results = await asyncio.gather(*search_tasks)
     questions = [
         "What programming language?",
         "What is the user learning?",
         "What framework is used?",
     ]
-    for q, a in zip(questions, answers):
-        print(f"\nQ: {q}\nA: {a}")
+    for q, results in zip(questions, all_results):
+        print(f"\nQ: {q}")
+        for item in results:
+            print(f"  [{item.type}] {item.text} (score={item.score:.2f})")
 
-    # Search asynchronously
-    print("\n--- Async Search ---")
+    # Additional search
+    print("\n--- Search by topic ---")
     results = await memory.search("programming")
     for item in results:
         print(f"  [{item.type}] {item.text} (score={item.score:.2f})")

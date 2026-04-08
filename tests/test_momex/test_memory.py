@@ -245,8 +245,8 @@ class TestMemoryAsync:
     """Async tests for Memory class (require LLM)."""
 
     @pytest.mark.skip(reason="Requires LLM API key")
-    async def test_add_and_query(self):
-        """Test adding and querying memories."""
+    async def test_add_and_search(self):
+        """Test adding and searching memories."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = MomexConfig(storage=StorageConfig(path=tmpdir))
             memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
@@ -255,8 +255,8 @@ class TestMemoryAsync:
             assert result.success
             assert result.messages_added == 1
 
-            answer = await memory.query("What does Alice like?")
-            assert "cat" in answer.lower()
+            results = await memory.search("What does Alice like?")
+            assert len(results) >= 1
 
     @pytest.mark.skip(reason="Requires LLM API key")
     async def test_search(self):
@@ -291,9 +291,9 @@ class TestPrefixQueryAsync:
     """Async tests for prefix query functions (require LLM)."""
 
     @pytest.mark.skip(reason="Requires LLM API key")
-    async def test_query_single_collection(self):
-        """Test querying a single collection by exact prefix."""
-        from momex import query
+    async def test_search_single_collection(self):
+        """Test searching a single collection by exact prefix."""
+        from momex import search
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config = MomexConfig(storage=StorageConfig(path=tmpdir))
@@ -302,25 +302,33 @@ class TestPrefixQueryAsync:
             memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
             await memory.add("Xiaoyuzhang likes Python")
 
-            # Query exact collection
-            answer = await query("momex:engineering:xiaoyuzhang", "What does Alice like?", config=config)
-            assert "Python" in answer
+            # Search exact collection
+            results = await search(
+                "momex:engineering:xiaoyuzhang", "What does Alice like?", config=config
+            )
+            assert len(results) >= 1
 
     @pytest.mark.skip(reason="Requires LLM API key")
-    async def test_query_prefix_multiple(self):
-        """Test querying multiple collections by prefix."""
-        from momex import query
+    async def test_search_prefix_multiple(self):
+        """Test searching multiple collections by prefix."""
+        from momex import search
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config = MomexConfig(storage=StorageConfig(path=tmpdir))
 
             # Add memories to different collections
-            xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
+            xiaoyuzhang = Memory(
+                collection="momex:engineering:xiaoyuzhang", config=config
+            )
             await xiaoyuzhang.add("Xiaoyuzhang likes Python")
 
-            gvanrossum = Memory(collection="momex:engineering:gvanrossum", config=config)
+            gvanrossum = Memory(
+                collection="momex:engineering:gvanrossum", config=config
+            )
             await gvanrossum.add("Bob likes Java")
 
-            # Query by prefix - should find both
-            answer = await query("momex:engineering", "What programming languages?", config=config)
-            assert "Python" in answer or "Java" in answer
+            # Search by prefix - should find both
+            results = await search(
+                "momex:engineering", "What programming languages?", config=config
+            )
+            assert len(results) >= 1

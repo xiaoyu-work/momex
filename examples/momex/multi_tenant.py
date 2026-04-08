@@ -10,7 +10,7 @@ Prerequisites:
 
 import asyncio
 
-from momex import Memory, MemoryManager, MomexConfig, query
+from momex import Memory, MemoryManager, MomexConfig, search
 from momex.config import StorageConfig
 
 
@@ -39,24 +39,33 @@ async def main():
     print(f"Charlie's DB: {charlie.db_path}")
     await charlie.add("I handle product marketing")
 
-    # Query with different scopes
-    print("\n--- Query single person (Xiaoyuzhang) ---")
-    answer = await query(
+    # Search with different scopes
+    print("\n--- Search single person (Xiaoyuzhang) ---")
+    results = await search(
         "momex:engineering:xiaoyuzhang",
         "What is Xiaoyuzhang working on?",
         config=config,
     )
-    print(f"Answer: {answer}")
+    for coll, items in results:
+        print(f"  [{coll}]")
+        for item in items:
+            print(f"    [{item.type}] {item.text} (score={item.score:.2f})")
 
-    print("\n--- Query engineering team ---")
-    answer = await query(
+    print("\n--- Search engineering team ---")
+    results = await search(
         "momex:engineering", "What are the team members working on?", config=config
     )
-    print(f"Answer: {answer}")
+    for coll, items in results:
+        print(f"  [{coll}]")
+        for item in items:
+            print(f"    [{item.type}] {item.text} (score={item.score:.2f})")
 
-    print("\n--- Query entire momex ---")
-    answer = await query("momex", "Who works at momex?", config=config)
-    print(f"Answer: {answer}")
+    print("\n--- Search entire momex ---")
+    results = await search("momex", "Who works at momex?", config=config)
+    for coll, items in results:
+        print(f"  [{coll}]")
+        for item in items:
+            print(f"    [{item.type}] {item.text} (score={item.score:.2f})")
 
     # Use MemoryManager to list collections
     print("\n--- Using MemoryManager ---")
