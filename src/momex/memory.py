@@ -458,8 +458,11 @@ class Memory:
     async def query(self, question: str) -> str:
         """Query memories with natural language using hybrid search.
 
-        Runs structured RAG and embedding search in parallel, merges results,
-        then generates an LLM answer from the combined context.
+        Runs structured RAG, embedding search, and entity-level sub-searches
+        in parallel, merges results, then generates an LLM answer.
+
+        For comparison questions (A vs B), automatically decomposes into
+        separate searches to ensure both entities are found.
 
         Args:
             question: Natural language question.
@@ -506,7 +509,7 @@ class Memory:
                 max_message_matches=25,
             )
 
-            # Run structured search and embedding search in parallel
+            # Phase 1: Run main structured search + embedding search in parallel
             async def _embedding_ordinals() -> list[ScoredMessageOrdinal]:
                 if (
                     conversation.secondary_indexes is None
@@ -541,6 +544,29 @@ class Memory:
                 search_results = self._filter_search_results(
                     search_results, deleted_ids
                 )
+
+            # Phase 2: Extract sub-entities from the question and search each
+            # in parallel. This helps comparison questions like "A vs B".
+            sub_queries = self._extract_sub_queries(question)
+            if sub_queries:
+                sub_tasks = [
+                    searchlang.search_conversation_with_language(
+                        conversation,
+                        conversation._query_translator,
+                        sq,
+                        search_options,
+                    )
+                    for sq in sub_queries
+                ]
+                sub_results = await asyncio.gather(*sub_tasks, return_exceptions=True)
+                for sr in sub_results:
+                    if isinstance(sr, typechat.Success):
+                        filtered = sr.value
+                        if deleted_ids:
+                            filtered = self._filter_search_results(
+                                filtered, deleted_ids
+                            )
+                        search_results.extend(filtered)
 
             # Inject embedding-found messages into search results
             if embedding_ordinals:
@@ -587,6 +613,63 @@ class Memory:
                 message=f"Failed to query memories: {e}",
                 operation="query",
             ) from e
+
+    @staticmethod
+    def _extract_sub_queries(question: str) -> list[str]:
+        """Extract sub-queries for comparison questions.
+
+        Detects patterns like "A or B", "A vs B", "between A and B",
+        "before/after A ... B" and returns individual search queries
+        for each entity/event mentioned.
+        """
+        q = question.strip().rstrip("?").strip()
+        ql = q.lower()
+
+        # Pattern: "between X and Y"
+        if "between" in ql and " and " in ql:
+            idx_between = ql.index("between")
+            idx_and = ql.index(" and ", idx_between)
+            part_a = q[idx_between + len("between") : idx_and].strip()
+            part_b = q[idx_and + len(" and ") :].strip()
+            if len(part_a) > 2 and len(part_b) > 2:
+                return [part_a, part_b]
+
+        # Pattern: "before/after X did/was ... Y"
+        for temporal in ["before the ", "after the ", "before ", "after "]:
+            if temporal in ql:
+                idx = ql.index(temporal)
+                rest = q[idx + len(temporal) :]
+                # Split at "did I", "was I", "I ", etc.
+                for split_word in [" did ", " was ", " had ", " could "]:
+                    if split_word in rest.lower():
+                        split_idx = rest.lower().index(split_word)
+                        part_a = rest[:split_idx].strip().strip("'\"")
+                        # Extract event name from the remainder
+                        remainder = rest[split_idx + len(split_word) :]
+                        # Look for quoted event names or "the X event"
+                        part_b = remainder.strip().strip("'\"")
+                        if len(part_a) > 2 and len(part_b) > 2:
+                            return [part_a, part_b]
+
+        # Pattern: "A or B" / "A or the B"
+        separators = [" or the ", " or ", " vs ", " versus "]
+        for sep in separators:
+            if sep in ql:
+                idx = ql.index(sep)
+                prefix = q[:idx]
+                suffix = q[idx + len(sep) :]
+                # Extract A: take last noun phrase (after comma, "the", etc.)
+                for marker in [", the ", ", ", "the "]:
+                    if marker in prefix.lower():
+                        last_idx = prefix.lower().rindex(marker)
+                        prefix = prefix[last_idx + len(marker) :]
+                        break
+                part_a = prefix.strip().strip("'\"")
+                part_b = suffix.strip().strip("'\"")
+                if len(part_a) > 2 and len(part_b) > 2:
+                    return [part_a, part_b]
+
+        return []
 
     @staticmethod
     def _extract_time_window(msg: Any) -> tuple[str | None, str | None]:
