@@ -343,6 +343,19 @@ class PostgresSemanticRefCollection(interfaces.ISemanticRefCollection):
                 self._deserialize_semantic_ref_from_row(rowdict[ordl]) for ordl in arg
             ]
 
+    async def get_metadata_multiple(
+        self, ordinals: list[interfaces.SemanticRefOrdinal]
+    ) -> list[interfaces.SemanticRefMetadata]:
+        semantic_refs = await self.get_multiple(ordinals)
+        return [
+            interfaces.SemanticRefMetadata(
+                ordinal=semantic_ref.semantic_ref_ordinal,
+                range=semantic_ref.range,
+                knowledge_type=semantic_ref.knowledge.knowledge_type,
+            )
+            for semantic_ref in semantic_refs
+        ]
+
     async def append(self, item: interfaces.SemanticRef) -> None:
         semref_id, range_json, knowledge_type, knowledge_json = (
             self._serialize_semantic_ref_to_row(item)

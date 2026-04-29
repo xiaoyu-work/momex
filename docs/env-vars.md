@@ -132,3 +132,6 @@ For advanced use cases, TypeAgent also supports these environment variables:
 - `OPENAI_MODEL` - Legacy TypeChat model setting
 
 Momex environment variables take precedence over TypeAgent variables.
+
+For direct TypeAgent use, call `load_dotenv()` (`from dotenv import load_dotenv`)
+at the start of your program before calling TypeAgent functions.

@@ -1,39 +1,23 @@
 # Copyright (c) Xiaoyu Zhang.
 # Licensed under the MIT License.
 
-import asyncio
 from dataclasses import dataclass, field
-import os
 from typing import TYPE_CHECKING
 
 import typechat
 
-from . import kplib
-from ..aitools import auth
+from . import knowledge_schema as kplib
+from ..aitools.model_adapters import create_chat_model
 
 if TYPE_CHECKING:
     from ..llm import LLMConfig
 
-# TODO: Move ModelWrapper and create_typechat_model() to aitools package.
 
-
-# TODO: Make these parameters that can be configured (e.g. from command line).
-DEFAULT_MAX_RETRY_ATTEMPTS = 0
-DEFAULT_TIMEOUT_SECONDS = 25
-
-# Global LLM config - can be set by MomexConfig
 _global_llm_config: "LLMConfig | None" = None
 
 
 def set_llm_config(config: "LLMConfig") -> None:
-    """Set the global LLM config for TypeAgent.
-
-    This should be called before creating any KnowledgeExtractor.
-    Typically called by Momex when initializing Memory.
-
-    Args:
-        config: LLM configuration from MomexConfig.
-    """
+    """Set the global LLM config for TypeAgent."""
     global _global_llm_config
     _global_llm_config = config
 
@@ -43,66 +27,21 @@ def get_llm_config() -> "LLMConfig | None":
     return _global_llm_config
 
 
-class ModelWrapper(typechat.TypeChatLanguageModel):
-    def __init__(
-        self,
-        base_model: typechat.TypeChatLanguageModel,
-        token_provider: auth.AzureTokenProvider,
-    ):
-        self.base_model = base_model
-        self.token_provider = token_provider
-
-    async def complete(
-        self, prompt: str | list[typechat.PromptSection]
-    ) -> typechat.Result[str]:
-        if self.token_provider.needs_refresh():
-            loop = asyncio.get_running_loop()
-            api_key = await loop.run_in_executor(
-                None, self.token_provider.refresh_token
-            )
-            env: dict[str, str | None] = dict(os.environ)
-            key_name = "AZURE_OPENAI_API_KEY"
-            env[key_name] = api_key
-            self.base_model = typechat.create_language_model(env)
-            self.base_model.timeout_seconds = DEFAULT_TIMEOUT_SECONDS
-        return await self.base_model.complete(prompt)
-
-
 def create_typechat_model(
     config: "LLMConfig | None" = None,
 ) -> typechat.TypeChatLanguageModel:
     """Create a TypeChat language model.
 
-    Args:
-        config: Optional LLM config. If provided, uses our LLM abstraction.
-                If None, checks global config, then falls back to env vars.
-
-    Returns:
-        TypeChatLanguageModel instance.
+    Momex can provide an explicit LLM config; otherwise use the upstream
+    pydantic-ai model adapter configured from environment variables.
     """
-    # Use provided config, or global config, or fall back to env vars
     config = config or _global_llm_config
-
     if config is not None:
-        # Use our LLM abstraction with TypeChat adapter
         from ..llm import create_typechat_model_from_config
 
         return create_typechat_model_from_config(config)
 
-    # Legacy: fall back to environment variables
-    env: dict[str, str | None] = dict(os.environ)
-    key_name = "AZURE_OPENAI_API_KEY"
-    key = env.get(key_name)
-    shared_token_provider: auth.AzureTokenProvider | None = None
-    if key is not None and key.lower() == "identity":
-        shared_token_provider = auth.get_shared_token_provider()
-        env[key_name] = shared_token_provider.get_token()
-    model = typechat.create_language_model(env)
-    model.timeout_seconds = DEFAULT_TIMEOUT_SECONDS
-    model.max_retry_attempts = DEFAULT_MAX_RETRY_ATTEMPTS
-    if shared_token_provider is not None:
-        model = ModelWrapper(model, shared_token_provider)
-    return model
+    return create_chat_model()
 
 
 @dataclass

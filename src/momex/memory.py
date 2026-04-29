@@ -122,16 +122,11 @@ class Memory:
     def _load_dotenv(self) -> None:
         """Load environment variables from .env file."""
         try:
-            from typeagent.aitools.utils import load_dotenv
+            from dotenv import load_dotenv
 
             load_dotenv()
         except ImportError:
-            try:
-                from dotenv import load_dotenv
-
-                load_dotenv()
-            except ImportError:
-                pass
+            pass
 
     async def _ensure_initialized(self) -> None:
         """Ensure the TypeAgent conversation is initialized."""
@@ -539,10 +534,12 @@ class Memory:
         from typeagent.aitools import utils
         from typeagent.knowpro import (
             convknowledge,
-            kplib,
+        )
+        from typeagent.knowpro import (
             search_query_schema,
             searchlang,
         )
+        from typeagent.knowpro import knowledge_schema as kplib
         from typeagent.knowpro.interfaces import Topic
 
         # Initialize query translator if needed
@@ -848,7 +845,7 @@ class Memory:
         for semref_id in semref_ids:
             try:
                 # Remove from property index
-                prop_index = await storage.get_property_index()
+                prop_index = storage.property_index
                 await prop_index.remove_all_for_semref(semref_id)
                 deleted_count += 1
             except (IndexError, KeyError):
@@ -995,7 +992,7 @@ Response:"""
         # Get all semantic refs
         semrefs = await conversation.semantic_refs.get_slice(0, 999999)
 
-        from typeagent.knowpro import kplib
+        from typeagent.knowpro import knowledge_schema as kplib
 
         data = {
             "collection": self.collection,

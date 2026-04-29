@@ -5,30 +5,17 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from typechat import Result, TypeChatLanguageModel
+from typechat import Result
 
-from . import convknowledge, kplib
+from . import knowledge_schema as kplib
 from .interfaces import IKnowledgeExtractor
-
-
-def create_knowledge_extractor(
-    chat_model: TypeChatLanguageModel | None = None,
-) -> convknowledge.KnowledgeExtractor:
-    """Create a knowledge extractor using the given Chat Model."""
-    chat_model = chat_model or convknowledge.create_typechat_model()
-    extractor = convknowledge.KnowledgeExtractor(
-        chat_model, max_chars_per_chunk=4096, merge_action_knowledge=False
-    )
-    return extractor
 
 
 async def extract_knowledge_from_text(
     knowledge_extractor: IKnowledgeExtractor,
     text: str,
-    max_retries: int,
 ) -> Result[kplib.KnowledgeResponse]:
-    """Extract knowledge from a single text input with retries."""
-    # TODO: Add a retry mechanism to handle transient errors.
+    """Extract knowledge from a single text input."""
     return await knowledge_extractor.extract(text)
 
 
@@ -36,21 +23,17 @@ async def batch_worker(
     q: asyncio.Queue[tuple[int, str] | None],
     knowledge_extractor: IKnowledgeExtractor,
     results: dict[int, Result[kplib.KnowledgeResponse]],
-    max_retries: int,
 ) -> None:
     while item := await q.get():
         index, text = item
-        result = await extract_knowledge_from_text(
-            knowledge_extractor, text, max_retries
-        )
+        result = await extract_knowledge_from_text(knowledge_extractor, text)
         results[index] = result
 
 
 async def extract_knowledge_from_text_batch(
     knowledge_extractor: IKnowledgeExtractor,
     text_batch: list[str],
-    concurrency: int = 2,
-    max_retries: int = 3,
+    concurrency: int = 4,
 ) -> list[Result[kplib.KnowledgeResponse]]:
     """Extract knowledge from a batch of text inputs concurrently."""
     if not text_batch:
@@ -63,7 +46,7 @@ async def extract_knowledge_from_text_batch(
 
     async with asyncio.TaskGroup() as tg:
         for _ in range(concurrency):
-            tg.create_task(batch_worker(q, knowledge_extractor, results, max_retries))
+            tg.create_task(batch_worker(q, knowledge_extractor, results))
 
         for index, text in enumerate(text_batch):
             await q.put((index, text))
@@ -196,26 +179,3 @@ def merge_topics(topics: list[str]) -> list[str]:
     # TODO: Preserve order of first occurrence?
     merged_topics = set(topics)
     return list(merged_topics)
-
-
-async def extract_knowledge_for_text_batch_q(
-    knowledge_extractor: convknowledge.KnowledgeExtractor,
-    text_batch: list[str],
-    concurrency: int = 2,
-    max_retries: int = 3,
-) -> list[Result[kplib.KnowledgeResponse]]:
-    """Extract knowledge for a batch of text inputs using a task queue."""
-    raise NotImplementedError("TODO")
-    # TODO: BatchTask etc.
-    # task_batch = [BatchTask(task=text) for text in text_batch]
-
-    # await run_in_batches(
-    #     task_batch,
-    #     lambda text: extract_knowledge_from_text(knowledge_extractor, text, max_retries),
-    #     concurrency,
-    # )
-
-    # results = []
-    # for task in task_batch:
-    #     results.append(task.result if task.result else Failure("No result"))
-    # return results

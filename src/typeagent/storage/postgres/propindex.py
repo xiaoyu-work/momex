@@ -3,6 +3,8 @@
 
 """PostgreSQL-based property index implementation."""
 
+from collections.abc import Sequence
+
 import asyncpg  # type: ignore[import-not-found]
 
 from ...knowpro import interfaces
@@ -66,6 +68,19 @@ class PostgresPropertyIndex(interfaces.IPropertyToSemanticRefIndex):
                 score,
                 semref_id,
             )
+
+    async def add_properties_batch(
+        self,
+        properties: Sequence[
+            tuple[
+                str,
+                str,
+                interfaces.SemanticRefOrdinal | interfaces.ScoredSemanticRefOrdinal,
+            ]
+        ],
+    ) -> None:
+        for property_name, value, semantic_ref_ordinal in properties:
+            await self.add_property(property_name, value, semantic_ref_ordinal)
 
     async def clear(self) -> None:
         async with self.pool.acquire() as conn:

@@ -3,6 +3,7 @@
 
 """PostgreSQL-based semantic reference index implementation."""
 
+from collections.abc import Sequence
 import re
 import unicodedata
 
@@ -61,6 +62,18 @@ class PostgresTermToSemanticRefIndex(interfaces.ITermToSemanticRefIndex):
             )
 
         return term
+
+    async def add_terms_batch(
+        self,
+        terms: Sequence[
+            tuple[
+                str,
+                interfaces.SemanticRefOrdinal | interfaces.ScoredSemanticRefOrdinal,
+            ]
+        ],
+    ) -> None:
+        for term, semantic_ref_ordinal in terms:
+            await self.add_term(term, semantic_ref_ordinal)
 
     async def remove_term(
         self, term: str, semantic_ref_ordinal: interfaces.SemanticRefOrdinal

@@ -7,8 +7,6 @@ from dataclasses import dataclass
 import logging
 from typing import Any
 
-import black
-
 import typechat
 
 logger = logging.getLogger(__name__)
@@ -41,7 +39,7 @@ from .interfaces import (
     TextRange,
     Topic,
 )
-from .kplib import Action, ConcreteEntity, Facet
+from .knowledge_schema import Action, ConcreteEntity, Facet
 from .search import ConversationSearchResult
 
 
@@ -139,10 +137,12 @@ def create_question_prompt(question: str) -> str:
 
 def create_context_prompt(context: AnswerContext) -> str:
     # TODO: Use a more compact representation of the context than JSON.
+    import pprint
+
     prompt = [
         "[ANSWER CONTEXT]",
         "===",
-        black.format_str(str(dictify(context)), mode=black.Mode(line_length=200)),
+        pprint.pformat(dictify(context), width=200),
         "===",
     ]
     return "\n".join(prompt)
@@ -646,11 +646,12 @@ async def get_enclosing_date_range_for_text_range(
     start_timestamp = (await messages.get_item(range.start.message_ordinal)).timestamp
     if not start_timestamp:
         return None
-    end_timestamp = (
-        (await messages.get_item(range.end.message_ordinal)).timestamp
-        if range.end
-        else None
-    )
+    end_timestamp: str | None = None
+    if range.end:
+        end_ordinal = range.end.message_ordinal
+        if end_ordinal < await messages.size():
+            end_timestamp = (await messages.get_item(end_ordinal)).timestamp
+        # else: range extends to the end of the conversation; leave as None.
     return DateRange(
         start=Datetime.fromisoformat(start_timestamp),
         end=Datetime.fromisoformat(end_timestamp) if end_timestamp else None,
@@ -693,19 +694,22 @@ async def get_scored_semantic_refs_from_ordinals_iter(
     semantic_ref_matches: list[ScoredSemanticRefOrdinal],
     knowledge_type: KnowledgeType,
 ) -> list[Scored[SemanticRef]]:
-    result = []
-    for semantic_ref_match in semantic_ref_matches:
-        semantic_ref = await semantic_refs.get_item(
-            semantic_ref_match.semantic_ref_ordinal
-        )
-        if semantic_ref.knowledge.knowledge_type == knowledge_type:
-            result.append(
-                Scored(
-                    item=semantic_ref,
-                    score=semantic_ref_match.score,
-                )
-            )
-    return result
+    if not semantic_ref_matches:
+        return []
+    ordinals = [m.semantic_ref_ordinal for m in semantic_ref_matches]
+    metadata = await semantic_refs.get_metadata_multiple(ordinals)
+    matching = [
+        (sr_match, m.ordinal)
+        for sr_match, m in zip(semantic_ref_matches, metadata)
+        if m.knowledge_type == knowledge_type
+    ]
+    if not matching:
+        return []
+    full_refs = await semantic_refs.get_multiple([o for _, o in matching])
+    return [
+        Scored(item=ref, score=sr_match.score)
+        for (sr_match, _), ref in zip(matching, full_refs)
+    ]
 
 
 def merge_scored_concrete_entities(
@@ -777,7 +781,7 @@ def facets_to_merged_facets(facets: list[Facet]) -> MergedFacets:
     merged_facets: MergedFacets = {}
     for facet in facets:
         name = facet.name.lower()
-        value = str(facet).lower()
+        value = str(facet.value).lower()
         merged_facets.setdefault(name, []).append(value)
     return merged_facets
 
