@@ -49,9 +49,11 @@ fwts/
 
 # Momex
 momex_data/
-test.py
-test_postgres.py
-test_memory.py
+# Scratch files in the repo root only -- unanchored patterns here would also
+# ignore real test modules such as tests/test_memory.py.
+/test.py
+/test_postgres.py
+/test_memory.py
 
 # LongMemEval benchmark
 /longmemeval_bench/
