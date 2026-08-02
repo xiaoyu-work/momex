@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 
 DELETED_SEMREFS_METADATA_KEY = "momex_deleted_semrefs"
 
+# Upper bound on how many ordinals a single stored [start, end] pair may expand
+# to, so corrupt metadata cannot exhaust memory on load.
+_MAX_TOMBSTONE_RANGE = 10_000_000
+
 # Reciprocal rank fusion constant, from the original RRF paper. Damps the
 # influence of the top ranks so one list cannot dominate the merged order.
 RRF_K = 60
@@ -89,6 +93,56 @@ def _collection_to_schema(collection: str) -> str:
 
     digest = hashlib.md5(collection.encode("utf-8")).hexdigest()[:8]
     return f"{base[:54]}_{digest}"
+
+
+def _encode_deleted_ids(ids: set[int]) -> list[int | list[int]]:
+    """Range-encode tombstoned ordinals for compact storage.
+
+    All knowledge extracted from one message gets consecutive ordinals, so
+    deletions arrive in runs. Storing runs as [start, end] keeps the metadata
+    payload proportional to the number of deleted *regions* rather than the
+    number of deleted items.
+    """
+    encoded: list[int | list[int]] = []
+    start: int | None = None
+    prev = 0
+
+    for ordinal in sorted(ids):
+        if start is None:
+            start = prev = ordinal
+        elif ordinal == prev + 1:
+            prev = ordinal
+        else:
+            encoded.append(start if start == prev else [start, prev])
+            start = prev = ordinal
+
+    if start is not None:
+        encoded.append(start if start == prev else [start, prev])
+    return encoded
+
+
+def _decode_deleted_ids(parsed: Any) -> set[int]:
+    """Decode tombstones, accepting range pairs and the older flat int list."""
+    ids: set[int] = set()
+    if not isinstance(parsed, list):
+        return ids
+
+    for item in parsed:
+        if isinstance(item, bool):
+            continue
+        if isinstance(item, int):
+            ids.add(item)
+        elif isinstance(item, str) and item.isdigit():
+            ids.add(int(item))
+        elif isinstance(item, list) and len(item) == 2:
+            try:
+                start, end = int(item[0]), int(item[1])
+            except (TypeError, ValueError):
+                continue
+            # Guard against a corrupt range expanding into a huge set.
+            if 0 <= start <= end <= start + _MAX_TOMBSTONE_RANGE:
+                ids.update(range(start, end + 1))
+    return ids
 
 
 class Memory:
@@ -216,19 +270,13 @@ class Memory:
             )
             parsed = []
 
-        deleted_ids: set[int] = set()
-        if isinstance(parsed, list):
-            for item in parsed:
-                if isinstance(item, int):
-                    deleted_ids.add(item)
-                elif isinstance(item, str) and item.isdigit():
-                    deleted_ids.add(int(item))
+        deleted_ids = _decode_deleted_ids(parsed)
 
         self._deleted_semref_ids = deleted_ids
         return deleted_ids
 
     async def _store_deleted_semref_ids(self, deleted_ids: set[int]) -> None:
-        serialized = json.dumps(sorted(deleted_ids))
+        serialized = json.dumps(_encode_deleted_ids(deleted_ids))
         await self._set_conversation_metadata(
             **{DELETED_SEMREFS_METADATA_KEY: serialized}
         )
