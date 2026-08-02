@@ -310,10 +310,33 @@ For manual control over deletion:
 async def main():
     memory = Memory(collection="user:xiaoyuzhang")
 
-    # Delete memories matching a query
+    # Preview first — matching is semantic, so a broad query matches broadly
+    would_delete = await memory.delete("likes sushi", dry_run=True)
+    print(f"Would delete {would_delete} items")
+
+    # Then delete for real
     deleted = await memory.delete("likes sushi")
     print(f"Deleted {deleted} memories")
+
+    # Optionally require a minimum relevance score
+    deleted = await memory.delete("likes sushi", min_score=1.0)
 ```
+
+**delete() parameters:**
+- `limit`: int (default 50) - Maximum number of candidates to consider
+- `min_score`: float (default 0.0) - Drop candidates below this native index
+  score. Scales differ per index: structured term weights are unbounded,
+  embedding similarities are in `[0, 1]`.
+- `dry_run`: bool (default False) - Report the count without deleting
+
+**What delete() removes:** extracted knowledge (entities, actions, topics), not
+the source messages. The original message text stays in the collection and can
+still surface through `search_by_embedding()`, and therefore through the
+embedding half of `search()`. Use `clear()` to remove everything in a
+collection.
+
+The return value is the number of knowledge items newly deleted. Deleting the
+same query twice returns `0` the second time.
 
 ### Query Across Collections
 

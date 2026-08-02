@@ -859,69 +859,98 @@ class Memory:
         items.sort(key=lambda x: x.score, reverse=True)
         return items[:limit]
 
-    async def delete(self, query: str, *, limit: int = 50) -> int:
-        """Delete memories matching a query.
+    async def delete(
+        self,
+        query: str,
+        *,
+        limit: int = 50,
+        min_score: float = 0.0,
+        dry_run: bool = False,
+    ) -> int:
+        """Delete knowledge (entities, actions, topics) matching a query.
 
         For advanced users who want explicit control over deletion.
         Normal users can rely on add() which automatically handles contradictions.
 
+        This removes extracted *knowledge*, not the source messages. The
+        original message text stays in the collection and can still surface via
+        search_by_embedding() (and therefore via the embedding half of
+        search()). Use clear() to remove everything in the collection.
+
+        Because matching is semantic, a bare query can match more loosely than
+        intended. Prefer previewing with ``dry_run=True``, and/or raising
+        ``min_score``, before deleting.
+
         Args:
             query: Search query to find memories to delete.
-            limit: Maximum number of items to delete (default 50).
+            limit: Maximum number of items to consider (default 50).
+            min_score: Drop candidates whose native index score is below this.
+                Note the scales differ per index: structured term weights are
+                unbounded, embedding similarities are in [0, 1]. Defaults to
+                0.0, which keeps every candidate.
+            dry_run: If True, report how many items *would* be deleted without
+                changing anything.
 
         Returns:
-            Number of items deleted.
+            Number of knowledge items deleted (or that would be deleted when
+            dry_run is True).
 
         Example:
-            # Delete memories about sushi preference
+            # See what would go first
+            await memory.delete("likes sushi", dry_run=True)
+            # Then delete for real
             deleted = await memory.delete("likes sushi")
-            print(f"Deleted {deleted} memories")
         """
         await self._ensure_initialized()
 
-        # Search for matching memories
         results = await self.search(query, limit=limit)
 
-        if not results:
-            return 0
-
-        # Collect IDs to delete
-        semref_ids = []
+        candidate_ids: list[int] = []
         for item in results:
-            if item.type != "message" and hasattr(item.raw, "semantic_ref_ordinal"):
-                semref_ids.append(item.raw.semantic_ref_ordinal)
+            if item.type == "message" or item.score < min_score:
+                continue
+            ordinal = getattr(item.raw, "semantic_ref_ordinal", None)
+            if ordinal is not None:
+                candidate_ids.append(ordinal)
 
-        if not semref_ids:
+        if not candidate_ids:
             return 0
 
-        # Delete from indexes
+        # Items already tombstoned are filtered out of search, but guard anyway
+        # so repeated calls do not inflate the reported count.
         deleted_ids = await self._load_deleted_semref_ids()
-        deleted_ids.update(semref_ids)
+        new_ids = [
+            ordinal
+            for ordinal in dict.fromkeys(candidate_ids)
+            if ordinal not in deleted_ids
+        ]
+
+        if not new_ids or dry_run:
+            return len(new_ids)
+
+        deleted_ids.update(new_ids)
         await self._store_deleted_semref_ids(deleted_ids)
 
-        deleted_count = await self._delete_by_ids(semref_ids)
+        await self._delete_by_ids(new_ids)
 
-        return deleted_count
+        return len(new_ids)
 
-    async def _delete_by_ids(self, semref_ids: list[int]) -> int:
-        """Internal: Delete semantic refs by IDs."""
+    async def _delete_by_ids(self, semref_ids: list[int]) -> None:
+        """Internal: drop index entries for the given semantic refs.
+
+        The tombstone list recorded by the caller is what actually hides these
+        from search; this additionally clears the property index so stale
+        entries do not accumulate.
+        """
         storage = self._conversation_required().storage_provider
-        deleted_count = 0
+        prop_index = storage.property_index
 
         for semref_id in semref_ids:
-            try:
-                # Remove from property index
-                prop_index = storage.property_index
-                await prop_index.remove_all_for_semref(semref_id)
-                deleted_count += 1
-            except (IndexError, KeyError):
-                continue
+            await prop_index.remove_all_for_semref(semref_id)
 
         # Commit for SQLite
         if self.config.is_sqlite and hasattr(storage, "db"):
             storage.db.commit()  # type: ignore[attr-defined]
-
-        return deleted_count
 
     async def _detect_and_remove_contradictions(self, new_content: str) -> int:
         """Internal: Use LLM to detect and remove contradicting memories.
@@ -987,14 +1016,20 @@ Response:"""
             semref_ids = []
             for idx in indices:
                 item = results[idx]
-                if item.type != "message" and hasattr(item.raw, "semantic_ref_ordinal"):
-                    semref_ids.append(item.raw.semantic_ref_ordinal)
+                if item.type != "message":
+                    ordinal = getattr(item.raw, "semantic_ref_ordinal", None)
+                    if ordinal is not None:
+                        semref_ids.append(ordinal)
 
             if semref_ids:
                 deleted_ids = await self._load_deleted_semref_ids()
-                deleted_ids.update(semref_ids)
+                new_ids = [i for i in dict.fromkeys(semref_ids) if i not in deleted_ids]
+                if not new_ids:
+                    return 0
+                deleted_ids.update(new_ids)
                 await self._store_deleted_semref_ids(deleted_ids)
-                return await self._delete_by_ids(semref_ids)
+                await self._delete_by_ids(new_ids)
+                return len(new_ids)
 
         except Exception:
             # If contradiction detection fails, just proceed with add
