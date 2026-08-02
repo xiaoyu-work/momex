@@ -46,7 +46,7 @@ class MemoryManager:
         Args:
             config: Configuration object. If None, uses default config.
         """
-        self.config = config or MomexConfig()
+        self.config = config or MomexConfig.get_default()
         self._storage_path = Path(self.config.storage_path)
 
     def list_collections(self, prefix: str | None = None) -> list[str]:

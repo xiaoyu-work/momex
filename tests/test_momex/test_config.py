@@ -1,8 +1,8 @@
-"""Tests for MomexConfig construction, defaults, and provider resolution."""
+﻿"""Tests for MomexConfig construction, defaults, and provider resolution."""
 
 import pytest
 
-from momex import EmbeddingConfig, LLMConfig, MomexConfig, StorageConfig
+from momex import EmbeddingConfig, LLMConfig, Memory, MomexConfig, StorageConfig
 from momex.exceptions import ConfigurationError
 
 
@@ -161,3 +161,26 @@ class TestYamlRoundTrip:
         assert loaded.embedding is not None
         assert loaded.embedding.api_version == "2024-02-01"
         assert loaded.embedding.api_base == "https://emb"
+
+
+class TestGlobalDefaultIsHonored:
+    """MemoryManager must resolve the same global default as Memory/query."""
+
+    def test_manager_uses_global_default(self, tmp_path):
+        MomexConfig.set_default(
+            llm=LLMConfig(provider="openai", model="gpt-4o", api_key="k"),
+            storage=StorageConfig(path=str(tmp_path)),
+        )
+        try:
+            from momex import MemoryManager
+
+            assert MemoryManager()._storage_path == tmp_path
+            assert Memory(collection="c").config.storage.path == str(tmp_path)
+        finally:
+            MomexConfig.clear_default()
+
+    def test_manager_falls_back_to_plain_default(self, tmp_path):
+        from momex import MemoryManager
+
+        MomexConfig.clear_default()
+        assert str(MemoryManager()._storage_path) == "momex_data"
