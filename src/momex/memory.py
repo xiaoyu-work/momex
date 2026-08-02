@@ -961,8 +961,10 @@ class Memory:
         Returns:
             Number of contradicting memories removed.
         """
-        # Search for potentially related memories
-        results = await self.search(new_content, limit=20)
+        # Only extracted knowledge can contradict; message hits are discarded
+        # below. The embedding half of search() returns nothing but messages,
+        # so run the structured path alone and skip that wasted round trip.
+        results = await self._search_structured(new_content, limit=20)
 
         if not results:
             return 0
