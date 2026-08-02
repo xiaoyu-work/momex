@@ -5,8 +5,12 @@ Supports code-based configuration, YAML files, and environment variables.
 
 Environment variables use the MOMEX_ prefix with nested structure:
 - LLM: MOMEX_LLM_PROVIDER, MOMEX_LLM_MODEL, MOMEX_LLM_API_KEY, MOMEX_LLM_API_BASE
-- Embedding: MOMEX_EMBEDDING_PROVIDER, MOMEX_EMBEDDING_MODEL, MOMEX_EMBEDDING_API_KEY
+- Embedding: MOMEX_EMBEDDING_PROVIDER, MOMEX_EMBEDDING_MODEL, MOMEX_EMBEDDING_API_KEY,
+             MOMEX_EMBEDDING_API_BASE, MOMEX_EMBEDDING_API_VERSION,
+             MOMEX_EMBEDDING_DIMENSIONS
 - Storage: MOMEX_STORAGE_BACKEND, MOMEX_STORAGE_PATH, MOMEX_STORAGE_POSTGRES_URL,
+           MOMEX_STORAGE_POSTGRES_SCHEMA, MOMEX_STORAGE_POSTGRES_POOL_MIN,
+           MOMEX_STORAGE_POSTGRES_POOL_MAX,
            MOMEX_STORAGE_POSTGRES_PGBOUNCER (set to "true" for Supabase/PgBouncer)
 """
 
@@ -18,6 +22,32 @@ from pathlib import Path
 from typing import ClassVar, Literal
 
 from .exceptions import ConfigurationError
+
+# Names of the MOMEX_EMBEDDING_* suffixes read by from_env().
+_EMBEDDING_ENV_KEYS = (
+    "provider",
+    "model",
+    "api_key",
+    "api_base",
+    "api_version",
+    "dimensions",
+)
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an int env var, falling back to default when unset or malformed."""
+    try:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a float env var, falling back to default when unset or malformed."""
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
 
 
 @dataclass
@@ -169,6 +199,7 @@ class MomexConfig:
                 MOMEX_EMBEDDING_MODEL - Model name
                 MOMEX_EMBEDDING_API_KEY - API key (defaults to LLM key if compatible)
                 MOMEX_EMBEDDING_API_BASE - Base URL
+                MOMEX_EMBEDDING_API_VERSION - API version (for Azure)
                 MOMEX_EMBEDDING_DIMENSIONS - Embedding dimensions
 
             Storage:
@@ -176,6 +207,9 @@ class MomexConfig:
                 MOMEX_STORAGE_PATH - SQLite storage path
                 MOMEX_STORAGE_POSTGRES_URL - PostgreSQL URL
                 MOMEX_STORAGE_POSTGRES_SCHEMA - PostgreSQL schema
+                MOMEX_STORAGE_POSTGRES_POOL_MIN - Minimum pool connections
+                MOMEX_STORAGE_POSTGRES_POOL_MAX - Maximum pool connections
+                MOMEX_STORAGE_POSTGRES_PGBOUNCER - "true" for Supabase/PgBouncer
         """
         # LLM config
         llm = LLMConfig(
@@ -183,18 +217,24 @@ class MomexConfig:
             model=os.getenv("MOMEX_LLM_MODEL", ""),
             api_key=os.getenv("MOMEX_LLM_API_KEY", ""),
             api_base=os.getenv("MOMEX_LLM_API_BASE", ""),
-            temperature=float(os.getenv("MOMEX_LLM_TEMPERATURE", "0.0")),
+            temperature=_env_float("MOMEX_LLM_TEMPERATURE", 0.0),
         )
 
-        # Embedding config (optional)
+        # Embedding config (optional). Built when *any* MOMEX_EMBEDDING_* var is
+        # set, so that e.g. setting only MOMEX_EMBEDDING_MODEL takes effect.
+        embedding_env = {
+            key: os.getenv(f"MOMEX_EMBEDDING_{key.upper()}", "")
+            for key in _EMBEDDING_ENV_KEYS
+        }
         embedding = None
-        if os.getenv("MOMEX_EMBEDDING_PROVIDER"):
+        if any(embedding_env.values()):
             embedding = EmbeddingConfig(
-                provider=os.getenv("MOMEX_EMBEDDING_PROVIDER", "openai"),
-                model=os.getenv("MOMEX_EMBEDDING_MODEL", "text-embedding-3-small"),
-                api_key=os.getenv("MOMEX_EMBEDDING_API_KEY", ""),
-                api_base=os.getenv("MOMEX_EMBEDDING_API_BASE", ""),
-                dimensions=int(os.getenv("MOMEX_EMBEDDING_DIMENSIONS", "0")) or None,
+                provider=embedding_env["provider"] or "openai",
+                model=embedding_env["model"] or "text-embedding-3-small",
+                api_key=embedding_env["api_key"],
+                api_base=embedding_env["api_base"],
+                api_version=embedding_env["api_version"],
+                dimensions=_env_int("MOMEX_EMBEDDING_DIMENSIONS", 0) or None,
             )
 
         # Storage config
@@ -210,6 +250,8 @@ class MomexConfig:
             path=os.getenv("MOMEX_STORAGE_PATH", "./momex_data"),
             postgres_url=os.getenv("MOMEX_STORAGE_POSTGRES_URL", ""),
             postgres_schema=os.getenv("MOMEX_STORAGE_POSTGRES_SCHEMA", ""),
+            postgres_pool_min=_env_int("MOMEX_STORAGE_POSTGRES_POOL_MIN", 2),
+            postgres_pool_max=_env_int("MOMEX_STORAGE_POSTGRES_POOL_MAX", 10),
             postgres_pgbouncer=pgbouncer,
         )
 
@@ -261,6 +303,7 @@ class MomexConfig:
                 model=self.embedding.model,
                 api_key=self.embedding.api_key,
                 api_base=self.embedding.api_base,
+                api_version=self.embedding.api_version,
                 dimensions=self.embedding.dimensions,
             )
             # If embedding API key not set, try to reuse LLM key if providers match
@@ -356,12 +399,13 @@ class MomexConfig:
         # Parse embedding config (optional)
         embedding = None
         if "embedding" in data:
-            emb_data = data["embedding"]
+            emb_data = data["embedding"] or {}
             embedding = EmbeddingConfig(
                 provider=emb_data.get("provider", "openai"),
                 model=emb_data.get("model", "text-embedding-3-small"),
                 api_key=emb_data.get("api_key", ""),
                 api_base=emb_data.get("api_base", ""),
+                api_version=emb_data.get("api_version", ""),
                 dimensions=emb_data.get("dimensions"),
             )
 
@@ -408,6 +452,8 @@ class MomexConfig:
                 data["embedding"]["api_key"] = self.embedding.api_key
             if self.embedding.api_base:
                 data["embedding"]["api_base"] = self.embedding.api_base
+            if self.embedding.api_version:
+                data["embedding"]["api_version"] = self.embedding.api_version
             if self.embedding.dimensions:
                 data["embedding"]["dimensions"] = self.embedding.dimensions
 
