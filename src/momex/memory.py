@@ -472,6 +472,31 @@ class Memory:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return valid_to < today
 
+    async def _get_source_messages(self, sem_refs) -> dict[int, Any]:
+        """Batch-fetch the source message of each semantic ref, keyed by ordinal."""
+        conversation = self._conversation_required()
+        ordinals = sorted(
+            {
+                sem_ref.range.start.message_ordinal
+                for sem_ref in sem_refs
+                if getattr(sem_ref, "range", None)
+            }
+        )
+        if not ordinals:
+            return {}
+
+        try:
+            msgs = await conversation.messages.get_multiple(ordinals)
+            return dict(zip(ordinals, msgs))
+        except (IndexError, KeyError):
+            msg_map: dict[int, Any] = {}
+            for ordinal in ordinals:
+                try:
+                    msg_map[ordinal] = await conversation.messages.get_item(ordinal)
+                except (IndexError, KeyError):
+                    continue
+            return msg_map
+
     async def search(
         self,
         query_text: str,
@@ -604,6 +629,10 @@ class Memory:
                     except (IndexError, KeyError):
                         pass
 
+            # Knowledge inherits the timestamp and validity window of the
+            # message it was extracted from, so fetch those up front.
+            src_msg_map = await self._get_source_messages(sem_ref_map.values())
+
             for ordinal, score in semref_requests:
                 sem_ref = sem_ref_map.get(ordinal)
                 if sem_ref is None:
@@ -612,15 +641,17 @@ class Memory:
                 knowledge = sem_ref.knowledge
                 k_type = knowledge.knowledge_type
 
-                # Get timestamp from the source message
                 src_timestamp: str | None = None
-                if hasattr(sem_ref, "range") and sem_ref.range:
-                    src_msg_ord = sem_ref.range.start.message_ordinal
-                    try:
-                        src_msg = await conversation.messages.get_item(src_msg_ord)
+                valid_from: str | None = None
+                valid_to: str | None = None
+                if getattr(sem_ref, "range", None):
+                    src_msg = src_msg_map.get(sem_ref.range.start.message_ordinal)
+                    if src_msg is not None:
                         src_timestamp = getattr(src_msg, "timestamp", None)
-                    except (IndexError, KeyError):
-                        pass
+                        valid_from, valid_to = self._extract_time_window(src_msg)
+
+                if not include_expired and self._is_expired(valid_to):
+                    continue
 
                 if isinstance(knowledge, kplib.ConcreteEntity):
                     text = knowledge.name
@@ -652,6 +683,8 @@ class Memory:
                         score=score,
                         raw=sem_ref,
                         timestamp=src_timestamp,
+                        valid_from=valid_from,
+                        valid_to=valid_to,
                     )
                 )
 
