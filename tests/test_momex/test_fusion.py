@@ -5,7 +5,7 @@ produces cosine similarities in [0, 1]. Merging them by raw score let one scale
 dominate the other, so results are fused by rank instead.
 """
 
-from momex.memory import RRF_K, Memory, SearchItem
+from momex.memory import Memory, RRF_K, SearchItem
 
 
 def _item(text: str, score: float, type_: str = "topic") -> SearchItem:
@@ -63,9 +63,10 @@ class TestFuseResults:
 
         fused = Memory._fuse_results(structured, limit=10)
 
-        assert fused[0].fusion_score == _rrf(0)
-        assert fused[1].fusion_score == _rrf(1)
-        assert fused[0].fusion_score > fused[1].fusion_score
+        first, second = fused[0].fusion_score, fused[1].fusion_score
+        assert first == _rrf(0)
+        assert second == _rrf(1)
+        assert first is not None and second is not None and first > second
 
     def test_respects_limit(self):
         structured = [_item(f"s{i}", 10.0 - i) for i in range(5)]

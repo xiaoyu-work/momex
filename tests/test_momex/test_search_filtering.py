@@ -8,8 +8,10 @@ from datetime import datetime, timedelta, timezone
 import tempfile
 
 import pytest
+
 import typechat
 
+from momex import Memory, MomexConfig, StorageConfig
 from typeagent.knowpro.interfaces_core import (
     ScoredMessageOrdinal,
     ScoredSemanticRefOrdinal,
@@ -17,8 +19,6 @@ from typeagent.knowpro.interfaces_core import (
 )
 from typeagent.knowpro.interfaces_search import SemanticRefSearchResult
 from typeagent.knowpro.search import ConversationSearchResult
-
-from momex import Memory, MomexConfig, StorageConfig
 
 
 def _day_offset(days: int) -> str:
