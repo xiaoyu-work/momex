@@ -47,12 +47,14 @@ async def search(
 
     async def search_one(coll_name: str) -> tuple[str, list[SearchItem]]:
         async with sem:
+            memory = Memory(collection=coll_name, config=config)
             try:
-                memory = Memory(collection=coll_name, config=config)
                 results = await memory.search(query_text, limit=limit)
                 return (coll_name, results)
             except Exception:
                 return (coll_name, [])
+            finally:
+                await memory.close()
 
     results = await asyncio.gather(*[search_one(c) for c in collections])
 
@@ -96,12 +98,14 @@ async def stats(
 
     async def stats_one(coll_name: str) -> tuple[str, dict[str, Any]]:
         async with sem:
+            memory = Memory(collection=coll_name, config=config)
             try:
-                memory = Memory(collection=coll_name, config=config)
                 coll_stats = await memory.stats()
                 return (coll_name, coll_stats)
             except Exception:
                 return (coll_name, {"total_messages": 0, "total_semantic_refs": 0})
+            finally:
+                await memory.close()
 
     results = await asyncio.gather(*[stats_one(c) for c in collections])
 

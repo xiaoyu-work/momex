@@ -1086,6 +1086,32 @@ Response:"""
             ) from e
 
     # =========================================================================
+    # Lifecycle
+    # =========================================================================
+
+    async def close(self) -> None:
+        """Release the underlying storage resources.
+
+        Closes the SQLite connection or the PostgreSQL connection pool. Safe to
+        call more than once; a later operation transparently re-initializes the
+        conversation.
+        """
+        conversation = self._conversation
+        self._conversation = None
+        self._initialized = False
+        self._deleted_semref_ids = None
+
+        if conversation is not None:
+            await conversation.storage_provider.close()
+
+    async def __aenter__(self) -> "Memory":
+        await self._ensure_initialized()
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback) -> None:
+        await self.close()
+
+    # =========================================================================
     # Properties
     # =========================================================================
 

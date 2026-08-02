@@ -680,6 +680,7 @@ All methods are async:
 | `await stats()` | Get memory statistics |
 | `await export(path)` | Export to JSON file |
 | `await clear()` | Delete all memories in this collection |
+| `await close()` | Release the SQLite connection / PostgreSQL pool |
 
 **add() parameters:**
 - `messages`: str or list[dict] - Content to add
@@ -690,6 +691,28 @@ All methods are async:
 
 **search() / search_by_embedding() parameters:**
 - `include_expired`: bool (default False) - Include memories past their valid_to date
+
+**Releasing resources:**
+
+A `Memory` holds a SQLite connection or a PostgreSQL connection pool until it is
+closed. Use it as an async context manager, or call `close()` explicitly:
+
+```python
+async with Memory(collection="user:xiaoyuzhang") as memory:
+    await memory.add("I like Python")
+# connection/pool released here
+
+# or, equivalently
+memory = Memory(collection="user:xiaoyuzhang")
+try:
+    await memory.add("I like Python")
+finally:
+    await memory.close()
+```
+
+This matters most on the PostgreSQL backend, where each un-closed `Memory`
+leaves a connection pool open. `close()` is idempotent, and the next operation
+transparently re-opens the collection.
 
 ### Prefix Query Functions
 
