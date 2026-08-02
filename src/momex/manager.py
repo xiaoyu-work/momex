@@ -8,7 +8,7 @@ import shutil
 from typing import Any
 
 from .config import MomexConfig
-from .exceptions import CollectionNotFoundError, ValidationError
+from .exceptions import CollectionNotFoundError, StorageError, ValidationError
 
 
 def _collection_to_path(collection: str) -> Path:
@@ -48,6 +48,20 @@ class MemoryManager:
         """
         self.config = config or MomexConfig.get_default()
         self._storage_path = Path(self.config.storage_path)
+
+    def _require_sqlite(self, operation: str, suggestion: str) -> None:
+        """Guard operations that can only work against the SQLite backend.
+
+        These walk the on-disk collection directories, which do not exist for
+        the PostgreSQL backend; without this guard they silently reported on
+        (or modified) an unrelated local directory.
+        """
+        if self.config.is_postgres:
+            raise StorageError(
+                message=f"{operation}() is not supported on the PostgreSQL backend.",
+                operation=operation,
+                suggestion=suggestion,
+            )
 
     def list_collections(self, prefix: str | None = None) -> list[str]:
         """List all collections, optionally filtered by prefix.
@@ -159,9 +173,33 @@ class MemoryManager:
 
         Returns:
             True if the collection exists.
+
+        Raises:
+            StorageError: If the backend is PostgreSQL and an event loop is
+                already running; use ``exists_async()`` instead.
         """
+        if self.config.is_postgres:
+            import asyncio
+
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(self.exists_async(collection))
+            raise StorageError(
+                message="PostgreSQL backend requires async existence checks.",
+                operation="exists",
+                suggestion="Use await exists_async() instead.",
+            )
+
         db_path = self._get_db_path(collection)
         return db_path.exists()
+
+    async def exists_async(self, collection: str) -> bool:
+        """Check if a collection exists (works on both backends)."""
+        if not self.config.is_postgres:
+            return self.exists(collection)
+
+        return collection in await self.list_collections_async(prefix=collection)
 
     def delete(self, collection: str) -> bool:
         """Delete a collection and all its data.
@@ -200,17 +238,30 @@ class MemoryManager:
         if not self.config.is_postgres:
             return self.delete(collection)
 
+        # An explicit schema is shared by every collection, so dropping it here
+        # would destroy unrelated collections rather than just this one.
+        if self.config.storage.postgres_schema:
+            raise StorageError(
+                message=(
+                    "Cannot delete a single collection when "
+                    "storage.postgres_schema is set: all collections share "
+                    f"schema '{self.config.storage.postgres_schema}', and "
+                    "dropping it would delete all of them."
+                ),
+                operation="delete",
+                suggestion=(
+                    "Unset storage.postgres_schema so each collection gets its "
+                    "own derived schema, or drop the schema manually."
+                ),
+            )
+
         import asyncpg  # type: ignore[import-not-found]
 
         from typeagent.storage.postgres.schema import quote_ident
 
         from .memory import _collection_to_schema
 
-        schema = (
-            self.config.storage.postgres_schema
-            if self.config.storage.postgres_schema
-            else _collection_to_schema(collection)
-        )
+        schema = _collection_to_schema(collection)
 
         conn = await asyncpg.connect(self.config.storage.postgres_url)
         try:
@@ -235,7 +286,17 @@ class MemoryManager:
 
         Returns:
             True if renamed, False if source not found.
+
+        Raises:
+            StorageError: If the backend is PostgreSQL (SQLite only).
         """
+        self._require_sqlite(
+            "rename",
+            "Renaming a PostgreSQL collection would have to rename its schema "
+            "and rewrite its stored metadata. Create the new collection and "
+            "re-ingest, or run the ALTER SCHEMA yourself.",
+        )
+
         old_dir = self._get_collection_dir(old_name)
         new_dir = self._get_collection_dir(new_name)
 
@@ -268,7 +329,16 @@ class MemoryManager:
 
         Returns:
             Dict with collection info (size, path, etc.).
+
+        Raises:
+            StorageError: If the backend is PostgreSQL (SQLite only).
         """
+        self._require_sqlite(
+            "info",
+            "This reports on-disk file stats, which do not apply to "
+            "PostgreSQL. Use await Memory(collection).stats() instead.",
+        )
+
         db_path = self._get_db_path(collection)
 
         if not db_path.exists():
@@ -301,7 +371,16 @@ class MemoryManager:
 
         Returns:
             True if copied.
+
+        Raises:
+            StorageError: If the backend is PostgreSQL (SQLite only).
         """
+        self._require_sqlite(
+            "copy",
+            "PostgreSQL has no portable schema-copy operation. Create the new "
+            "collection and re-ingest, or copy the schema with pg_dump.",
+        )
+
         source_dir = self._get_collection_dir(source)
         dest_dir = self._get_collection_dir(destination)
 
