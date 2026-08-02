@@ -734,8 +734,10 @@ results = await memory.search("programming")
 for item in results:
     print(item.type)        # "entity", "action", "topic", or "message"
     print(item.text)        # Formatted text
-    print(item.score)       # Relevance score
+    print(item.score)       # Native score of the index that produced the item
+    print(item.fusion_score)  # Rank-fusion score used to order search() results
     print(item.raw)         # Original TypeAgent object (SemanticRef or Message)
+    print(item.timestamp)   # ISO timestamp of the source message, or None
     print(item.valid_from)  # ISO date or None — when memory becomes relevant
     print(item.valid_to)    # ISO date or None — when memory expires
 ```
@@ -745,6 +747,17 @@ for item in results:
 - `"action"` - Actions with verbs, subjects, objects
 - `"topic"` - Topic keywords
 - `"message"` - Original message text
+
+**score vs fusion_score:**
+
+`score` is the raw score reported by whichever index produced the item:
+unbounded term-match weights for structured results, cosine similarity in
+`[0, 1]` for embedding results. The two are not comparable, so `search()`
+orders its hybrid results by `fusion_score`, computed with reciprocal rank
+fusion over both result lists. Items found by *both* paths rank highest.
+
+`fusion_score` is `None` for single-path calls such as
+`search_by_embedding()`, where `score` alone already defines the order.
 
 ### AddResult
 

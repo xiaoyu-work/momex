@@ -28,6 +28,10 @@ if TYPE_CHECKING:
 
 DELETED_SEMREFS_METADATA_KEY = "momex_deleted_semrefs"
 
+# Reciprocal rank fusion constant, from the original RRF paper. Damps the
+# influence of the top ranks so one list cannot dominate the merged order.
+RRF_K = 60
+
 
 @dataclass
 class AddResult:
@@ -46,11 +50,14 @@ class SearchItem:
 
     type: str  # Uses TypeAgent's native knowledge_type: "entity", "action", "topic", "message"
     text: str
-    score: float
+    score: float  # Native score of the index that produced this item
     raw: Any  # Original TypeAgent object (SemanticRef or Message)
     timestamp: str | None = None  # When the memory was recorded (ISO format)
     valid_from: str | None = None
     valid_to: str | None = None
+    # Rank-fusion score used to order hybrid search() results. None when the
+    # item comes from a single-path search such as search_by_embedding().
+    fusion_score: float | None = None
 
 
 def _collection_to_db_path(collection: str, base_path: str, db_name: str) -> Path:
@@ -506,8 +513,8 @@ class Memory:
     ) -> list[SearchItem]:
         """Hybrid search: structured term matching + embedding similarity in parallel.
 
-        Runs both search paths concurrently and merges results for better recall
-        without sacrificing precision.
+        Runs both search paths concurrently and merges them with reciprocal rank
+        fusion for better recall without sacrificing precision.
 
         Args:
             query_text: Search query (natural language question or topic).
@@ -515,34 +522,60 @@ class Memory:
             include_expired: If True, include memories past their valid_to date.
 
         Returns:
-            List of SearchItem with type, text, score, and raw TypeAgent object.
+            List of SearchItem with type, text, score, and raw TypeAgent object,
+            ordered by fusion_score.
         """
         await self._ensure_initialized()
 
         # Run structured search and embedding search in parallel
-        structured_task = self._search_structured(
-            query_text, limit=limit, include_expired=include_expired
-        )
-        embedding_task = self._search_embedding(
-            query_text, limit=limit, include_expired=include_expired
-        )
         structured_items, embedding_items = await asyncio.gather(
-            structured_task, embedding_task
+            self._search_structured(
+                query_text, limit=limit, include_expired=include_expired
+            ),
+            self._search_embedding(
+                query_text, limit=limit, include_expired=include_expired
+            ),
         )
 
-        # Merge: structured results first, then embedding results not already present
-        seen_texts: set[str] = set()
-        merged: list[SearchItem] = []
-        for item in structured_items:
-            seen_texts.add(item.text)
-            merged.append(item)
-        for item in embedding_items:
-            if item.text not in seen_texts:
-                seen_texts.add(item.text)
-                merged.append(item)
+        return self._fuse_results(structured_items, embedding_items, limit=limit)
 
-        merged.sort(key=lambda x: x.score, reverse=True)
-        return merged[:limit]
+    @staticmethod
+    def _fuse_results(
+        *result_lists: list[SearchItem],
+        limit: int,
+    ) -> list[SearchItem]:
+        """Merge ranked result lists using reciprocal rank fusion.
+
+        Structured search returns term-match weights, which are unbounded and
+        routinely exceed 1, while embedding search returns cosine similarities
+        in [0, 1]. Sorting the two together by raw score is meaningless, so they
+        are combined by rank instead of by magnitude.
+        """
+        best: dict[str, SearchItem] = {}
+        fused_scores: dict[str, float] = {}
+
+        for items in result_lists:
+            seen: set[str] = set()
+            for rank, item in enumerate(items):
+                # Same text from two indexes is one memory, and should be
+                # rewarded for appearing in both -- but only once per list.
+                if item.text in seen:
+                    continue
+                seen.add(item.text)
+                fused_scores[item.text] = fused_scores.get(item.text, 0.0) + 1.0 / (
+                    RRF_K + rank + 1
+                )
+                best.setdefault(item.text, item)
+
+        for text, item in best.items():
+            item.fusion_score = fused_scores[text]
+
+        ordered = sorted(
+            best.values(),
+            key=lambda item: (item.fusion_score or 0.0, item.score),
+            reverse=True,
+        )
+        return ordered[:limit]
 
     async def _search_structured(
         self,

@@ -176,10 +176,12 @@ Momex wraps TypeAgent's search results in a simple `SearchItem` dataclass:
 class SearchItem:
     type: str          # "entity", "action", "topic", "message"
     text: str          # Formatted text
-    score: float
+    score: float       # Native score of the producing index
     raw: Any           # Original TypeAgent object
+    timestamp: str | None   # ISO timestamp of the source message
     valid_from: str | None  # ISO date: memory is relevant from this date
     valid_to: str | None    # ISO date: memory expires after this date
+    fusion_score: float | None  # Rank-fusion score ordering hybrid results
 ```
 
 This provides:
@@ -187,3 +189,8 @@ This provides:
 - Access to raw TypeAgent objects via `.raw`
 - Type information from TypeAgent's native `knowledge_type`
 - Time window metadata for temporal memories
+
+Structured scores (unbounded term weights) and embedding scores (cosine
+similarity in `[0, 1]`) are not comparable, so `search()` merges the two
+result lists with reciprocal rank fusion and orders by `fusion_score`
+rather than by raw `score`.
