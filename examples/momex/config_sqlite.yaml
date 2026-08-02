@@ -1,16 +1,25 @@
 # Momex Configuration - SQLite Backend
+# Use with: config = MomexConfig.from_yaml("config_sqlite.yaml")
 
-backend: sqlite
+llm:
+  provider: openai  # openai, azure, anthropic, deepseek, qwen
+  model: gpt-4o
+  # Prefer the MOMEX_LLM_API_KEY env var over storing the key here.
+  api_key: ""
+  # api_base is required for azure, optional elsewhere.
+  api_base: ""
+  temperature: 0.0
 
-storage_path: ./momex_data
+# Optional. If omitted, embedding settings are inferred from `llm`
+# (supported when llm.provider is openai or azure).
+embedding:
+  provider: openai  # openai, azure
+  model: text-embedding-3-small
+  # Falls back to llm.api_key when the provider matches.
+  api_key: ""
+  api_base: ""
+  # dimensions: 1536
 
-# LLM configuration
-provider: openai  # openai, azure, anthropic, deepseek, qwen
-model: gpt-4o
-# api_key: use MOMEX_API_KEY env var
-# api_base: https://xxx.openai.azure.com  # Required for Azure
-temperature: 0.0
-
-# Embedding configuration (API key via OPENAI_API_KEY or AZURE_OPENAI_API_KEY)
-embedding_model: text-embedding-3-small
-# embedding_endpoint_envvar: AZURE_OPENAI_ENDPOINT_EMBEDDING_3_SMALL
+storage:
+  backend: sqlite
+  path: ./momex_data
