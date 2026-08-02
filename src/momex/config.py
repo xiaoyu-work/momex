@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 from .exceptions import ConfigurationError
 
@@ -143,8 +143,10 @@ class MomexConfig:
         config = MomexConfig.from_yaml("config.yaml")
     """
 
-    # Class-level default
-    _default: "MomexConfig | None" = None
+    # Global default. ClassVar so it stays out of the generated __init__;
+    # as a plain annotation it became the *first* positional field, and
+    # MomexConfig(LLMConfig(...)) would silently bind the LLM config to it.
+    _default: ClassVar["MomexConfig | None"] = None
 
     llm: LLMConfig = field(default_factory=LLMConfig)
     embedding: EmbeddingConfig | None = None
