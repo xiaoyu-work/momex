@@ -1,4 +1,4 @@
-﻿"""Tests for MomexConfig construction, defaults, and provider resolution."""
+"""Tests for MomexConfig construction, defaults, and provider resolution."""
 
 import pytest
 
@@ -41,6 +41,8 @@ class TestMomexConfigConstruction:
 
         MomexConfig.clear_default()
         assert MomexConfig.get_default().storage.path == "./momex_data"
+
+
 class TestEmbeddingResolution:
     def test_api_version_is_preserved(self):
         """Azure embeddings need api_version to survive get_embedding_config()."""
@@ -89,6 +91,7 @@ class TestEmbeddingResolution:
         )
         with pytest.raises(ConfigurationError):
             config.get_embedding_config()
+
 
 class TestFromEnv:
     def test_embedding_built_without_provider_var(self, monkeypatch):

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from .config import MomexConfig
 from .manager import MemoryManager
 from .memory import Memory, SearchItem
+
+logger = logging.getLogger(__name__)
 
 # Maximum concurrent queries to avoid rate limiting
 MAX_CONCURRENT_QUERIES = 5
@@ -52,6 +55,11 @@ async def search(
                 results = await memory.search(query_text, limit=limit)
                 return (coll_name, results)
             except Exception:
+                logger.warning(
+                    "Search failed for collection %r; skipping it.",
+                    coll_name,
+                    exc_info=True,
+                )
                 return (coll_name, [])
             finally:
                 await memory.close()
@@ -103,6 +111,11 @@ async def stats(
                 coll_stats = await memory.stats()
                 return (coll_name, coll_stats)
             except Exception:
+                logger.warning(
+                    "Stats failed for collection %r; reporting zeros.",
+                    coll_name,
+                    exc_info=True,
+                )
                 return (coll_name, {"total_messages": 0, "total_semantic_refs": 0})
             finally:
                 await memory.close()

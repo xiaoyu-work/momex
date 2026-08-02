@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 from pathlib import Path
 import re
 from typing import Any, TYPE_CHECKING
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
         RelatedTermIndexSettings,
     )
 
+
+logger = logging.getLogger(__name__)
 
 DELETED_SEMREFS_METADATA_KEY = "momex_deleted_semrefs"
 
@@ -204,6 +207,13 @@ class Memory:
         try:
             parsed = json.loads(deleted_raw)
         except json.JSONDecodeError:
+            logger.warning(
+                "Ignoring corrupt %s metadata for collection %r; "
+                "previously deleted memories may reappear.",
+                DELETED_SEMREFS_METADATA_KEY,
+                self.collection,
+                exc_info=True,
+            )
             parsed = []
 
         deleted_ids: set[int] = set()
@@ -773,12 +783,18 @@ class Memory:
         *,
         include_expired: bool = False,
     ) -> list[SearchItem]:
-        """Internal embedding search. Silently returns empty on failure."""
+        """Internal embedding search. Logs and degrades to empty on failure."""
         try:
             return await self.search_by_embedding(
                 query_text, limit=limit, include_expired=include_expired
             )
         except Exception:
+            logger.warning(
+                "Embedding search failed for collection %r; "
+                "returning structured results only.",
+                self.collection,
+                exc_info=True,
+            )
             return []
 
     async def search_by_embedding(
@@ -822,6 +838,11 @@ class Memory:
                 threshold_score=min_score,
             )
         except Exception:
+            logger.warning(
+                "Message index lookup failed for collection %r.",
+                self.collection,
+                exc_info=True,
+            )
             return []
 
         if not scored_ordinals:
@@ -1034,8 +1055,13 @@ Response:"""
                 return len(new_ids)
 
         except Exception:
-            # If contradiction detection fails, just proceed with add
-            pass
+            # Contradiction detection is best-effort and must never block add().
+            logger.warning(
+                "Contradiction detection failed for collection %r; "
+                "adding the new memory without it.",
+                self.collection,
+                exc_info=True,
+            )
 
         return 0
 

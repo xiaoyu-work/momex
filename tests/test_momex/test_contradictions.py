@@ -4,6 +4,8 @@ Contradiction detection only ever considers extracted knowledge, so it must not
 pay for the embedding search, which returns messages exclusively.
 """
 
+import logging
+
 import pytest
 
 from momex import LLMConfig, Memory, MomexConfig, StorageConfig
@@ -144,3 +146,23 @@ async def test_no_existing_knowledge_skips_llm_call(memory, monkeypatch):
 
     assert removed == 0
     assert llm.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_llm_failure_is_logged_and_does_not_block_add(
+    memory, monkeypatch, caplog
+):
+    """A broken LLM must degrade loudly, not silently."""
+
+    class _BrokenLLM:
+        async def complete(self, prompt, **kwargs):
+            raise RuntimeError("llm is down")
+
+    _wire(memory, monkeypatch, _BrokenLLM(), [_knowledge("likes sushi", 1)])
+
+    with caplog.at_level(logging.WARNING, logger="momex.memory"):
+        removed = await memory._detect_and_remove_contradictions("I don't like sushi")
+
+    assert removed == 0
+    assert "Contradiction detection failed" in caplog.text
+    assert "llm is down" in caplog.text
