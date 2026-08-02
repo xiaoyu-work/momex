@@ -184,3 +184,63 @@ class TestGlobalDefaultIsHonored:
 
         MomexConfig.clear_default()
         assert str(MemoryManager()._storage_path) == "momex_data"
+
+
+class TestSecretHandling:
+    """to_yaml() must not persist credentials unless explicitly asked."""
+
+    def _config(self):
+        return MomexConfig(
+            llm=LLMConfig(provider="openai", model="gpt-4o", api_key="sk-secret"),
+            embedding=EmbeddingConfig(provider="openai", api_key="sk-emb-secret"),
+            storage=StorageConfig(
+                backend="postgres",
+                postgres_url="postgresql://u:pw@localhost:5432/momex",
+            ),
+        )
+
+    def test_secrets_omitted_by_default(self, tmp_path):
+        path = tmp_path / "config.yaml"
+        self._config().to_yaml(path)
+
+        text = path.read_text(encoding="utf-8")
+        assert "sk-secret" not in text
+        assert "sk-emb-secret" not in text
+        assert "pw@localhost" not in text
+        # Non-secret settings are still written.
+        assert "gpt-4o" in text
+        assert "postgres" in text
+
+    def test_include_secrets_writes_them(self, tmp_path):
+        path = tmp_path / "config.yaml"
+        self._config().to_yaml(path, include_secrets=True)
+
+        text = path.read_text(encoding="utf-8")
+        assert "sk-secret" in text
+        assert "sk-emb-secret" in text
+        assert "postgresql://u:pw@localhost:5432/momex" in text
+
+    def test_from_yaml_recovers_secrets_from_env(self, tmp_path, monkeypatch):
+        path = tmp_path / "config.yaml"
+        self._config().to_yaml(path)
+
+        monkeypatch.setenv("MOMEX_LLM_API_KEY", "sk-from-env")
+        monkeypatch.setenv("MOMEX_EMBEDDING_API_KEY", "sk-emb-from-env")
+        monkeypatch.setenv(
+            "MOMEX_STORAGE_POSTGRES_URL", "postgresql://u:pw@db:5432/momex"
+        )
+
+        loaded = MomexConfig.from_yaml(path)
+        assert loaded.llm.api_key == "sk-from-env"
+        assert loaded.embedding is not None
+        assert loaded.embedding.api_key == "sk-emb-from-env"
+        assert loaded.storage.postgres_url == "postgresql://u:pw@db:5432/momex"
+        loaded.validate()
+
+    def test_file_value_wins_over_env(self, tmp_path, monkeypatch):
+        path = tmp_path / "config.yaml"
+        self._config().to_yaml(path, include_secrets=True)
+
+        monkeypatch.setenv("MOMEX_LLM_API_KEY", "sk-from-env")
+
+        assert MomexConfig.from_yaml(path).llm.api_key == "sk-secret"

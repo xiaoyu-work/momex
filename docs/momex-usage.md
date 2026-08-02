@@ -612,13 +612,14 @@ config = MomexConfig(
 llm:
   provider: openai
   model: gpt-4o
-  api_key: sk-xxx  # or use MOMEX_LLM_API_KEY env var
+  api_key: sk-xxx  # optional here — MOMEX_LLM_API_KEY is used when omitted
   temperature: 0.0
 
 # embedding: (optional, auto-inferred for OpenAI/Azure)
 #   provider: openai
 #   model: text-embedding-3-small
-#   api_key: sk-xxx
+#   api_key: sk-xxx          # falls back to MOMEX_EMBEDDING_API_KEY
+#   api_version: 2024-02-01  # for Azure
 
 storage:
   backend: sqlite  # or postgres
@@ -635,8 +636,16 @@ memory = Memory(collection="user:xiaoyuzhang", config=config)
 
 **Save to YAML:**
 ```python
+# Safe to commit: API keys and the PostgreSQL URL are omitted
 config.to_yaml("my_config.yaml")
+
+# Self-contained, including credentials — keep this file out of version control
+config.to_yaml("my_config.yaml", include_secrets=True)
 ```
+
+Any secret missing from the file is read from the environment when loading:
+`MOMEX_LLM_API_KEY`, `MOMEX_EMBEDDING_API_KEY` and
+`MOMEX_STORAGE_POSTGRES_URL`. Values present in the file take precedence.
 
 ### Environment Variables
 

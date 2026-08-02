@@ -425,20 +425,42 @@ class MomexConfig:
             postgres_pgbouncer=storage_data.get("postgres_pgbouncer", False),
         )
 
+        # Secrets are normally kept out of the file (to_yaml omits them unless
+        # include_secrets=True), so fall back to the environment for them.
+        llm.api_key = llm.api_key or os.getenv("MOMEX_LLM_API_KEY", "")
+        if embedding is not None:
+            embedding.api_key = embedding.api_key or os.getenv(
+                "MOMEX_EMBEDDING_API_KEY", ""
+            )
+        storage.postgres_url = storage.postgres_url or os.getenv(
+            "MOMEX_STORAGE_POSTGRES_URL", ""
+        )
+
         return cls(llm=llm, embedding=embedding, storage=storage)
 
-    def to_yaml(self, path: str | Path) -> None:
-        """Save to YAML file."""
+    def to_yaml(self, path: str | Path, *, include_secrets: bool = False) -> None:
+        """Save to YAML file.
+
+        Args:
+            path: Destination file.
+            include_secrets: When False (the default), API keys and the
+                PostgreSQL URL (which embeds credentials) are left out, so the
+                written file is safe to commit. from_yaml() recovers them from
+                MOMEX_LLM_API_KEY, MOMEX_EMBEDDING_API_KEY and
+                MOMEX_STORAGE_POSTGRES_URL. Set True to write a self-contained
+                file including the credentials.
+        """
         import yaml
 
         data: dict[str, dict[str, str | int | float | bool]] = {
             "llm": {
                 "provider": self.llm.provider,
                 "model": self.llm.model,
-                "api_key": self.llm.api_key,
                 "temperature": self.llm.temperature,
             }
         }
+        if include_secrets and self.llm.api_key:
+            data["llm"]["api_key"] = self.llm.api_key
 
         if self.llm.api_base:
             data["llm"]["api_base"] = self.llm.api_base
@@ -448,7 +470,7 @@ class MomexConfig:
                 "provider": self.embedding.provider,
                 "model": self.embedding.model,
             }
-            if self.embedding.api_key:
+            if include_secrets and self.embedding.api_key:
                 data["embedding"]["api_key"] = self.embedding.api_key
             if self.embedding.api_base:
                 data["embedding"]["api_base"] = self.embedding.api_base
@@ -463,7 +485,9 @@ class MomexConfig:
         if self.storage.is_sqlite:
             data["storage"]["path"] = self.storage.path
         else:
-            data["storage"]["postgres_url"] = self.storage.postgres_url
+            # The URL embeds credentials, so treat it as a secret.
+            if include_secrets and self.storage.postgres_url:
+                data["storage"]["postgres_url"] = self.storage.postgres_url
             if self.storage.postgres_schema:
                 data["storage"]["postgres_schema"] = self.storage.postgres_schema
             data["storage"]["postgres_pool_min"] = self.storage.postgres_pool_min
