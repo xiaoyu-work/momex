@@ -13,7 +13,7 @@ Momex is a high-level memory API for AI agents, built on TypeAgent's Structured 
 
 ```
 ┌─────────────────┐
-│   Momex API     │  Memory, MemoryManager, query(), search()
+│   Momex API     │  Memory, MemoryManager, search(), stats()
 ├─────────────────┤
 │   MomexConfig   │  LLM config (provider, model, env-based api_key)
 ├─────────────────┤
@@ -76,9 +76,9 @@ Schema naming notes:
 ### Prefix Queries
 
 Both backends support prefix-based queries:
-- `query("momex:engineering:xiaoyuzhang", ...)` → searches only xiaoyuzhang
-- `query("momex:engineering", ...)` → searches all under engineering
-- `query("momex", ...)` → searches entire momex
+- `search("momex:engineering:xiaoyuzhang", ...)` → searches only xiaoyuzhang
+- `search("momex:engineering", ...)` → searches all under engineering
+- `search("momex", ...)` → searches entire momex
 
 ## Knowledge Extraction
 
@@ -153,18 +153,6 @@ Embedding similarity search
 Filter expired memories (valid_to < today)
     ↓
 Wrap as list[SearchItem]
-```
-
-### query()
-
-```
-search() results
-    ↓
-Format as context
-    ↓
-[LLM] Generate answer
-    ↓
-Return string
 ```
 
 ## SearchItem

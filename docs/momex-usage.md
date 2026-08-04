@@ -34,8 +34,8 @@ async def main():
 
     memory = Memory(collection="user:xiaoyuzhang")
     await memory.add("I like Python")
-    answer = await memory.query("What language?")
-    print(answer)
+    for item in await memory.search("What language?"):
+        print(f"[{item.type}] {item.text}")
 
 asyncio.run(main())
 ```
@@ -58,14 +58,14 @@ momex:engineering:gvanrossum   →  ./momex_data/momex/engineering/gvanrossum/me
 momex:marketing:charlie        →  ./momex_data/momex/marketing/charlie/memory.db
 ```
 
-Query behavior:
-- `await query("momex:engineering:xiaoyuzhang", ...)` → searches only xiaoyuzhang
-- `await query("momex:engineering", ...)` → searches xiaoyuzhang + gvanrossum
-- `await query("momex", ...)` → searches xiaoyuzhang + gvanrossum + charlie
+Search behavior:
+- `await search("momex:engineering:xiaoyuzhang", ...)` → searches only xiaoyuzhang
+- `await search("momex:engineering", ...)` → searches xiaoyuzhang + gvanrossum
+- `await search("momex", ...)` → searches xiaoyuzhang + gvanrossum + charlie
 
 ## Basic Usage
 
-### Add and Query
+### Add and Search
 
 ```python
 import asyncio
@@ -78,9 +78,9 @@ async def main():
     await memory.add("I love Python programming")
     await memory.add("Project deadline is Friday")
 
-    # Query - returns LLM-generated answer
-    answer = await memory.query("What programming language does the user like?")
-    print(answer)
+    # Search - returns structured results to feed to your own agent
+    for item in await memory.search("What programming language does the user like?"):
+        print(f"[{item.type}] {item.text}")
 
 asyncio.run(main())
 ```
@@ -100,8 +100,9 @@ async def main():
         {"role": "user", "content": "I'm working on a FastAPI project"},
     ])
 
-    # Query the memories
-    answer = await memory.query("What is the user's name?")
+    # Search the memories
+    for item in await memory.search("What is the user's name?"):
+        print(f"[{item.type}] {item.text}")
 ```
 
 ### Direct Storage (No LLM Processing)
@@ -208,54 +209,35 @@ collection.
 The return value is the number of knowledge items newly deleted. Deleting the
 same query twice returns `0` the second time.
 
-### Query Across Collections
+### Search Across Collections
 
-```python
-from momex import Memory, query
-
-async def main():
-    # Create memories for different users
-    xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang")
-    await xiaoyuzhang.add("I like Python")
-
-    gvanrossum = Memory(collection="momex:engineering:gvanrossum")
-    await gvanrossum.add("I prefer Java")
-
-    # Query single collection
-    answer = await xiaoyuzhang.query("What programming language?")
-
-    # Query by prefix - searches multiple collections
-    answer = await query("momex:engineering", "What programming languages do people use?")
-    answer = await query("momex", "Who works here?")
-```
-
-### Search for Raw Results
-
-Use `search()` to get structured results without LLM answer generation. Useful when you want to provide context to your own LLM:
+`search()` returns structured results for you to feed to your own LLM or agent.
+Momex does not generate answers itself.
 
 ```python
 from momex import Memory, search
 
 async def main():
-    memory = Memory(collection="momex:engineering:xiaoyuzhang")
-    await memory.add("I like Python and FastAPI")
+    # Create memories for different users
+    xiaoyuzhang = Memory(collection="momex:engineering:xiaoyuzhang")
+    await xiaoyuzhang.add("I like Python and FastAPI")
 
-    # Search single collection - returns SearchItem objects
-    results = await memory.search("programming")
+    gvanrossum = Memory(collection="momex:engineering:gvanrossum")
+    await gvanrossum.add("I prefer Java")
+
+    # Search a single collection - returns SearchItem objects
+    results = await xiaoyuzhang.search("programming")
     for item in results:
         print(f"[{item.type}] {item.text} (score={item.score:.2f})")
         # item.raw contains the original TypeAgent object
 
-    # Search across collections with prefix
-    results = await search("momex", "what programming languages", limit=5)
+    # Search across collections by prefix
+    results = await search("momex:engineering", "what programming languages", limit=5)
+    results = await search("momex", "who works here", limit=5)
 
     # Use as context for your own LLM
     context = "\n".join([f"- [{coll}] {item.text}" for coll, items in results for item in items])
 ```
-
-**query() vs search():**
-- `query()`: Uses LLM to generate a natural language answer
-- `search()`: Returns structured `SearchItem` results for you to process
 
 ### Embedding-Only Search (Fallback)
 
@@ -298,7 +280,7 @@ manager.rename("user:old", "user:new")
 ## Configuration
 
 Configuration has three parts:
-- **LLM**: Required for knowledge extraction and query answering
+- **LLM**: Required for knowledge extraction and search query translation
 - **Embedding**: Optional, auto-inferred from LLM for OpenAI/Azure
 - **Storage**: SQLite (default) or PostgreSQL
 
@@ -575,7 +557,6 @@ All methods are async:
 | Method | Description |
 |--------|-------------|
 | `await add(messages)` | Add memories (auto-detects contradictions) |
-| `await query(question)` | Query with natural language (LLM answer) |
 | `await search(query, limit=10)` | Search, returns `list[SearchItem]` |
 | `await search_by_embedding(query, limit=10)` | Embedding-only search, no LLM needed |
 | `await delete(query)` | Delete memories matching query (advanced) |
@@ -616,13 +597,12 @@ This matters most on the PostgreSQL backend, where each un-closed `Memory`
 leaves a connection pool open. `close()` is idempotent, and the next operation
 transparently re-opens the collection.
 
-### Prefix Query Functions
+### Prefix Search Functions
 
 All functions are async:
 
 | Function | Description |
 |----------|-------------|
-| `await query(prefix, question)` | Query with LLM answer (returns str) |
 | `await search(prefix, query, limit=10)` | Search (returns list of tuples) |
 | `await stats(prefix)` | Get combined stats for matching collections |
 
