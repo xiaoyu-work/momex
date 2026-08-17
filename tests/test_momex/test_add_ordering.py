@@ -1,6 +1,9 @@
 """Regression tests for add() write ordering, date validation, and the
 settings toggle used by infer=False.
 
+Contradicted memories are superseded rather than deleted, so add() reports
+what it retired (AddResult.superseded), not just how many.
+
 All offline: the conversation object is faked, no LLM or embedding key needed.
 """
 
@@ -9,6 +12,7 @@ import asyncio
 import pytest
 
 from momex import LLMConfig, Memory, MomexConfig, StorageConfig
+from momex.memory import SupersededRecord
 
 
 class _FakeIndexSettings:
@@ -66,16 +70,33 @@ def _make_memory(conversation) -> Memory:
     memory._conversation = conversation  # type: ignore[assignment]
     memory._initialized = True
     memory._deleted_semref_ids = set()
+    memory._supersession_ledger = []
+
+    async def _no_persist_ledger(records):
+        memory._supersession_ledger = records
+
+    memory._store_ledger = _no_persist_ledger  # type: ignore[method-assign]
     return memory
 
 
 def _record_contradictions(memory, conversation, monkeypatch, *, returns=1):
     seen: dict = {}
 
-    async def fake_detect(new_content, *, protect_semrefs_from=None):
-        conversation.events.append("delete")
+    async def fake_detect(
+        new_content, *, protect_semrefs_from=None, superseded_by=None
+    ):
+        conversation.events.append("supersede")
         seen["protect_semrefs_from"] = protect_semrefs_from
-        return returns
+        seen["superseded_by"] = superseded_by
+        return [
+            SupersededRecord(
+                ordinal=100 + i,
+                superseded_by=list(superseded_by or []),
+                at="2026-01-01T00:00:00Z",
+                reason="contradiction",
+            )
+            for i in range(returns)
+        ]
 
     monkeypatch.setattr(memory, "_detect_and_remove_contradictions", fake_detect)
     return seen
@@ -93,8 +114,9 @@ async def test_contradictions_are_removed_after_the_write(monkeypatch):
 
     result = await memory.add("I don't like sushi")
 
-    assert conversation.events == ["write", "delete"]
+    assert conversation.events == ["write", "supersede"]
     assert result.contradictions_removed == 1
+    assert result.superseded is not None and len(result.superseded) == 1
 
 
 @pytest.mark.asyncio
@@ -107,7 +129,7 @@ async def test_failed_write_deletes_nothing(monkeypatch):
     with pytest.raises(RuntimeError):
         await memory.add("I don't like sushi")
 
-    assert "delete" not in conversation.events
+    assert "supersede" not in conversation.events
 
 
 @pytest.mark.asyncio
@@ -120,6 +142,8 @@ async def test_own_semrefs_are_protected_from_self_contradiction(monkeypatch):
     await memory.add("I don't like sushi")
 
     assert seen["protect_semrefs_from"] == 7
+    # The two refs this write produced are what the old ones were superseded by.
+    assert seen["superseded_by"] == [7, 8]
 
 
 # --- 2. valid_from enforcement + date validation ---------------------------

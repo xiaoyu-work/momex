@@ -231,7 +231,9 @@ class TestMemoryManager:
             assert "momex:marketing:charlie" not in eng_collections
 
             # Filter by exact match
-            exact_collections = manager.list_collections(prefix="momex:engineering:xiaoyuzhang")
+            exact_collections = manager.list_collections(
+                prefix="momex:engineering:xiaoyuzhang"
+            )
             assert len(exact_collections) == 1
             assert "momex:engineering:xiaoyuzhang" in exact_collections
 
