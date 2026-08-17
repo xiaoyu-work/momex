@@ -9,7 +9,7 @@ contradicting something it could not have contradicted.
 
 import pytest
 
-from momex.contradictions import is_propositional, select_candidates
+from momex.contradictions import is_propositional
 from momex.results import SearchItem
 from typeagent.knowpro.knowledge_schema import Action, ConcreteEntity, Facet
 
@@ -82,46 +82,27 @@ class TestIsPropositional:
         """Absent the knowledge object there is nothing to judge."""
         assert not is_propositional(_item("entity", "sushi"))
 
-
-class TestSelectCandidates:
-    def test_keeps_only_propositions(self):
+    def test_a_mixed_result_set_reduces_to_its_assertions(self):
+        """What one sentence typically extracts, and what survives of it."""
         results = [
             _item("message", "I like sushi", 0),
             _item("entity", "sushi (type: food)", 1, knowledge=_entity("sushi")),
             _item("topic", "dietary preferences", 2),
             _item(
+                "entity",
+                "Xiaoyu [employer: Microsoft]",
+                3,
+                knowledge=_entity(
+                    "Xiaoyu", facets=[Facet(name="employer", value="Microsoft")]
+                ),
+            ),
+            _item(
                 "action",
                 "user like sushi",
-                3,
+                4,
                 knowledge=_action("user", ["like"], "sushi"),
             ),
         ]
 
-        assert [c.text for c in select_candidates(results, None)] == ["user like sushi"]
-
-    def test_keeps_entities_that_assert_something(self):
-        entity = _entity("Xiaoyu", facets=[Facet(name="employer", value="Microsoft")])
-        results = [
-            _item("entity", "Xiaoyu [employer: Microsoft]", 1, knowledge=entity),
-            _item("entity", "Microsoft (type: company)", 2, knowledge=_entity("MS")),
-        ]
-
-        kept = select_candidates(results, None)
-        assert [c.text for c in kept] == ["Xiaoyu [employer: Microsoft]"]
-
-    def test_still_protects_the_callers_own_refs(self):
-        """A new memory must not be retired as a contradiction of itself."""
-        results = [
-            _item("action", "old", 4, knowledge=_action("user", ["like"], "sushi")),
-            _item("action", "new", 5, knowledge=_action("user", ["hate"], "sushi")),
-        ]
-
-        assert [c.text for c in select_candidates(results, 5)] == ["old"]
-
-    def test_no_propositions_yields_nothing(self):
-        results = [
-            _item("topic", "a", 1),
-            _item("entity", "b", 2, knowledge=_entity("b")),
-        ]
-
-        assert select_candidates(results, None) == []
+        kept = [item.text for item in results if is_propositional(item)]
+        assert kept == ["Xiaoyu [employer: Microsoft]", "user like sushi"]

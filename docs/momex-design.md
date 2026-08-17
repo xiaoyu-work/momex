@@ -127,7 +127,7 @@ KnowledgeResponse(
 ```
 Input text
     ↓
-ConversationMessage (with speaker metadata)
+ConversationMessage (speaker metadata, source_id, time-window tags)
     ↓
 add_messages_with_indexing()
     ↓
@@ -135,8 +135,19 @@ KnowledgeExtractor.extract()  [LLM call]
     ↓
 SemanticRefs created for entities, actions, topics
     ↓
-Terms indexed in SemanticRefIndex
+Terms indexed in SemanticRefIndex; subject/verb/object in PropertyIndex
+    ↓
+Contradiction detection, from the knowledge just extracted:
+    property lookup: same subject ∩ (same verb ∪ same object)  [no LLM]
+    ↓
+    adjudicate the candidates  [LLM call]
+    ↓
+    supersession ledger entries
 ```
+
+`source_id` is what gives each extracted memory a stable identity
+(`memory_id`), independent of the semantic-ref ordinals that positions
+depend on.
 
 ### search()
 
@@ -185,6 +196,7 @@ class SearchItem:
     valid_from: str | None  # ISO date: memory is relevant from this date
     valid_to: str | None    # ISO date: memory expires after this date
     fusion_score: float | None  # Rank-fusion score ordering hybrid results
+    memory_id: str | None   # Stable identity, independent of ordinals
 ```
 
 This provides:

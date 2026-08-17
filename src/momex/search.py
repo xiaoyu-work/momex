@@ -160,6 +160,80 @@ def fuse_results(*result_lists: list[SearchItem], limit: int) -> list[SearchItem
     return ordered[:limit]
 
 
+async def items_for_semrefs(
+    conversation: Any,
+    ordinals: list[int],
+    *,
+    scores: dict[int, float] | None = None,
+    include_expired: bool = False,
+) -> list[SearchItem]:
+    """Build SearchItems for the given semantic refs.
+
+    Knowledge inherits the timestamp, validity window and source identity of
+    the message it was extracted from, so those are fetched up front and
+    attached here. Refs that no longer resolve, or whose window has closed, are
+    dropped.
+    """
+    sem_ref_map = await fetch_many(conversation.semantic_refs, ordinals)
+    src_msg_map = await get_source_messages(conversation, sem_ref_map.values())
+
+    items: list[SearchItem] = []
+    for ordinal in ordinals:
+        sem_ref = sem_ref_map.get(ordinal)
+        if sem_ref is None:
+            continue
+
+        src_timestamp: str | None = None
+        valid_from: str | None = None
+        valid_to: str | None = None
+        source_id: str | None = None
+        if getattr(sem_ref, "range", None):
+            src_msg = src_msg_map.get(sem_ref.range.start.message_ordinal)
+            if src_msg is not None:
+                src_timestamp = getattr(src_msg, "timestamp", None)
+                source_id = getattr(src_msg, "source_id", None)
+                valid_from, valid_to = extract_time_window(src_msg)
+
+        if not include_expired and is_outside_window(valid_from, valid_to):
+            continue
+
+        items.append(
+            SearchItem(
+                type=sem_ref.knowledge.knowledge_type,
+                text=render_knowledge(sem_ref.knowledge),
+                score=scores.get(ordinal, 0.0) if scores is not None else 1.0,
+                raw=sem_ref,
+                timestamp=src_timestamp,
+                valid_from=valid_from,
+                valid_to=valid_to,
+                memory_id=memory_id(source_id, sem_ref.knowledge),
+            )
+        )
+    return items
+
+
+async def lookup_property_ordinals(
+    conversation: Any, property_name: str, value: str
+) -> set[int]:
+    """Semantic refs carrying one property value, via the property index.
+
+    A direct index probe: no LLM, no query compilation. Returns an empty set
+    when the index is absent or nothing matches.
+    """
+    if not value:
+        return set()
+
+    indexes = getattr(conversation, "secondary_indexes", None)
+    property_index = getattr(indexes, "property_to_semantic_ref_index", None)
+    if property_index is None:
+        return set()
+
+    scored = await property_index.lookup_property(property_name, value)
+    if not scored:
+        return set()
+    return {s.semantic_ref_ordinal for s in scored}
+
+
 async def search_structured(
     conversation: Any,
     query_text: str,
@@ -224,44 +298,20 @@ async def search_structured(
     items: list[SearchItem] = []
 
     if semref_requests:
-        sem_ref_map = await fetch_many(
-            conversation.semantic_refs, [o for o, _ in semref_requests]
-        )
-        # Knowledge inherits the timestamp and validity window of the message
-        # it was extracted from, so fetch those up front.
-        src_msg_map = await get_source_messages(conversation, sem_ref_map.values())
-
+        # Later duplicates of an ordinal keep the first (highest) score, since
+        # the requests arrive in the order the index ranked them.
+        scores: dict[int, float] = {}
         for ordinal, score in semref_requests:
-            sem_ref = sem_ref_map.get(ordinal)
-            if sem_ref is None:
-                continue
+            scores.setdefault(ordinal, score)
 
-            src_timestamp: str | None = None
-            valid_from: str | None = None
-            valid_to: str | None = None
-            source_id: str | None = None
-            if getattr(sem_ref, "range", None):
-                src_msg = src_msg_map.get(sem_ref.range.start.message_ordinal)
-                if src_msg is not None:
-                    src_timestamp = getattr(src_msg, "timestamp", None)
-                    source_id = getattr(src_msg, "source_id", None)
-                    valid_from, valid_to = extract_time_window(src_msg)
-
-            if not include_expired and is_outside_window(valid_from, valid_to):
-                continue
-
-            items.append(
-                SearchItem(
-                    type=sem_ref.knowledge.knowledge_type,
-                    text=render_knowledge(sem_ref.knowledge),
-                    score=score,
-                    raw=sem_ref,
-                    timestamp=src_timestamp,
-                    valid_from=valid_from,
-                    valid_to=valid_to,
-                    memory_id=memory_id(source_id, sem_ref.knowledge),
-                )
+        items.extend(
+            await items_for_semrefs(
+                conversation,
+                list(scores),
+                scores=scores,
+                include_expired=include_expired,
             )
+        )
 
     if msg_requests:
         msg_map = await fetch_many(conversation.messages, [o for o, _ in msg_requests])

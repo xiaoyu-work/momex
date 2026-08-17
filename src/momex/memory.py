@@ -14,6 +14,7 @@ from typing import Any, TYPE_CHECKING
 
 from .config import MomexConfig
 from .contradictions import detect as detect_contradictions
+from .contradictions import find_candidates as find_contradiction_candidates
 from .identity import new_source_id
 from .ledger import SupersessionLedger
 from .paths import collection_to_db_path, utc_now
@@ -288,10 +289,10 @@ class Memory:
             result = await conversation_obj.add_messages_with_indexing(ta_messages)
 
             # Only now that the new content is durable do we retire whatever it
-            # contradicts. Detection matches the new facts too, so exclude the
-            # semrefs this call just produced -- and point the ledger's
-            # superseded_by at them, so the replacement is recorded, not just
-            # the removal.
+            # contradicts. The knowledge this write produced is what drives the
+            # search for candidates, and is also what the ledger's
+            # superseded_by points at -- so the replacement is recorded, not
+            # just the removal.
             if detect_contradictions:
                 content_text = (
                     messages
@@ -305,8 +306,7 @@ class Memory:
                     )
                 superseded = await self._detect_and_remove_contradictions(
                     content_text,
-                    protect_semrefs_from=semref_baseline,
-                    superseded_by=new_ordinals,
+                    new_ordinals=new_ordinals,
                 )
 
             return AddResult(
@@ -597,8 +597,7 @@ class Memory:
         self,
         new_content: str,
         *,
-        protect_semrefs_from: int | None = None,
-        superseded_by: list[int] | None = None,
+        new_ordinals: list[int] | None = None,
     ) -> list[SupersededRecord]:
         """Internal: use an LLM to retire memories the new content contradicts.
 
@@ -608,24 +607,35 @@ class Memory:
 
         Args:
             new_content: The new content being added.
-            protect_semrefs_from: Semantic-ref ordinal marking the start of the
-                knowledge extracted by the caller's own write. Those refs match
-                the query by construction and must be excluded, or the new
-                memory would be retired as a contradiction of itself.
-            superseded_by: Ordinals of the knowledge that replaced them,
-                recorded on each ledger entry.
+            new_ordinals: Semantic-ref ordinals the caller's own write just
+                produced. They drive the search for what those assertions might
+                contradict, are excluded from the results (a memory must not
+                contradict itself), and are recorded as what replaced whatever
+                is retired.
 
         Returns:
             The ledger entries appended, empty when nothing was retired.
         """
+        ordinals = list(new_ordinals or [])
+        if not ordinals:
+            return []
+
+        conversation = self._conversation_required()
+
+        async def candidates() -> list[SearchItem]:
+            return await find_contradiction_candidates(
+                conversation,
+                ordinals,
+                hidden_ordinals=await self._ledger.hidden_ordinals(),
+            )
+
         return await detect_contradictions(
             new_content,
             collection=self.collection,
-            search_structured=self._search_structured,
+            find_candidates=candidates,
             create_llm=self.config.create_llm,
             append=self._ledger.append,
-            protect_semrefs_from=protect_semrefs_from,
-            superseded_by=superseded_by,
+            superseded_by=ordinals,
         )
 
     async def history(

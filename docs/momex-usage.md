@@ -141,10 +141,36 @@ The old memory is hidden from search, not deleted. See
 [Supersession and history](#supersession-and-history) for how to review and
 undo it.
 
+**What can be superseded.** Contradiction is a relation between propositions,
+so only knowledge that asserts something is eligible:
+
+| Knowledge | Eligible | Why |
+|-----------|----------|-----|
+| `action` — "user like sushi" | yes | Has a truth value; "dislike" denies it |
+| `entity` with facets — "Xiaoyu [employer: Microsoft]" | yes | The facet is the assertion |
+| `entity` bare — "sushi (type: food)" | no | Names a thing; no preference can make it false |
+| `topic` — "dietary preferences" | no | A label, not a claim |
+
+**How candidates are found.** Momex uses the knowledge it just extracted from
+your new text, and looks for existing memories with the *same subject* and
+either the same verb or the same object:
+
+- "I don't like sushi" → subject `user`, object `sushi` → finds "user like
+  sushi" even though the verb changed.
+- "I work at Google" → subject `user`, verb `work at` → finds "user work at
+  Microsoft" even though the object changed.
+- "I like ramen" → subject `user`, verb `like`, object `ramen` → finds "user
+  like sushi" as a candidate, and the model is asked whether it is actually
+  contradicted. Preferences are multi-valued, so it should say no.
+
+This is a deliberate bias toward keeping memories. A missed contradiction
+leaves a stale memory that a later `add()` can still correct; a wrong
+supersession is silent data loss.
+
 You can disable automatic contradiction detection:
 
 ```python
-# Skip contradiction detection (faster, but may create inconsistent memories)
+# Skip contradiction detection (one fewer LLM call per add)
 await memory.add("I don't like sushi", detect_contradictions=False)
 ```
 

@@ -85,16 +85,13 @@ def _make_memory(conversation) -> Memory:
 def _record_contradictions(memory, conversation, monkeypatch, *, returns=1):
     seen: dict = {}
 
-    async def fake_detect(
-        new_content, *, protect_semrefs_from=None, superseded_by=None
-    ):
+    async def fake_detect(new_content, *, new_ordinals=None):
         conversation.events.append("supersede")
-        seen["protect_semrefs_from"] = protect_semrefs_from
-        seen["superseded_by"] = superseded_by
+        seen["new_ordinals"] = new_ordinals
         return [
             SupersededRecord(
                 ordinal=100 + i,
-                superseded_by=list(superseded_by or []),
+                superseded_by=list(new_ordinals or []),
                 at="2026-01-01T00:00:00Z",
                 reason="contradiction",
             )
@@ -137,16 +134,16 @@ async def test_failed_write_deletes_nothing(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_own_semrefs_are_protected_from_self_contradiction(monkeypatch):
-    """Detection must skip the refs this same call just wrote."""
+    """Detection is driven by, and excludes, the refs this call just wrote."""
     conversation = _FakeConversation(semref_count=7)
     memory = _make_memory(conversation)
     seen = _record_contradictions(memory, conversation, monkeypatch)
 
     await memory.add("I don't like sushi")
 
-    assert seen["protect_semrefs_from"] == 7
-    # The two refs this write produced are what the old ones were superseded by.
-    assert seen["superseded_by"] == [7, 8]
+    # The two refs this write produced: what to search from, what to exclude,
+    # and what the old ones were superseded by.
+    assert seen["new_ordinals"] == [7, 8]
 
 
 # --- 2. valid_from enforcement + date validation ---------------------------

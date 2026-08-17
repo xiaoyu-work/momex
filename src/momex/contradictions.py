@@ -15,8 +15,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable
 
+from .identity import memory_id
 from .paths import utc_now
 from .results import SearchItem, SupersededRecord
+from .search import items_for_semrefs, lookup_property_ordinals
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,120 @@ If no contradictions, return "none".
 Only identify clear contradictions (e.g., "likes X" vs "doesn't like X"), not merely related information.
 
 Response:"""
+
+
+def relation_probes(
+    knowledge: Any,
+) -> tuple[tuple[str, str] | None, list[tuple[str, str]]]:
+    """The property lookups that find propositions about the same relation.
+
+    Returns a subject probe and a list of anchor probes. A candidate has to
+    match the subject *and* at least one anchor, which is what keeps this from
+    degenerating into "everything ever said about the user".
+
+    Two anchors, because contradiction arrives in two shapes:
+
+      - Polarity flip: "user like sushi" vs "user dislike sushi". The verb
+        changes, so the *object* is what still matches.
+      - Value replacement: "user work-at Microsoft" vs "user work-at Google".
+        The object changes, so the *verb* is what still matches.
+
+    Matching on the verb alone would miss every polarity flip, which is the
+    case this feature exists for.
+
+    Entities work the same way with different property names: the entity is the
+    subject and each facet name is an anchor, so "[employer: Microsoft]" is
+    reachable from "[employer: Google]".
+    """
+    from typeagent.storage.memory.propindex import PropertyNames
+
+    knowledge_type = getattr(knowledge, "knowledge_type", None)
+
+    if knowledge_type == "action":
+        subject = _usable(getattr(knowledge, "subject_entity_name", None))
+        if not subject:
+            return None, []
+        anchors: list[tuple[str, str]] = []
+        verbs = getattr(knowledge, "verbs", None) or []
+        if verbs:
+            anchors.append((PropertyNames.Verb.value, " ".join(verbs)))
+        obj = _usable(getattr(knowledge, "object_entity_name", None))
+        if obj:
+            anchors.append((PropertyNames.Object.value, obj))
+        return (PropertyNames.Subject.value, subject), anchors
+
+    if knowledge_type == "entity":
+        facets = getattr(knowledge, "facets", None) or []
+        name = _usable(getattr(knowledge, "name", None))
+        if not name or not facets:
+            return None, []
+        return (
+            (PropertyNames.EntityName.value, name),
+            [(PropertyNames.FacetName.value, f.name) for f in facets if f.name],
+        )
+
+    return None, []
+
+
+def _usable(value: Any) -> str | None:
+    """Action fields default to the literal "none" rather than being absent."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text or text.lower() == "none":
+        return None
+    return text
+
+
+async def related_ordinals(conversation: Any, knowledge: Any) -> set[int]:
+    """Semantic refs asserting something about the same subject and relation."""
+    subject_probe, anchor_probes = relation_probes(knowledge)
+    if subject_probe is None or not anchor_probes:
+        return set()
+
+    subject_hits = await lookup_property_ordinals(conversation, *subject_probe)
+    if not subject_hits:
+        return set()
+
+    anchor_hits: set[int] = set()
+    for probe in anchor_probes:
+        anchor_hits |= await lookup_property_ordinals(conversation, *probe)
+
+    return subject_hits & anchor_hits
+
+
+async def find_candidates(
+    conversation: Any,
+    new_ordinals: list[int],
+    *,
+    hidden_ordinals: set[int] | None = None,
+    limit: int = CANDIDATE_LIMIT,
+) -> list[SearchItem]:
+    """Find what the memories just written might contradict.
+
+    Driven by the knowledge the write already produced, rather than by
+    recompiling the raw text into a natural-language query. That avoids an LLM
+    round trip, and it asks a better question: "what else is asserted about
+    this subject and this relation" instead of "what is topically similar".
+
+    The caller's own semantic refs are excluded -- they match by construction,
+    and a memory must not be retired as a contradiction of itself.
+    """
+    new_refs = await items_for_semrefs(conversation, list(new_ordinals))
+
+    exclude = set(new_ordinals) | (hidden_ordinals or set())
+    found: set[int] = set()
+    for item in new_refs:
+        if not is_propositional(item):
+            continue
+        found |= await related_ordinals(conversation, item.raw.knowledge)
+
+    ordinals = sorted(found - exclude)
+    if not ordinals:
+        return []
+
+    candidates = await items_for_semrefs(conversation, ordinals[:limit])
+    return [item for item in candidates if is_propositional(item)]
 
 
 def is_propositional(item: SearchItem) -> bool:
@@ -67,30 +183,6 @@ def is_propositional(item: SearchItem) -> bool:
         knowledge = getattr(item.raw, "knowledge", None)
         return bool(getattr(knowledge, "facets", None))
     return False
-
-
-def select_candidates(
-    results: list[SearchItem],
-    protect_semrefs_from: int | None,
-) -> list[SearchItem]:
-    """Narrow search results to what may legitimately be retired.
-
-    Two exclusions. Anything that is not a proposition cannot be contradicted
-    (see is_propositional). And the semantic refs at or above
-    `protect_semrefs_from` are where the caller's own write starts -- those
-    match the query by construction, and retiring them would make the new
-    memory contradict itself.
-    """
-    candidates: list[SearchItem] = []
-    for item in results:
-        if not is_propositional(item):
-            continue
-        if protect_semrefs_from is not None:
-            ordinal = getattr(item.raw, "semantic_ref_ordinal", None)
-            if ordinal is not None and ordinal >= protect_semrefs_from:
-                continue
-        candidates.append(item)
-    return candidates
 
 
 def build_prompt(new_content: str, candidates: list[SearchItem]) -> str:
@@ -157,10 +249,9 @@ async def detect(
     new_content: str,
     *,
     collection: str,
-    search_structured: Callable[..., Awaitable[list[SearchItem]]],
+    find_candidates: Callable[[], Awaitable[list[SearchItem]]],
     create_llm: Callable[[], Any],
     append: Callable[[list[SupersededRecord]], Awaitable[list[SupersededRecord]]],
-    protect_semrefs_from: int | None = None,
     superseded_by: list[int] | None = None,
 ) -> list[SupersededRecord]:
     """Retire the memories `new_content` contradicts, and report what was retired.
@@ -168,25 +259,20 @@ async def detect(
     Args:
         new_content: The new content being added.
         collection: Collection name, for log messages.
-        search_structured: Finds existing knowledge. The structured path only:
-            the embedding half returns messages exclusively, and messages are
-            discarded here, so running it would be a wasted round trip.
+        find_candidates: Produces the propositions that might be contradicted.
         create_llm: Builds the LLM used to make the judgment.
         append: Appends to the supersession ledger, returning what it accepted.
-        protect_semrefs_from: Semantic-ref ordinal marking the start of the
-            knowledge extracted by the caller's own write.
         superseded_by: Ordinals of the knowledge that replaced them, recorded
             on each ledger entry.
 
     Returns:
         The ledger entries appended, empty when nothing was retired.
     """
-    # This lookup is itself an LLM round trip, so it fails for the same
-    # ordinary reasons the write does. It must not escape: add() has already
-    # committed the new messages by this point, and raising here would report
-    # a failure for a write that actually landed.
+    # Candidate lookup must not escape: add() has already committed the new
+    # messages by this point, and raising here would report a failure for a
+    # write that actually landed.
     try:
-        results = await search_structured(new_content, limit=CANDIDATE_LIMIT)
+        candidates = await find_candidates()
     except Exception:
         logger.warning(
             "Contradiction detection lookup failed for collection %r; "
@@ -196,10 +282,6 @@ async def detect(
         )
         return []
 
-    if not results:
-        return []
-
-    candidates = select_candidates(results, protect_semrefs_from)
     if not candidates:
         return []
 
