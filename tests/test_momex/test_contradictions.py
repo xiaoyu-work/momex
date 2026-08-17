@@ -190,3 +190,60 @@ async def test_llm_failure_is_logged_and_does_not_block_add(
     assert superseded == []
     assert "Contradiction detection failed" in caplog.text
     assert "llm is down" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_lookup_failure_is_logged_and_does_not_block_add(
+    memory, monkeypatch, caplog
+):
+    """The lookup is an LLM round trip too, and it ran outside the guard."""
+
+    async def broken_structured(query_text, limit=10, **kwargs):
+        raise RuntimeError("query translation failed")
+
+    monkeypatch.setattr(memory, "_search_structured", broken_structured)
+    monkeypatch.setattr(memory.config, "create_llm", lambda: _FakeLLM("0"))
+
+    with caplog.at_level(logging.WARNING, logger="momex.memory"):
+        superseded = await memory._detect_and_remove_contradictions(
+            "I don't like sushi"
+        )
+
+    assert superseded == []
+    assert "Contradiction detection lookup failed" in caplog.text
+    assert "query translation failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_add_reports_the_write_even_when_detection_cannot_run(
+    memory, monkeypatch
+):
+    """add() commits before detecting, so detection must never fail the call."""
+
+    class _Result:
+        messages_added = 1
+        semrefs_added = 2
+
+    class _Semrefs:
+        async def size(self):
+            return 0
+
+    class _Conversation:
+        semantic_refs = _Semrefs()
+        storage_provider = _FakeStorageProvider()
+
+        async def add_messages_with_indexing(self, messages):
+            return _Result()
+
+    async def broken_structured(query_text, limit=10, **kwargs):
+        raise RuntimeError("query translation failed")
+
+    memory._conversation = _Conversation()  # type: ignore[assignment]
+    monkeypatch.setattr(memory, "_search_structured", broken_structured)
+
+    result = await memory.add("I don't like sushi")
+
+    assert result.messages_added == 1
+    assert result.entities_extracted == 2
+    assert result.contradictions_removed == 0
+    assert result.superseded is None

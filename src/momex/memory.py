@@ -1406,7 +1406,21 @@ class Memory:
         # Only extracted knowledge can contradict; message hits are discarded
         # below. The embedding half of search() returns nothing but messages,
         # so run the structured path alone and skip that wasted round trip.
-        results = await self._search_structured(new_content, limit=20)
+        #
+        # This lookup is itself an LLM round trip, so it fails for the same
+        # ordinary reasons the write does. It must not escape: add() has
+        # already committed the new messages by this point, and raising here
+        # would report a failure for a write that actually landed.
+        try:
+            results = await self._search_structured(new_content, limit=20)
+        except Exception:
+            logger.warning(
+                "Contradiction detection lookup failed for collection %r; "
+                "the new memory was added without it.",
+                self.collection,
+                exc_info=True,
+            )
+            return []
 
         if not results:
             return []
