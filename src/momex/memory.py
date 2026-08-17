@@ -18,6 +18,7 @@ import re
 from typing import Any, TYPE_CHECKING
 
 from .config import MomexConfig
+from .exceptions import ValidationError
 
 if TYPE_CHECKING:
     from typeagent.knowpro.conversation_base import ConversationBase
@@ -114,16 +115,52 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Characters that must never reach the filesystem as part of a path segment.
+# Both separators are included: a collection segment is always exactly one
+# directory, so "a/b" must not silently become two of them.
+_UNSAFE_PATH_CHARS = re.compile(r'[<>"|?*:\\/]')
+
+
+def _sanitize_collection_part(part: str, collection: str) -> str:
+    """Map one ':'-delimited collection segment to a safe path component.
+
+    Segments come from the caller, and in a multi-tenant deployment that
+    usually means from user input. A segment of "." or ".." would resolve
+    *outside* the storage directory, so those are rejected rather than
+    sanitized: silently rewriting them would let two different tenants land on
+    the same directory.
+    """
+    if not part.strip(". \t\r\n"):
+        raise ValidationError(
+            message=(
+                f"Invalid collection name {collection!r}: segment {part!r} is "
+                "empty or consists only of dots/whitespace."
+            ),
+            field="collection",
+            value=collection,
+            suggestion=("Use non-empty segments separated by ':', e.g. 'user:alice'."),
+        )
+    return _UNSAFE_PATH_CHARS.sub("_", part)
+
+
+def _collection_to_path(collection: str) -> Path:
+    """Convert a collection name to a relative path, one segment per ':'.
+
+    Converts "user:xiaoyuzhang" to Path("user/xiaoyuzhang").
+    """
+    parts = [
+        _sanitize_collection_part(part, collection) for part in collection.split(":")
+    ]
+    return Path(*parts)
+
+
 def _collection_to_db_path(collection: str, base_path: str, db_name: str) -> Path:
     """Convert collection name to database path.
 
     Converts "momex:engineering:xiaoyuzhang" to
     Path("base_path/momex/engineering/xiaoyuzhang/db_name")
     """
-    parts = collection.split(":")
-    # Sanitize each part for invalid characters (Windows forbidden chars)
-    sanitized = [re.sub(r'[<>"|?*:\\]', "_", part) for part in parts]
-    return Path(base_path) / Path(*sanitized) / db_name
+    return Path(base_path) / _collection_to_path(collection) / db_name
 
 
 def _collection_to_schema(collection: str) -> str:

@@ -3,22 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
 import shutil
 from typing import Any
 
 from .config import MomexConfig
 from .exceptions import CollectionNotFoundError, StorageError, ValidationError
-
-
-def _collection_to_path(collection: str) -> Path:
-    """Convert collection name to path.
-
-    Converts "user:xiaoyuzhang" to Path("user/xiaoyuzhang") for cross-platform compatibility.
-    """
-    parts = collection.split(":")
-    sanitized = [re.sub(r'[<>"|?*:\\]', "_", part) for part in parts]
-    return Path(*sanitized)
+from .memory import _collection_to_path, _collection_to_schema
 
 
 def _path_to_collection(path: Path) -> str:
@@ -258,8 +248,6 @@ class MemoryManager:
         import asyncpg  # type: ignore[import-not-found]
 
         from typeagent.storage.postgres.schema import quote_ident
-
-        from .memory import _collection_to_schema
 
         schema = _collection_to_schema(collection)
 
