@@ -903,12 +903,16 @@ class Memory:
         Returns:
             List of SearchItem with type, text, score, and raw TypeAgent object,
             ordered by fusion_score.
+
+        Neither path is allowed to take the other down: if one fails it is
+        logged and contributes nothing, and the results of the other are
+        returned on their own. Both failing yields an empty list.
         """
         await self._ensure_initialized()
 
         # Run structured search and embedding search in parallel
         structured_items, embedding_items = await asyncio.gather(
-            self._search_structured(
+            self._search_structured_guarded(
                 query_text,
                 limit=limit,
                 include_expired=include_expired,
@@ -920,6 +924,38 @@ class Memory:
         )
 
         return self._fuse_results(structured_items, embedding_items, limit=limit)
+
+    async def _search_structured_guarded(
+        self,
+        query_text: str,
+        limit: int = 10,
+        *,
+        include_expired: bool = False,
+        include_superseded: bool = False,
+    ) -> list[SearchItem]:
+        """Structured search for the hybrid path. Degrades to empty on failure.
+
+        The structured path depends on an LLM to translate the query, so it
+        fails for ordinary operational reasons -- rate limits, timeouts, a
+        transient 5xx. Left unguarded it took the whole of search() with it,
+        including the embedding results that had already come back, which is
+        the opposite of what search_by_embedding() documents itself as.
+        """
+        try:
+            return await self._search_structured(
+                query_text,
+                limit=limit,
+                include_expired=include_expired,
+                include_superseded=include_superseded,
+            )
+        except Exception:
+            logger.warning(
+                "Structured search failed for collection %r; "
+                "returning embedding results only.",
+                self.collection,
+                exc_info=True,
+            )
+            return []
 
     @staticmethod
     def _fuse_results(
