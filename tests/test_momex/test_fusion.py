@@ -5,8 +5,8 @@ produces cosine similarities in [0, 1]. Merging them by raw score let one scale
 dominate the other, so results are fused by rank instead.
 """
 
-from momex.memory import Memory, RRF_K
 from momex.results import SearchItem
+from momex.search import fuse_results, RRF_K
 
 
 def _item(text: str, score: float, type_: str = "topic") -> SearchItem:
@@ -23,7 +23,7 @@ class TestFuseResults:
         structured = [_item("entity a", 100.0), _item("entity b", 90.0)]
         embedding = [_item("message c", 0.91, "message")]
 
-        fused = Memory._fuse_results(structured, embedding, limit=10)
+        fused = fuse_results(structured, embedding, limit=10)
 
         # "message c" is rank 0 of its own list, so it ties with "entity a"
         # and beats "entity b" despite a raw score of 0.91 vs 90.0.
@@ -35,7 +35,7 @@ class TestFuseResults:
         structured = [_item("only structured", 100.0), _item("in both", 10.0)]
         embedding = [_item("only embedding", 0.9), _item("in both", 0.8)]
 
-        fused = Memory._fuse_results(structured, embedding, limit=10)
+        fused = fuse_results(structured, embedding, limit=10)
 
         assert fused[0].text == "in both"
         assert fused[0].fusion_score == _rrf(1, 1)
@@ -44,7 +44,7 @@ class TestFuseResults:
         structured = [_item("shared", 42.0, "entity")]
         embedding = [_item("shared", 0.7, "message")]
 
-        fused = Memory._fuse_results(structured, embedding, limit=10)
+        fused = fuse_results(structured, embedding, limit=10)
 
         assert len(fused) == 1
         # The structured item is kept, so .raw/.type stay the richer ones.
@@ -54,7 +54,7 @@ class TestFuseResults:
     def test_duplicate_within_one_list_counted_once(self):
         structured = [_item("dup", 5.0), _item("dup", 4.0), _item("other", 3.0)]
 
-        fused = Memory._fuse_results(structured, limit=10)
+        fused = fuse_results(structured, limit=10)
 
         assert [i.text for i in fused] == ["dup", "other"]
         assert fused[0].fusion_score == _rrf(0)
@@ -62,7 +62,7 @@ class TestFuseResults:
     def test_fusion_scores_are_assigned(self):
         structured = [_item("a", 9.0), _item("b", 8.0)]
 
-        fused = Memory._fuse_results(structured, limit=10)
+        fused = fuse_results(structured, limit=10)
 
         first, second = fused[0].fusion_score, fused[1].fusion_score
         assert first == _rrf(0)
@@ -73,9 +73,9 @@ class TestFuseResults:
         structured = [_item(f"s{i}", 10.0 - i) for i in range(5)]
         embedding = [_item(f"e{i}", 0.9 - i / 10) for i in range(5)]
 
-        fused = Memory._fuse_results(structured, embedding, limit=3)
+        fused = fuse_results(structured, embedding, limit=3)
 
         assert len(fused) == 3
 
     def test_empty_lists(self):
-        assert Memory._fuse_results([], [], limit=5) == []
+        assert fuse_results([], [], limit=5) == []

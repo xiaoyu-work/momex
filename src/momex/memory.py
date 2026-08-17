@@ -16,12 +16,8 @@ from .config import MomexConfig
 from .ledger import SupersessionLedger
 from .paths import collection_to_db_path, collection_to_schema, utc_now
 from .results import AddResult, SearchItem, SupersededRecord
-from .timewindow import (
-    extract_time_window,
-    is_outside_window,
-    validate_iso_date,
-    window_tags,
-)
+from .search import fuse_results, search_by_embedding, search_structured
+from .timewindow import validate_iso_date, window_tags
 
 if TYPE_CHECKING:
     from typeagent.knowpro.conversation_base import ConversationBase
@@ -32,10 +28,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-# Reciprocal rank fusion constant, from the original RRF paper. Damps the
-# influence of the top ranks so one list cannot dominate the merged order.
-RRF_K = 60
 
 
 class Memory:
@@ -144,34 +136,6 @@ class Memory:
     async def _set_conversation_metadata(self, **kwds: str | list[str] | None) -> None:
         storage = self._conversation_required().storage_provider
         await storage.set_conversation_metadata(**kwds)
-
-    def _filter_search_results(
-        self,
-        results,
-        hidden_ordinals: set[int],
-    ):
-        """Drop superseded knowledge from raw search results.
-
-        The underlying records still exist; the ledger decides what is visible.
-        """
-        if not hidden_ordinals:
-            return results
-        filtered = []
-        for search_result in results:
-            knowledge_matches = {}
-            for ktype, kmatches in search_result.knowledge_matches.items():
-                kept = [
-                    match
-                    for match in kmatches.semantic_ref_matches
-                    if match.semantic_ref_ordinal not in hidden_ordinals
-                ]
-                if kept:
-                    kmatches.semantic_ref_matches = kept
-                    knowledge_matches[ktype] = kmatches
-            search_result.knowledge_matches = knowledge_matches
-            if search_result.knowledge_matches or search_result.message_matches:
-                filtered.append(search_result)
-        return filtered
 
     def _create_sqlite_provider(
         self,
@@ -407,30 +371,9 @@ class Memory:
                 collections=[self.collection],
             )
 
-    async def _get_source_messages(self, sem_refs) -> dict[int, Any]:
-        """Batch-fetch the source message of each semantic ref, keyed by ordinal."""
-        conversation = self._conversation_required()
-        ordinals = sorted(
-            {
-                sem_ref.range.start.message_ordinal
-                for sem_ref in sem_refs
-                if getattr(sem_ref, "range", None)
-            }
-        )
-        if not ordinals:
-            return {}
-
-        try:
-            msgs = await conversation.messages.get_multiple(ordinals)
-            return dict(zip(ordinals, msgs))
-        except (IndexError, KeyError):
-            msg_map: dict[int, Any] = {}
-            for ordinal in ordinals:
-                try:
-                    msg_map[ordinal] = await conversation.messages.get_item(ordinal)
-                except (IndexError, KeyError):
-                    continue
-            return msg_map
+    # =========================================================================
+    # Search
+    # =========================================================================
 
     async def search(
         self,
@@ -476,7 +419,25 @@ class Memory:
             ),
         )
 
-        return self._fuse_results(structured_items, embedding_items, limit=limit)
+        return fuse_results(structured_items, embedding_items, limit=limit)
+
+    async def _search_structured(
+        self,
+        query_text: str,
+        limit: int = 10,
+        *,
+        include_expired: bool = False,
+        include_superseded: bool = False,
+    ) -> list[SearchItem]:
+        """Structured RAG search using LLM query translation + term matching."""
+        hidden = set() if include_superseded else await self._ledger.hidden_ordinals()
+        return await search_structured(
+            self._conversation_required(),
+            query_text,
+            limit=limit,
+            hidden_ordinals=hidden,
+            include_expired=include_expired,
+        )
 
     async def _search_structured_guarded(
         self,
@@ -509,235 +470,6 @@ class Memory:
                 exc_info=True,
             )
             return []
-
-    @staticmethod
-    def _fuse_results(
-        *result_lists: list[SearchItem],
-        limit: int,
-    ) -> list[SearchItem]:
-        """Merge ranked result lists using reciprocal rank fusion.
-
-        Structured search returns term-match weights, which are unbounded and
-        routinely exceed 1, while embedding search returns cosine similarities
-        in [0, 1]. Sorting the two together by raw score is meaningless, so they
-        are combined by rank instead of by magnitude.
-        """
-        best: dict[str, SearchItem] = {}
-        fused_scores: dict[str, float] = {}
-
-        for items in result_lists:
-            seen: set[str] = set()
-            for rank, item in enumerate(items):
-                # Same text from two indexes is one memory, and should be
-                # rewarded for appearing in both -- but only once per list.
-                if item.text in seen:
-                    continue
-                seen.add(item.text)
-                fused_scores[item.text] = fused_scores.get(item.text, 0.0) + 1.0 / (
-                    RRF_K + rank + 1
-                )
-                best.setdefault(item.text, item)
-
-        for text, item in best.items():
-            item.fusion_score = fused_scores[text]
-
-        ordered = sorted(
-            best.values(),
-            key=lambda item: (item.fusion_score or 0.0, item.score),
-            reverse=True,
-        )
-        return ordered[:limit]
-
-    async def _search_structured(
-        self,
-        query_text: str,
-        limit: int = 10,
-        *,
-        include_expired: bool = False,
-        include_superseded: bool = False,
-    ) -> list[SearchItem]:
-        """Structured RAG search using LLM query translation + term matching."""
-        conversation = self._conversation_required()
-
-        import typechat
-
-        from typeagent.aitools import utils
-        from typeagent.knowpro import (
-            convknowledge,
-        )
-        from typeagent.knowpro import (
-            search_query_schema,
-            searchlang,
-        )
-        from typeagent.knowpro import knowledge_schema as kplib
-        from typeagent.knowpro.interfaces import Topic
-
-        # Initialize query translator if needed
-        if conversation._query_translator is None:
-            model = convknowledge.create_typechat_model()
-            conversation._query_translator = utils.create_translator(
-                model, search_query_schema.SearchQuery
-            )
-
-        # Use TypeAgent's language search
-        options = searchlang.LanguageSearchOptions(
-            compile_options=searchlang.LanguageQueryCompileOptions(
-                exact_scope=False,
-                verb_scope=True,
-                term_filter=None,
-                apply_scope=False,
-            ),
-            exact_match=False,
-            max_message_matches=limit,
-        )
-
-        result = await searchlang.search_conversation_with_language(
-            conversation,
-            conversation._query_translator,
-            query_text,
-            options,
-        )
-
-        if isinstance(result, typechat.Failure):
-            return []
-
-        # Wrap TypeAgent results into SearchItem
-        items: list[SearchItem] = []
-
-        search_results = result.value
-        if not include_superseded:
-            hidden = await self._ledger.hidden_ordinals()
-            if hidden:
-                search_results = self._filter_search_results(search_results, hidden)
-
-        # Collect all ordinals first for batch fetching
-        semref_requests: list[tuple[int, float]] = []  # (ordinal, score)
-        msg_requests: list[tuple[int, float]] = []  # (ordinal, score)
-
-        for search_result in search_results:
-            for _, matches in search_result.knowledge_matches.items():
-                for scored in matches.semantic_ref_matches[:limit]:
-                    semref_requests.append((scored.semantic_ref_ordinal, scored.score))
-            for msg_match in search_result.message_matches[:limit]:
-                msg_requests.append((msg_match.message_ordinal, msg_match.score))
-
-        # Batch fetch SemanticRefs
-        if semref_requests:
-            ordinals = [o for o, _ in semref_requests]
-            try:
-                sem_refs = await conversation.semantic_refs.get_multiple(ordinals)
-                sem_ref_map = dict(zip(ordinals, sem_refs))
-            except (IndexError, KeyError):
-                sem_ref_map = {}
-                for o in ordinals:
-                    try:
-                        sem_ref_map[o] = await conversation.semantic_refs.get_item(o)
-                    except (IndexError, KeyError):
-                        pass
-
-            # Knowledge inherits the timestamp and validity window of the
-            # message it was extracted from, so fetch those up front.
-            src_msg_map = await self._get_source_messages(sem_ref_map.values())
-
-            for ordinal, score in semref_requests:
-                sem_ref = sem_ref_map.get(ordinal)
-                if sem_ref is None:
-                    continue
-
-                knowledge = sem_ref.knowledge
-                k_type = knowledge.knowledge_type
-
-                src_timestamp: str | None = None
-                valid_from: str | None = None
-                valid_to: str | None = None
-                if getattr(sem_ref, "range", None):
-                    src_msg = src_msg_map.get(sem_ref.range.start.message_ordinal)
-                    if src_msg is not None:
-                        src_timestamp = getattr(src_msg, "timestamp", None)
-                        valid_from, valid_to = extract_time_window(src_msg)
-
-                if not include_expired and is_outside_window(valid_from, valid_to):
-                    continue
-
-                if isinstance(knowledge, kplib.ConcreteEntity):
-                    text = knowledge.name
-                    if knowledge.type:
-                        text += f" (type: {', '.join(knowledge.type)})"
-                    if knowledge.facets:
-                        facets = [
-                            f"{f.name}: {f.value}" for f in knowledge.facets if f.value
-                        ]
-                        if facets:
-                            text += f" [{'; '.join(facets)}]"
-                elif isinstance(knowledge, kplib.Action):
-                    parts = []
-                    if knowledge.subject_entity_name:
-                        parts.append(knowledge.subject_entity_name)
-                    parts.extend(knowledge.verbs)
-                    if knowledge.object_entity_name:
-                        parts.append(knowledge.object_entity_name)
-                    text = " ".join(parts)
-                elif isinstance(knowledge, Topic):
-                    text = knowledge.text
-                else:
-                    text = str(knowledge)
-
-                items.append(
-                    SearchItem(
-                        type=k_type,
-                        text=text,
-                        score=score,
-                        raw=sem_ref,
-                        timestamp=src_timestamp,
-                        valid_from=valid_from,
-                        valid_to=valid_to,
-                    )
-                )
-
-        # Batch fetch Messages
-        if msg_requests:
-            msg_ordinals = [o for o, _ in msg_requests]
-            try:
-                msgs = await conversation.messages.get_multiple(msg_ordinals)
-                msg_map = dict(zip(msg_ordinals, msgs))
-            except (IndexError, KeyError):
-                msg_map = {}
-                for o in msg_ordinals:
-                    try:
-                        msg_map[o] = await conversation.messages.get_item(o)
-                    except (IndexError, KeyError):
-                        pass
-
-            for ordinal, score in msg_requests:
-                msg = msg_map.get(ordinal)
-                if msg is None:
-                    continue
-
-                vf, vt = extract_time_window(msg)
-                if not include_expired and is_outside_window(vf, vt):
-                    continue
-
-                text = (
-                    " ".join(msg.text_chunks)
-                    if hasattr(msg, "text_chunks")
-                    else str(msg)
-                )
-
-                items.append(
-                    SearchItem(
-                        type="message",
-                        text=text,
-                        score=score,
-                        raw=msg,
-                        timestamp=getattr(msg, "timestamp", None),
-                        valid_from=vf,
-                        valid_to=vt,
-                    )
-                )
-
-        # Sort by score and limit
-        items.sort(key=lambda x: x.score, reverse=True)
-        return items[:limit]
 
     async def _search_embedding(
         self,
@@ -783,65 +515,14 @@ class Memory:
             List of SearchItem with type="message".
         """
         await self._ensure_initialized()
-        conversation = self._conversation_required()
-
-        # Get the message text index from secondary indexes
-        if (
-            conversation.secondary_indexes is None
-            or conversation.secondary_indexes.message_index is None
-        ):
-            return []
-
-        msg_index = conversation.secondary_indexes.message_index
-
-        try:
-            scored_ordinals = await msg_index.lookup_messages(
-                query_text,
-                max_matches=limit,
-                threshold_score=min_score,
-            )
-        except Exception:
-            logger.warning(
-                "Message index lookup failed for collection %r.",
-                self.collection,
-                exc_info=True,
-            )
-            return []
-
-        if not scored_ordinals:
-            return []
-
-        # Fetch messages and build SearchItems
-        items: list[SearchItem] = []
-        for scored in scored_ordinals:
-            try:
-                msg = await conversation.messages.get_item(scored.message_ordinal)
-
-                vf, vt = extract_time_window(msg)
-                if not include_expired and is_outside_window(vf, vt):
-                    continue
-
-                text = (
-                    " ".join(msg.text_chunks)
-                    if hasattr(msg, "text_chunks")
-                    else str(msg)
-                )
-                items.append(
-                    SearchItem(
-                        type="message",
-                        text=text,
-                        score=scored.score,
-                        raw=msg,
-                        timestamp=getattr(msg, "timestamp", None),
-                        valid_from=vf,
-                        valid_to=vt,
-                    )
-                )
-            except (IndexError, KeyError):
-                continue
-
-        items.sort(key=lambda x: x.score, reverse=True)
-        return items[:limit]
+        return await search_by_embedding(
+            self._conversation_required(),
+            self.collection,
+            query_text,
+            limit=limit,
+            min_score=min_score,
+            include_expired=include_expired,
+        )
 
     async def delete(
         self,
