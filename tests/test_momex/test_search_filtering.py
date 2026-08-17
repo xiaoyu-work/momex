@@ -217,7 +217,7 @@ async def test_expired_messages_are_filtered_out(monkeypatch):
 @pytest.mark.asyncio
 async def test_superseded_knowledge_is_hidden_from_search(monkeypatch):
     """The ledger, not deletion, is what removes a memory from the current view."""
-    from momex.memory import SupersededRecord
+    from momex.results import SupersededRecord
 
     messages = [_FakeMessage("I like sushi"), _FakeMessage("I don't like sushi")]
     semantic_refs = [
@@ -254,7 +254,7 @@ async def test_superseded_knowledge_is_hidden_from_search(monkeypatch):
 @pytest.mark.asyncio
 async def test_include_superseded_returns_the_full_history(monkeypatch):
     """Nothing was destroyed, so the old fact is still retrievable on request."""
-    from momex.memory import SupersededRecord
+    from momex.results import SupersededRecord
 
     messages = [_FakeMessage("I like sushi"), _FakeMessage("I don't like sushi")]
     semantic_refs = [

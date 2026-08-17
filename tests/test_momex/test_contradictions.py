@@ -13,7 +13,7 @@ import logging
 import pytest
 
 from momex import LLMConfig, Memory, MomexConfig, StorageConfig
-from momex.memory import SearchItem
+from momex.results import SearchItem
 
 
 class _FakeSemanticRef:
@@ -158,7 +158,7 @@ async def test_no_contradiction_removes_nothing(memory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_already_superseded_ids_are_not_recounted(memory, monkeypatch):
-    from momex.memory import SupersededRecord
+    from momex.results import SupersededRecord
 
     llm = _FakeLLM("0")
     _wire(memory, monkeypatch, llm, [_knowledge("likes sushi", 1)])

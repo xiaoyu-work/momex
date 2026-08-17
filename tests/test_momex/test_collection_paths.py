@@ -19,7 +19,7 @@ from momex import (
     StorageConfig,
     ValidationError,
 )
-from momex.memory import _collection_to_db_path, _collection_to_path
+from momex.paths import collection_to_db_path, collection_to_path
 
 TRAVERSING = [
     "..",
@@ -44,31 +44,31 @@ class TestCollectionToPath:
     @pytest.mark.parametrize("collection", TRAVERSING)
     def test_traversing_names_are_rejected(self, collection):
         with pytest.raises(ValidationError):
-            _collection_to_path(collection)
+            collection_to_path(collection)
 
     def test_separators_stay_within_one_segment(self):
         """A ':' segment is exactly one directory, whatever it contains."""
-        assert _collection_to_path("user:a/b") == Path("user", "a_b")
-        assert _collection_to_path("user:a\\b") == Path("user", "a_b")
+        assert collection_to_path("user:a/b") == Path("user", "a_b")
+        assert collection_to_path("user:a\\b") == Path("user", "a_b")
 
     def test_embedded_traversal_is_neutralized(self):
         """Separators are replaced, so "../../pwned" becomes one literal name."""
-        assert _collection_to_path("user:../../pwned") == Path("user", ".._.._pwned")
+        assert collection_to_path("user:../../pwned") == Path("user", ".._.._pwned")
 
     def test_ordinary_names_are_unchanged(self):
-        assert _collection_to_path("user:xiaoyuzhang") == Path("user", "xiaoyuzhang")
-        assert _collection_to_path("momex:engineering:x") == Path(
+        assert collection_to_path("user:xiaoyuzhang") == Path("user", "xiaoyuzhang")
+        assert collection_to_path("momex:engineering:x") == Path(
             "momex", "engineering", "x"
         )
 
     def test_leading_dots_are_still_allowed(self):
         """Only dot-*only* segments are bogus; ".hidden" is a fine name."""
-        assert _collection_to_path("user:...hidden") == Path("user", "...hidden")
+        assert collection_to_path("user:...hidden") == Path("user", "...hidden")
 
     def test_db_path_stays_under_the_storage_root(self):
         root = Path("/srv/momex_data").resolve()
         for collection in ("user:a/b", "user:../../pwned"):
-            path = _collection_to_db_path(collection, str(root), "memory.db")
+            path = collection_to_db_path(collection, str(root), "memory.db")
             assert root in path.resolve().parents
 
 

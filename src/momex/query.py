@@ -8,7 +8,8 @@ from typing import Any
 
 from .config import MomexConfig
 from .manager import MemoryManager
-from .memory import Memory, SearchItem
+from .memory import Memory
+from .results import SearchItem
 
 logger = logging.getLogger(__name__)
 

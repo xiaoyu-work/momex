@@ -12,7 +12,8 @@ import asyncio
 import pytest
 
 from momex import LLMConfig, Memory, MomexConfig, StorageConfig
-from momex.memory import SupersededRecord
+from momex.results import SupersededRecord
+from momex.timewindow import is_not_yet_active, is_outside_window
 
 
 class _FakeIndexSettings:
@@ -152,12 +153,12 @@ async def test_own_semrefs_are_protected_from_self_contradiction(monkeypatch):
 
 
 def test_not_yet_active_window_is_outside():
-    assert Memory._is_not_yet_active("2999-01-01") is True
-    assert Memory._is_not_yet_active("2000-01-01") is False
-    assert Memory._is_not_yet_active(None) is False
-    assert Memory._is_outside_window("2999-01-01", None) is True
-    assert Memory._is_outside_window(None, "2000-01-01") is True
-    assert Memory._is_outside_window("2000-01-01", "2999-01-01") is False
+    assert is_not_yet_active("2999-01-01") is True
+    assert is_not_yet_active("2000-01-01") is False
+    assert is_not_yet_active(None) is False
+    assert is_outside_window("2999-01-01", None) is True
+    assert is_outside_window(None, "2000-01-01") is True
+    assert is_outside_window("2000-01-01", "2999-01-01") is False
 
 
 @pytest.mark.parametrize("bad", ["2026-4-1", "04/01/2026", "next tuesday", ""])

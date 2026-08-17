@@ -70,8 +70,9 @@ from .exceptions import (
     ValidationError,
 )
 from .manager import MemoryManager
-from .memory import AddResult, Memory, SearchItem, SupersededRecord
+from .memory import Memory
 from .query import search, stats
+from .results import AddResult, SearchItem, SupersededRecord
 
 __all__ = [
     # Core classes

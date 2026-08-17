@@ -10,7 +10,7 @@ appended to the ledger with reason="delete" and hidden from search.
 import pytest
 
 from momex import LLMConfig, Memory, MomexConfig, StorageConfig
-from momex.memory import SearchItem
+from momex.results import SearchItem
 
 
 class _FakeSemanticRef:

@@ -87,7 +87,7 @@ async def test_reinitializes_after_close(config):
 @pytest.mark.asyncio
 async def test_close_drops_the_metadata_caches(config):
     """Both caches are backed by metadata that close() releases."""
-    from momex.memory import SupersededRecord
+    from momex.results import SupersededRecord
 
     memory = Memory(collection="test:caches", config=config)
     await memory._ensure_initialized()
@@ -108,7 +108,7 @@ async def test_close_drops_the_metadata_caches(config):
 @pytest.mark.asyncio
 async def test_ledger_is_re_read_from_storage_after_close(config):
     """A stale ledger cache would keep hiding refs the collection no longer has."""
-    from momex.memory import SupersededRecord
+    from momex.results import SupersededRecord
 
     memory = Memory(collection="test:stale-ledger", config=config)
     await memory._ensure_initialized()

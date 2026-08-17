@@ -8,17 +8,19 @@ search for robust hybrid retrieval.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from datetime import date, datetime, timezone
-import hashlib
 import json
 import logging
-from pathlib import Path
-import re
 from typing import Any, TYPE_CHECKING
 
 from .config import MomexConfig
-from .exceptions import ValidationError
+from .paths import collection_to_db_path, collection_to_schema, utc_now
+from .results import AddResult, SearchItem, SupersededRecord
+from .timewindow import (
+    extract_time_window,
+    is_outside_window,
+    validate_iso_date,
+    window_tags,
+)
 
 if TYPE_CHECKING:
     from typeagent.knowpro.conversation_base import ConversationBase
@@ -44,138 +46,6 @@ _MAX_TOMBSTONE_RANGE = 10_000_000
 # Reciprocal rank fusion constant, from the original RRF paper. Damps the
 # influence of the top ranks so one list cannot dominate the merged order.
 RRF_K = 60
-
-
-@dataclass
-class SupersededRecord:
-    """One entry in the append-only supersession ledger.
-
-    A memory is never destroyed. It is marked as superseded by whatever
-    replaced it, hidden from search, and can be restored -- so a bad
-    contradiction judgment is recoverable and the change itself is preserved.
-    """
-
-    ordinal: int
-    """Semantic-ref ordinal of the memory that was retired."""
-
-    superseded_by: list[int]
-    """Ordinals of the memories that replaced it. Empty for explicit delete()."""
-
-    at: str
-    """ISO-8601 UTC timestamp of the supersession."""
-
-    reason: str
-    """One of "contradiction", "delete", or "legacy"."""
-
-    text: str | None = None
-    """Rendered text at the time of supersession, for auditing."""
-
-    query: str | None = None
-    """The content or query that triggered it."""
-
-    restored_at: str | None = None
-    """Set when restore() reversed this record. Non-None means inactive."""
-
-    @property
-    def active(self) -> bool:
-        return self.restored_at is None
-
-
-@dataclass
-class AddResult:
-    """Result of adding memories."""
-
-    messages_added: int
-    entities_extracted: int
-    contradictions_removed: int = 0
-    collections: list[str] | None = None
-    superseded: list[SupersededRecord] | None = None
-    """What add() retired, not just how many. None when nothing was retired."""
-
-
-@dataclass
-class SearchItem:
-    """A single search result item."""
-
-    type: str  # Uses TypeAgent's native knowledge_type: "entity", "action", "topic", "message"
-    text: str
-    score: float  # Native score of the index that produced this item
-    raw: Any  # Original TypeAgent object (SemanticRef or Message)
-    timestamp: str | None = None  # When the memory was recorded (ISO format)
-    valid_from: str | None = None
-    valid_to: str | None = None
-    # Rank-fusion score used to order hybrid search() results. None when the
-    # item comes from a single-path search such as search_by_embedding().
-    fusion_score: float | None = None
-
-
-def _utc_now() -> str:
-    """Current UTC time as an ISO-8601 string."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-# Characters that must never reach the filesystem as part of a path segment.
-# Both separators are included: a collection segment is always exactly one
-# directory, so "a/b" must not silently become two of them.
-_UNSAFE_PATH_CHARS = re.compile(r'[<>"|?*:\\/]')
-
-
-def _sanitize_collection_part(part: str, collection: str) -> str:
-    """Map one ':'-delimited collection segment to a safe path component.
-
-    Segments come from the caller, and in a multi-tenant deployment that
-    usually means from user input. A segment of "." or ".." would resolve
-    *outside* the storage directory, so those are rejected rather than
-    sanitized: silently rewriting them would let two different tenants land on
-    the same directory.
-    """
-    if not part.strip(". \t\r\n"):
-        raise ValidationError(
-            message=(
-                f"Invalid collection name {collection!r}: segment {part!r} is "
-                "empty or consists only of dots/whitespace."
-            ),
-            field="collection",
-            value=collection,
-            suggestion=("Use non-empty segments separated by ':', e.g. 'user:alice'."),
-        )
-    return _UNSAFE_PATH_CHARS.sub("_", part)
-
-
-def _collection_to_path(collection: str) -> Path:
-    """Convert a collection name to a relative path, one segment per ':'.
-
-    Converts "user:xiaoyuzhang" to Path("user/xiaoyuzhang").
-    """
-    parts = [
-        _sanitize_collection_part(part, collection) for part in collection.split(":")
-    ]
-    return Path(*parts)
-
-
-def _collection_to_db_path(collection: str, base_path: str, db_name: str) -> Path:
-    """Convert collection name to database path.
-
-    Converts "momex:engineering:xiaoyuzhang" to
-    Path("base_path/momex/engineering/xiaoyuzhang/db_name")
-    """
-    return Path(base_path) / _collection_to_path(collection) / db_name
-
-
-def _collection_to_schema(collection: str) -> str:
-    """Convert collection name to a PostgreSQL-safe schema name."""
-    base = re.sub(r"[^a-zA-Z0-9_]", "_", collection).lower()
-    if not base:
-        base = "momex"
-    if base[0].isdigit():
-        base = f"c_{base}"
-
-    max_len = 63
-    if len(base) <= max_len:
-        return base
-
-    digest = hashlib.md5(collection.encode("utf-8")).hexdigest()[:8]
-    return f"{base[:54]}_{digest}"
 
 
 def _encode_deleted_ids(ids: set[int]) -> list[int | list[int]]:
@@ -486,7 +356,7 @@ class Memory:
         else:
             legacy = await self._load_deleted_semref_ids()
             if legacy:
-                now = _utc_now()
+                now = utc_now()
                 records = [
                     SupersededRecord(
                         ordinal=ordinal,
@@ -586,7 +456,7 @@ class Memory:
         from typeagent.storage.sqlite import SqliteStorageProvider
 
         # Create storage path from collection name
-        db_path = _collection_to_db_path(
+        db_path = collection_to_db_path(
             self.collection,
             self.config.storage_path,
             "memory.db",
@@ -621,7 +491,7 @@ class Memory:
         schema = (
             self.config.storage.postgres_schema
             if self.config.storage.postgres_schema
-            else _collection_to_schema(self.collection)
+            else collection_to_schema(self.collection)
         )
 
         storage_provider = await PostgresStorageProvider.create(
@@ -698,8 +568,8 @@ class Memory:
         # Reject unusable dates before anything is written. The window checks
         # compare these lexicographically, so a non-padded value would fail
         # silently rather than loudly.
-        valid_from = self._validate_iso_date(valid_from, "valid_from")
-        valid_to = self._validate_iso_date(valid_to, "valid_to")
+        valid_from = validate_iso_date(valid_from, "valid_from")
+        valid_to = validate_iso_date(valid_to, "valid_to")
 
         # Contradiction handling runs *after* the write (see below): retiring
         # first means a failed insert leaves the old facts hidden and the
@@ -720,11 +590,7 @@ class Memory:
         # Convert to TypeAgent ConversationMessage format
         ta_messages: list[ConversationMessage] = []
         # Store time windows as tags so they survive serialization
-        time_tags: list[str] = []
-        if valid_from:
-            time_tags.append(f"valid_from:{valid_from}")
-        if valid_to:
-            time_tags.append(f"valid_to:{valid_to}")
+        time_tags = window_tags(valid_from, valid_to)
 
         for msg in conversation_messages:
             role = msg.get("role", "user")
@@ -739,7 +605,7 @@ class Memory:
                 text_chunks=[content],
                 metadata=ConversationMessageMeta(speaker=speaker),
                 tags=list(time_tags),
-                timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                timestamp=utc_now(),
             )
             ta_messages.append(ta_message)
 
@@ -813,60 +679,6 @@ class Memory:
                 contradictions_removed=0,
                 collections=[self.collection],
             )
-
-    @staticmethod
-    def _extract_time_window(msg: Any) -> tuple[str | None, str | None]:
-        """Extract valid_from/valid_to from a message's tags."""
-        tags = getattr(msg, "tags", None) or []
-        valid_from = None
-        valid_to = None
-        for tag in tags:
-            if isinstance(tag, str):
-                if tag.startswith("valid_from:"):
-                    valid_from = tag[len("valid_from:") :]
-                elif tag.startswith("valid_to:"):
-                    valid_to = tag[len("valid_to:") :]
-        return valid_from, valid_to
-
-    @staticmethod
-    def _validate_iso_date(value: str | None, field: str) -> str | None:
-        """Normalize an ISO date, or raise if it cannot be compared safely.
-
-        The window checks compare these values lexicographically against
-        `YYYY-MM-DD`, which is only correct for zero-padded ISO dates. An
-        unpadded string like "2026-4-1" would sort *after* "2026-08-17" and
-        silently never expire, so reject it at write time instead.
-        """
-        if value is None:
-            return None
-        try:
-            parsed = date.fromisoformat(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"{field} must be an ISO date string (YYYY-MM-DD); got {value!r}"
-            ) from exc
-        return parsed.isoformat()
-
-    @staticmethod
-    def _is_expired(valid_to: str | None) -> bool:
-        """Check if a time window has expired (valid_to < today UTC)."""
-        if not valid_to:
-            return False
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        return valid_to < today
-
-    @staticmethod
-    def _is_not_yet_active(valid_from: str | None) -> bool:
-        """Check if a time window has not opened yet (valid_from > today UTC)."""
-        if not valid_from:
-            return False
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        return valid_from > today
-
-    @classmethod
-    def _is_outside_window(cls, valid_from: str | None, valid_to: str | None) -> bool:
-        """True when today falls outside [valid_from, valid_to]."""
-        return cls._is_expired(valid_to) or cls._is_not_yet_active(valid_from)
 
     async def _get_source_messages(self, sem_refs) -> dict[int, Any]:
         """Batch-fetch the source message of each semantic ref, keyed by ordinal."""
@@ -1115,11 +927,9 @@ class Memory:
                     src_msg = src_msg_map.get(sem_ref.range.start.message_ordinal)
                     if src_msg is not None:
                         src_timestamp = getattr(src_msg, "timestamp", None)
-                        valid_from, valid_to = self._extract_time_window(src_msg)
+                        valid_from, valid_to = extract_time_window(src_msg)
 
-                if not include_expired and self._is_outside_window(
-                    valid_from, valid_to
-                ):
+                if not include_expired and is_outside_window(valid_from, valid_to):
                     continue
 
                 if isinstance(knowledge, kplib.ConcreteEntity):
@@ -1176,8 +986,8 @@ class Memory:
                 if msg is None:
                     continue
 
-                vf, vt = self._extract_time_window(msg)
-                if not include_expired and self._is_outside_window(vf, vt):
+                vf, vt = extract_time_window(msg)
+                if not include_expired and is_outside_window(vf, vt):
                     continue
 
                 text = (
@@ -1280,8 +1090,8 @@ class Memory:
             try:
                 msg = await conversation.messages.get_item(scored.message_ordinal)
 
-                vf, vt = self._extract_time_window(msg)
-                if not include_expired and self._is_outside_window(vf, vt):
+                vf, vt = extract_time_window(msg)
+                if not include_expired and is_outside_window(vf, vt):
                     continue
 
                 text = (
@@ -1387,7 +1197,7 @@ class Memory:
         if not new_ids or dry_run:
             return len(new_ids)
 
-        now = _utc_now()
+        now = utc_now()
         await self._append_supersessions(
             [
                 SupersededRecord(
@@ -1519,7 +1329,7 @@ Response:"""
                     texts_by_ordinal.setdefault(ordinal, candidate.text)
 
             if semref_ids:
-                now = _utc_now()
+                now = utc_now()
                 added = await self._append_supersessions(
                     [
                         SupersededRecord(
@@ -1605,7 +1415,7 @@ Response:"""
         async with self._ledger_lock:
             self._supersession_ledger = None
             ledger = await self._load_ledger()
-            now = _utc_now()
+            now = utc_now()
             restored = 0
             for record in ledger:
                 if record.active and record.ordinal in wanted:
@@ -1797,7 +1607,7 @@ Response:"""
         if self.config.is_postgres:
             return self.config.storage.postgres_url
         return str(
-            _collection_to_db_path(
+            collection_to_db_path(
                 self.collection,
                 self.config.storage_path,
                 "memory.db",

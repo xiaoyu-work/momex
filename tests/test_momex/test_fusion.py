@@ -5,7 +5,8 @@ produces cosine similarities in [0, 1]. Merging them by raw score let one scale
 dominate the other, so results are fused by rank instead.
 """
 
-from momex.memory import Memory, RRF_K, SearchItem
+from momex.memory import Memory, RRF_K
+from momex.results import SearchItem
 
 
 def _item(text: str, score: float, type_: str = "topic") -> SearchItem:

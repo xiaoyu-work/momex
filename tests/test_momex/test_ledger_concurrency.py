@@ -18,7 +18,7 @@ import asyncio
 import pytest
 
 from momex import LLMConfig, Memory, MomexConfig, StorageConfig
-from momex.memory import SearchItem, SupersededRecord
+from momex.results import SearchItem, SupersededRecord
 
 
 class _FakeSemanticRef:

@@ -10,7 +10,7 @@ search_by_embedding() documents itself as the fallback for exactly that.
 import pytest
 
 from momex import LLMConfig, Memory, MomexConfig, StorageConfig
-from momex.memory import SearchItem
+from momex.results import SearchItem
 
 
 @pytest.fixture

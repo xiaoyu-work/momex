@@ -8,15 +8,7 @@ from typing import Any
 
 from .config import MomexConfig
 from .exceptions import CollectionNotFoundError, StorageError, ValidationError
-from .memory import _collection_to_path, _collection_to_schema
-
-
-def _path_to_collection(path: Path) -> str:
-    """Convert path back to collection name.
-
-    Converts Path("user/xiaoyuzhang") to "user:xiaoyuzhang".
-    """
-    return ":".join(path.parts)
+from .paths import collection_to_path, collection_to_schema, path_to_collection
 
 
 class MemoryManager:
@@ -85,7 +77,7 @@ class MemoryManager:
             # Get relative path from storage root to the directory containing db
             rel_path = db_file.parent.relative_to(self._storage_path)
             # Convert path to collection name
-            collection_name = _path_to_collection(rel_path)
+            collection_name = path_to_collection(rel_path)
             if collection_name:
                 # Filter by prefix if specified
                 if prefix is None:
@@ -249,7 +241,7 @@ class MemoryManager:
 
         from typeagent.storage.postgres.schema import quote_ident
 
-        schema = _collection_to_schema(collection)
+        schema = collection_to_schema(collection)
 
         conn = await asyncpg.connect(self.config.storage.postgres_url)
         try:
@@ -392,7 +384,7 @@ class MemoryManager:
 
     def _get_collection_dir(self, collection: str) -> Path:
         """Get the directory path for a collection."""
-        return self._storage_path / _collection_to_path(collection)
+        return self._storage_path / collection_to_path(collection)
 
     def _get_db_path(self, collection: str) -> Path:
         """Get the database file path for a collection."""
