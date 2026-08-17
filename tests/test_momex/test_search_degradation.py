@@ -22,7 +22,7 @@ def memory(tmp_path):
     mem = Memory(collection="test:degrade", config=config)
     mem._initialized = True
     mem._conversation = object()  # type: ignore[assignment]
-    mem._supersession_ledger = []
+    mem._ledger._records = []
     return mem
 
 

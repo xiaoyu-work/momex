@@ -58,14 +58,14 @@ def memory(tmp_path, monkeypatch):
     mem = Memory(collection="test:delete", config=config)
     mem._conversation = _FakeConversation()  # type: ignore[assignment]
     mem._initialized = True
-    mem._deleted_semref_ids = set()
-    mem._supersession_ledger = []
+    mem._ledger._legacy_ids = set()
+    mem._ledger._records = []
     return mem
 
 
 def _hidden(memory) -> list[int]:
     """Ordinals currently hidden from search, in ledger order."""
-    return [r.ordinal for r in memory._supersession_ledger if r.active]
+    return [r.ordinal for r in memory._ledger._records if r.active]
 
 
 def _stub_search(memory, items):
@@ -155,7 +155,7 @@ async def test_ledger_entry_records_why_and_what(memory):
 
     await memory.delete("sushi preferences")
 
-    (record,) = memory._supersession_ledger
+    (record,) = memory._ledger._records
     assert record.ordinal == 1
     assert record.reason == "delete"
     assert record.text == "likes sushi"

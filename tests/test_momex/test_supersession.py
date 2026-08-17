@@ -11,9 +11,9 @@ import json
 import pytest
 
 from momex import LLMConfig, Memory, MomexConfig, StorageConfig, SupersededRecord
-from momex.memory import (
-    _decode_ledger,
-    _encode_ledger,
+from momex.ledger import (
+    decode_ledger,
+    encode_ledger,
     SUPERSESSION_LEDGER_VERSION,
     SUPERSESSION_METADATA_KEY,
 )
@@ -34,27 +34,27 @@ class TestSerialization:
             _record(1, superseded_by=[9, 10], text="likes sushi", query="no sushi"),
             _record(4, reason="delete", restored_at="2026-08-18T00:00:00Z"),
         ]
-        decoded = _decode_ledger(json.loads(json.dumps(_encode_ledger(records))))
+        decoded = decode_ledger(json.loads(json.dumps(encode_ledger(records))))
         assert decoded == records
 
     def test_empty_round_trip(self):
-        assert _decode_ledger(json.loads(json.dumps(_encode_ledger([])))) == []
+        assert decode_ledger(json.loads(json.dumps(encode_ledger([])))) == []
 
     def test_payload_is_versioned(self):
-        assert _encode_ledger([])["version"] == SUPERSESSION_LEDGER_VERSION
+        assert encode_ledger([])["version"] == SUPERSESSION_LEDGER_VERSION
 
     def test_unknown_version_is_ignored(self):
         """Better to show a memory that should be hidden than to misread the
         ledger and hide the wrong ones."""
-        assert _decode_ledger({"version": 999, "records": [{"ordinal": 1}]}) == []
+        assert decode_ledger({"version": 999, "records": [{"ordinal": 1}]}) == []
 
     def test_non_dict_yields_empty(self):
-        assert _decode_ledger([1, 2, 3]) == []
-        assert _decode_ledger(None) == []
+        assert decode_ledger([1, 2, 3]) == []
+        assert decode_ledger(None) == []
 
     def test_bad_records_are_skipped_not_fatal(self):
         """One corrupt entry must not take the whole ledger with it."""
-        decoded = _decode_ledger(
+        decoded = decode_ledger(
             {
                 "version": SUPERSESSION_LEDGER_VERSION,
                 "records": [
@@ -68,7 +68,7 @@ class TestSerialization:
         assert [r.ordinal for r in decoded] == [5]
 
     def test_missing_fields_get_safe_defaults(self):
-        (record,) = _decode_ledger(
+        (record,) = decode_ledger(
             {"version": SUPERSESSION_LEDGER_VERSION, "records": [{"ordinal": 3}]}
         )
         assert record.ordinal == 3
@@ -124,10 +124,10 @@ def _make_memory(tmp_path, extra=None) -> Memory:
 @pytest.mark.asyncio
 async def test_ledger_persists_through_metadata(tmp_path):
     memory = _make_memory(tmp_path)
-    await memory._append_supersessions([_record(1, text="likes sushi")])
+    await memory._ledger.append([_record(1, text="likes sushi")])
 
     # Drop the cache and reload from the fake metadata store.
-    memory._supersession_ledger = None
+    memory._ledger._records = None
     (record,) = await memory.history()
 
     assert record.ordinal == 1
@@ -138,36 +138,36 @@ async def test_ledger_persists_through_metadata(tmp_path):
 async def test_append_is_idempotent_for_hidden_ordinals(tmp_path):
     memory = _make_memory(tmp_path)
 
-    assert len(await memory._append_supersessions([_record(1)])) == 1
-    assert await memory._append_supersessions([_record(1)]) == []
-    assert await memory._hidden_ordinals() == {1}
+    assert len(await memory._ledger.append([_record(1)])) == 1
+    assert await memory._ledger.append([_record(1)]) == []
+    assert await memory._ledger.hidden_ordinals() == {1}
 
 
 @pytest.mark.asyncio
 async def test_restore_makes_a_memory_visible_again(tmp_path):
     """The whole point: a bad contradiction judgment is recoverable."""
     memory = _make_memory(tmp_path)
-    await memory._append_supersessions([_record(1), _record(2)])
+    await memory._ledger.append([_record(1), _record(2)])
 
     assert await memory.restore(1) == 1
-    assert await memory._hidden_ordinals() == {2}
+    assert await memory._ledger.hidden_ordinals() == {2}
 
 
 @pytest.mark.asyncio
 async def test_restore_accepts_a_list_and_ignores_unknown_ordinals(tmp_path):
     memory = _make_memory(tmp_path)
-    await memory._append_supersessions([_record(1)])
+    await memory._ledger.append([_record(1)])
 
     assert await memory.restore([1, 42]) == 1
     assert await memory.restore([1]) == 0  # already restored
-    assert await memory._hidden_ordinals() == set()
+    assert await memory._ledger.hidden_ordinals() == set()
 
 
 @pytest.mark.asyncio
 async def test_restored_entries_stay_in_the_ledger(tmp_path):
     """Append-only: restoring adds a timestamp, it does not erase history."""
     memory = _make_memory(tmp_path)
-    await memory._append_supersessions([_record(1)])
+    await memory._ledger.append([_record(1)])
     await memory.restore(1)
 
     assert await memory.history() == []
@@ -179,11 +179,11 @@ async def test_restored_entries_stay_in_the_ledger(tmp_path):
 @pytest.mark.asyncio
 async def test_restored_ordinal_can_be_superseded_again(tmp_path):
     memory = _make_memory(tmp_path)
-    await memory._append_supersessions([_record(1)])
+    await memory._ledger.append([_record(1)])
     await memory.restore(1)
 
-    assert len(await memory._append_supersessions([_record(1)])) == 1
-    assert await memory._hidden_ordinals() == {1}
+    assert len(await memory._ledger.append([_record(1)])) == 1
+    assert await memory._ledger.hidden_ordinals() == {1}
     assert len(await memory.history(include_restored=True)) == 2
 
 
@@ -202,7 +202,7 @@ async def test_legacy_tombstones_are_migrated(tmp_path):
     assert [r.ordinal for r in records] == [1, 4, 5, 6]
     assert all(r.reason == "legacy" for r in records)
     assert all(r.superseded_by == [] for r in records)
-    assert await memory._hidden_ordinals() == {1, 4, 5, 6}
+    assert await memory._ledger.hidden_ordinals() == {1, 4, 5, 6}
 
 
 @pytest.mark.asyncio
@@ -210,7 +210,7 @@ async def test_migrated_tombstones_are_restorable(tmp_path):
     memory = _make_memory(tmp_path, extra={"momex_deleted_semrefs": json.dumps([7])})
 
     assert await memory.restore(7) == 1
-    assert await memory._hidden_ordinals() == set()
+    assert await memory._ledger.hidden_ordinals() == set()
 
 
 @pytest.mark.asyncio
@@ -220,7 +220,7 @@ async def test_ledger_wins_over_legacy_tombstones(tmp_path):
         tmp_path,
         extra={
             "momex_deleted_semrefs": json.dumps([99]),
-            SUPERSESSION_METADATA_KEY: json.dumps(_encode_ledger([_record(1)])),
+            SUPERSESSION_METADATA_KEY: json.dumps(encode_ledger([_record(1)])),
         },
     )
 

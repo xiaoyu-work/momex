@@ -72,11 +72,11 @@ def _make_memory(conversation) -> Memory:
     memory = Memory(collection="test:ordering", config=config)
     memory._conversation = conversation  # type: ignore[assignment]
     memory._initialized = True
-    memory._deleted_semref_ids = set()
-    memory._supersession_ledger = []
+    memory._ledger._legacy_ids = set()
+    memory._ledger._records = []
 
     async def _no_persist_ledger(records):
-        memory._supersession_ledger = records
+        memory._ledger._records = records
 
     memory._store_ledger = _no_persist_ledger  # type: ignore[method-assign]
     return memory

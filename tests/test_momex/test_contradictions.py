@@ -76,19 +76,14 @@ def memory(tmp_path, monkeypatch):
     mem = Memory(collection="test:contradictions", config=config)
     mem._conversation = _FakeConversation()  # type: ignore[assignment]
     mem._initialized = True
-    mem._deleted_semref_ids = set()
-    mem._supersession_ledger = []
-
-    async def _no_persist(_):
-        return None
-
-    monkeypatch.setattr(mem, "_store_deleted_semref_ids", _no_persist)
+    mem._ledger._legacy_ids = set()
+    mem._ledger._records = []
     return mem
 
 
 def _hidden(memory) -> list[int]:
     """Ordinals currently hidden from search, in ledger order."""
-    return [r.ordinal for r in memory._supersession_ledger if r.active]
+    return [r.ordinal for r in memory._ledger._records if r.active]
 
 
 def _knowledge(text, ordinal):
@@ -162,7 +157,7 @@ async def test_already_superseded_ids_are_not_recounted(memory, monkeypatch):
 
     llm = _FakeLLM("0")
     _wire(memory, monkeypatch, llm, [_knowledge("likes sushi", 1)])
-    await memory._store_ledger(
+    await memory._ledger.store(
         [
             SupersededRecord(
                 ordinal=1,

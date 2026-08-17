@@ -86,14 +86,14 @@ async def test_reinitializes_after_close(config):
 
 @pytest.mark.asyncio
 async def test_close_drops_the_metadata_caches(config):
-    """Both caches are backed by metadata that close() releases."""
+    """Both ledger caches are backed by metadata that close() releases."""
     from momex.results import SupersededRecord
 
     memory = Memory(collection="test:caches", config=config)
     await memory._ensure_initialized()
 
-    memory._deleted_semref_ids = {1, 2}
-    memory._supersession_ledger = [
+    memory._ledger._legacy_ids = {1, 2}
+    memory._ledger._records = [
         SupersededRecord(
             ordinal=7, superseded_by=[], at="2026-01-01T00:00:00Z", reason="delete"
         )
@@ -101,8 +101,8 @@ async def test_close_drops_the_metadata_caches(config):
 
     await memory.close()
 
-    assert memory._deleted_semref_ids is None
-    assert memory._supersession_ledger is None
+    assert memory._ledger._legacy_ids is None
+    assert memory._ledger._records is None
 
 
 @pytest.mark.asyncio
@@ -115,7 +115,7 @@ async def test_ledger_is_re_read_from_storage_after_close(config):
     assert await memory.history() == []
 
     # Something that was never persisted must not survive the close.
-    memory._supersession_ledger = [
+    memory._ledger._records = [
         SupersededRecord(
             ordinal=7, superseded_by=[], at="2026-01-01T00:00:00Z", reason="delete"
         )

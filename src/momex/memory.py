@@ -13,6 +13,7 @@ import logging
 from typing import Any, TYPE_CHECKING
 
 from .config import MomexConfig
+from .ledger import SupersessionLedger
 from .paths import collection_to_db_path, collection_to_schema, utc_now
 from .results import AddResult, SearchItem, SupersededRecord
 from .timewindow import (
@@ -32,147 +33,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DELETED_SEMREFS_METADATA_KEY = "momex_deleted_semrefs"
-
-# Append-only supersession ledger. Replaces the tombstone set above, which is
-# still read so collections written by older versions keep their deletions.
-SUPERSESSION_METADATA_KEY = "momex_supersession_ledger"
-SUPERSESSION_LEDGER_VERSION = 1
-
-# Upper bound on how many ordinals a single stored [start, end] pair may expand
-# to, so corrupt metadata cannot exhaust memory on load.
-_MAX_TOMBSTONE_RANGE = 10_000_000
-
 # Reciprocal rank fusion constant, from the original RRF paper. Damps the
 # influence of the top ranks so one list cannot dominate the merged order.
 RRF_K = 60
-
-
-def _encode_deleted_ids(ids: set[int]) -> list[int | list[int]]:
-    """Range-encode tombstoned ordinals for compact storage.
-
-    All knowledge extracted from one message gets consecutive ordinals, so
-    deletions arrive in runs. Storing runs as [start, end] keeps the metadata
-    payload proportional to the number of deleted *regions* rather than the
-    number of deleted items.
-    """
-    encoded: list[int | list[int]] = []
-    start: int | None = None
-    prev = 0
-
-    for ordinal in sorted(ids):
-        if start is None:
-            start = prev = ordinal
-        elif ordinal == prev + 1:
-            prev = ordinal
-        else:
-            encoded.append(start if start == prev else [start, prev])
-            start = prev = ordinal
-
-    if start is not None:
-        encoded.append(start if start == prev else [start, prev])
-    return encoded
-
-
-def _decode_deleted_ids(parsed: Any) -> set[int]:
-    """Decode tombstones, accepting range pairs and the older flat int list."""
-    ids: set[int] = set()
-    if not isinstance(parsed, list):
-        return ids
-
-    for item in parsed:
-        if isinstance(item, bool):
-            continue
-        if isinstance(item, int):
-            ids.add(item)
-        elif isinstance(item, str) and item.isdigit():
-            ids.add(int(item))
-        elif isinstance(item, list) and len(item) == 2:
-            try:
-                start, end = int(item[0]), int(item[1])
-            except (TypeError, ValueError):
-                continue
-            # Guard against a corrupt range expanding into a huge set.
-            if 0 <= start <= end <= start + _MAX_TOMBSTONE_RANGE:
-                ids.update(range(start, end + 1))
-    return ids
-
-
-def _encode_ledger(records: list[SupersededRecord]) -> dict[str, Any]:
-    """Serialize the supersession ledger.
-
-    Unlike the tombstone set this replaces, the ledger is append-only: entries
-    are added and marked restored, never removed. It is versioned so the shape
-    can change without silently misreading old data.
-    """
-    return {
-        "version": SUPERSESSION_LEDGER_VERSION,
-        "records": [
-            {
-                "ordinal": r.ordinal,
-                "superseded_by": list(r.superseded_by),
-                "at": r.at,
-                "reason": r.reason,
-                "text": r.text,
-                "query": r.query,
-                "restored_at": r.restored_at,
-            }
-            for r in records
-        ],
-    }
-
-
-def _decode_ledger(parsed: Any) -> list[SupersededRecord]:
-    """Decode the ledger, skipping entries that are not usable.
-
-    A corrupt entry must not take the whole ledger with it: dropping one record
-    hides one fewer memory, while raising would make the collection unreadable.
-    """
-    if not isinstance(parsed, dict):
-        return []
-
-    version = parsed.get("version")
-    if version != SUPERSESSION_LEDGER_VERSION:
-        logger.warning(
-            "Ignoring supersession ledger with unsupported version %r.", version
-        )
-        return []
-
-    raw_records = parsed.get("records")
-    if not isinstance(raw_records, list):
-        return []
-
-    records: list[SupersededRecord] = []
-    for raw in raw_records:
-        if not isinstance(raw, dict):
-            continue
-        ordinal = raw.get("ordinal")
-        if isinstance(ordinal, bool) or not isinstance(ordinal, int):
-            continue
-
-        superseded_by = [
-            o
-            for o in (raw.get("superseded_by") or [])
-            if isinstance(o, int) and not isinstance(o, bool)
-        ]
-        at = raw.get("at")
-        reason = raw.get("reason")
-        records.append(
-            SupersededRecord(
-                ordinal=ordinal,
-                superseded_by=superseded_by,
-                at=at if isinstance(at, str) else "",
-                reason=reason if isinstance(reason, str) else "unknown",
-                text=raw.get("text") if isinstance(raw.get("text"), str) else None,
-                query=raw.get("query") if isinstance(raw.get("query"), str) else None,
-                restored_at=(
-                    raw.get("restored_at")
-                    if isinstance(raw.get("restored_at"), str)
-                    else None
-                ),
-            )
-        )
-    return records
 
 
 class Memory:
@@ -208,14 +71,14 @@ class Memory:
         # TypeAgent conversation (lazy initialized)
         self._conversation = None
         self._initialized = False
-        self._deleted_semref_ids: set[int] | None = None
-        self._supersession_ledger: list[SupersededRecord] | None = None
+        self._ledger = SupersessionLedger(
+            collection,
+            self._get_conversation_metadata,
+            self._set_conversation_metadata,
+        )
         # Guards the temporary auto_extract_knowledge toggle in add(), which
         # mutates state shared by every concurrent call on this instance.
         self._settings_lock = asyncio.Lock()
-        # Serializes the ledger's read-modify-write. It lives in one metadata
-        # blob, so two concurrent writers would otherwise clobber each other.
-        self._ledger_lock = asyncio.Lock()
 
         # Auto-load dotenv
         self._load_dotenv()
@@ -281,142 +144,6 @@ class Memory:
     async def _set_conversation_metadata(self, **kwds: str | list[str] | None) -> None:
         storage = self._conversation_required().storage_provider
         await storage.set_conversation_metadata(**kwds)
-
-    async def _load_deleted_semref_ids(self) -> set[int]:
-        """Read the legacy tombstone set.
-
-        Superseded by the supersession ledger. Kept because collections written
-        by older versions still carry this key; `_load_ledger` migrates it once
-        and nothing writes it again except `clear()`, which resets it so an
-        older reader does not resurrect deletions.
-        """
-        if self._deleted_semref_ids is not None:
-            return self._deleted_semref_ids
-
-        metadata = await self._get_conversation_metadata()
-        deleted_raw = ""
-        if metadata.extra and DELETED_SEMREFS_METADATA_KEY in metadata.extra:
-            deleted_raw = metadata.extra[DELETED_SEMREFS_METADATA_KEY]
-
-        if not deleted_raw:
-            self._deleted_semref_ids = set()
-            return self._deleted_semref_ids
-
-        try:
-            parsed = json.loads(deleted_raw)
-        except json.JSONDecodeError:
-            logger.warning(
-                "Ignoring corrupt %s metadata for collection %r; "
-                "previously deleted memories may reappear.",
-                DELETED_SEMREFS_METADATA_KEY,
-                self.collection,
-                exc_info=True,
-            )
-            parsed = []
-
-        deleted_ids = _decode_deleted_ids(parsed)
-
-        self._deleted_semref_ids = deleted_ids
-        return deleted_ids
-
-    async def _store_deleted_semref_ids(self, deleted_ids: set[int]) -> None:
-        serialized = json.dumps(_encode_deleted_ids(deleted_ids))
-        await self._set_conversation_metadata(
-            **{DELETED_SEMREFS_METADATA_KEY: serialized}
-        )
-
-    async def _load_ledger(self) -> list[SupersededRecord]:
-        """Load the supersession ledger, migrating legacy tombstones once.
-
-        Collections written before the ledger existed only have the tombstone
-        set. Those ordinals are folded in as reason="legacy" records with no
-        `superseded_by` and no text, since that information was never kept.
-        """
-        if self._supersession_ledger is not None:
-            return self._supersession_ledger
-
-        metadata = await self._get_conversation_metadata()
-        raw = ""
-        if metadata.extra and SUPERSESSION_METADATA_KEY in metadata.extra:
-            raw = metadata.extra[SUPERSESSION_METADATA_KEY]
-
-        records: list[SupersededRecord] = []
-        if raw:
-            try:
-                records = _decode_ledger(json.loads(raw))
-            except json.JSONDecodeError:
-                logger.warning(
-                    "Ignoring corrupt %s metadata for collection %r; "
-                    "superseded memories may reappear.",
-                    SUPERSESSION_METADATA_KEY,
-                    self.collection,
-                    exc_info=True,
-                )
-                records = []
-        else:
-            legacy = await self._load_deleted_semref_ids()
-            if legacy:
-                now = utc_now()
-                records = [
-                    SupersededRecord(
-                        ordinal=ordinal,
-                        superseded_by=[],
-                        at=now,
-                        reason="legacy",
-                    )
-                    for ordinal in sorted(legacy)
-                ]
-                logger.info(
-                    "Migrated %d legacy tombstone(s) to the supersession ledger "
-                    "for collection %r.",
-                    len(records),
-                    self.collection,
-                )
-
-        self._supersession_ledger = records
-        return records
-
-    async def _store_ledger(self, records: list[SupersededRecord]) -> None:
-        self._supersession_ledger = records
-        await self._set_conversation_metadata(
-            **{SUPERSESSION_METADATA_KEY: json.dumps(_encode_ledger(records))}
-        )
-
-    async def _hidden_ordinals(self) -> set[int]:
-        """Ordinals currently hidden from search: superseded and not restored."""
-        return {r.ordinal for r in await self._load_ledger() if r.active}
-
-    async def _append_supersessions(
-        self, records: list[SupersededRecord]
-    ) -> list[SupersededRecord]:
-        """Append entries to the ledger, skipping already-hidden ordinals.
-
-        The ledger is stored as a single metadata blob, so appending to it is a
-        read-modify-write. Concurrent add() and delete() calls therefore raced:
-        each read the same list and wrote back its own version, and whichever
-        finished last erased the other's entries -- leaving memories that had
-        been judged contradictory visible again.
-
-        The lock serializes those writers, and the cache is dropped inside it
-        so the merge starts from what is actually stored rather than from a
-        copy this instance read earlier. Concurrency *between processes* is
-        still not covered: the underlying blob has no compare-and-swap.
-        """
-        async with self._ledger_lock:
-            self._supersession_ledger = None
-            ledger = await self._load_ledger()
-            hidden = {r.ordinal for r in ledger if r.active}
-
-            added: list[SupersededRecord] = []
-            for record in records:
-                if record.ordinal in hidden:
-                    continue
-                hidden.add(record.ordinal)
-                added.append(record)
-
-            if added:
-                await self._store_ledger(ledger + added)
-            return added
 
     def _filter_search_results(
         self,
@@ -879,7 +606,7 @@ class Memory:
 
         search_results = result.value
         if not include_superseded:
-            hidden = await self._hidden_ordinals()
+            hidden = await self._ledger.hidden_ordinals()
             if hidden:
                 search_results = self._filter_search_results(search_results, hidden)
 
@@ -1189,7 +916,7 @@ class Memory:
 
         # Superseded items are filtered out of search already, but guard anyway
         # so repeated calls do not inflate the reported count.
-        hidden = await self._hidden_ordinals()
+        hidden = await self._ledger.hidden_ordinals()
         new_ids = [
             ordinal for ordinal in dict.fromkeys(candidate_ids) if ordinal not in hidden
         ]
@@ -1198,7 +925,7 @@ class Memory:
             return len(new_ids)
 
         now = utc_now()
-        await self._append_supersessions(
+        await self._ledger.append(
             [
                 SupersededRecord(
                     ordinal=ordinal,
@@ -1330,7 +1057,7 @@ Response:"""
 
             if semref_ids:
                 now = utc_now()
-                added = await self._append_supersessions(
+                added = await self._ledger.append(
                     [
                         SupersededRecord(
                             ordinal=ordinal,
@@ -1379,7 +1106,7 @@ Response:"""
                 print(record.at, record.text, "->", record.superseded_by)
         """
         await self._ensure_initialized()
-        ledger = await self._load_ledger()
+        ledger = await self._ledger.load()
         if include_restored:
             return list(ledger)
         return [r for r in ledger if r.active]
@@ -1406,25 +1133,7 @@ Response:"""
         await self._ensure_initialized()
 
         wanted = {ordinals} if isinstance(ordinals, int) else set(ordinals)
-        if not wanted:
-            return 0
-
-        # Same read-modify-write as _append_supersessions, and the same lock:
-        # restoring against a stale copy would resurrect entries that a
-        # concurrent add() had just appended.
-        async with self._ledger_lock:
-            self._supersession_ledger = None
-            ledger = await self._load_ledger()
-            now = utc_now()
-            restored = 0
-            for record in ledger:
-                if record.active and record.ordinal in wanted:
-                    record.restored_at = now
-                    restored += 1
-
-            if restored:
-                await self._store_ledger(ledger)
-            return restored
+        return await self._ledger.restore(wanted)
 
     async def clear(self) -> bool:
         """Clear all memories for this collection.
@@ -1440,14 +1149,7 @@ Response:"""
         if self.config.is_sqlite and hasattr(conversation.storage_provider, "db"):
             conversation.storage_provider.db.commit()  # type: ignore[attr-defined]
 
-        # clear() is the one genuinely destructive operation, and it drops the
-        # underlying records too -- so the ledger has nothing left to describe.
-        # Under the same lock as the appenders, so a concurrent supersession
-        # cannot land entries pointing at refs that no longer exist.
-        async with self._ledger_lock:
-            self._deleted_semref_ids = set()
-            await self._store_deleted_semref_ids(self._deleted_semref_ids)
-            await self._store_ledger([])
+        await self._ledger.reset()
 
         return True
 
@@ -1463,7 +1165,7 @@ Response:"""
         message_count = await conversation.messages.size()
         semref_count = await conversation.semantic_refs.size()
 
-        ledger = await self._load_ledger()
+        ledger = await self._ledger.load()
         active_supersessions = sum(1 for r in ledger if r.active)
 
         backend_name = "postgres" if self.config.is_postgres else "sqlite"
@@ -1575,13 +1277,12 @@ Response:"""
         conversation = self._conversation
         self._conversation = None
         self._initialized = False
-        # Both caches are backed by the collection's metadata, which is about
-        # to be closed. Dropping them together means the next operation reads
-        # the ledger back from storage rather than trusting a copy that may
-        # have been superseded -- by another process, or by the collection
-        # having been deleted and recreated under the same name.
-        self._deleted_semref_ids = None
-        self._supersession_ledger = None
+        # The ledger caches are backed by the collection's metadata, which is
+        # about to be closed. Dropping them means the next operation reads the
+        # ledger back from storage rather than trusting a copy that may have
+        # been superseded -- by another process, or by the collection having
+        # been deleted and recreated under the same name.
+        self._ledger.invalidate()
 
         if conversation is not None:
             await conversation.storage_provider.close()

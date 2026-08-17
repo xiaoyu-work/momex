@@ -81,8 +81,8 @@ def _make_memory(conversation) -> Memory:
     memory = Memory(collection="test:expiry", config=config)
     memory._conversation = conversation  # type: ignore[assignment]
     memory._initialized = True
-    memory._deleted_semref_ids = set()  # avoid touching real metadata storage
-    memory._supersession_ledger = []
+    memory._ledger._legacy_ids = set()
+    memory._ledger._records = []
     return memory
 
 
@@ -225,7 +225,7 @@ async def test_superseded_knowledge_is_hidden_from_search(monkeypatch):
         _FakeSemanticRef(Topic(text="dislikes sushi"), 1),
     ]
     memory = _make_memory(_FakeConversation(messages, semantic_refs))
-    memory._supersession_ledger = [
+    memory._ledger._records = [
         SupersededRecord(
             ordinal=0,
             superseded_by=[1],
@@ -262,7 +262,7 @@ async def test_include_superseded_returns_the_full_history(monkeypatch):
         _FakeSemanticRef(Topic(text="dislikes sushi"), 1),
     ]
     memory = _make_memory(_FakeConversation(messages, semantic_refs))
-    memory._supersession_ledger = [
+    memory._ledger._records = [
         SupersededRecord(
             ordinal=0,
             superseded_by=[1],

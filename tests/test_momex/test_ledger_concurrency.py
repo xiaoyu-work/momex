@@ -58,9 +58,7 @@ async def test_concurrent_appends_all_survive(config, monkeypatch):
     await memory._ensure_initialized()
     _make_reads_suspend(memory, monkeypatch)
 
-    await asyncio.gather(
-        *(memory._append_supersessions([_record(i)]) for i in range(10))
-    )
+    await asyncio.gather(*(memory._ledger.append([_record(i)]) for i in range(10)))
 
     assert sorted(r.ordinal for r in await memory.history()) == list(range(10))
     await memory.close()
@@ -73,9 +71,9 @@ async def test_appends_survive_across_batches(config, monkeypatch):
     _make_reads_suspend(memory, monkeypatch)
 
     await asyncio.gather(
-        memory._append_supersessions([_record(1), _record(2)]),
-        memory._append_supersessions([_record(3)]),
-        memory._append_supersessions([_record(4)]),
+        memory._ledger.append([_record(1), _record(2)]),
+        memory._ledger.append([_record(3)]),
+        memory._ledger.append([_record(4)]),
     )
 
     assert sorted(r.ordinal for r in await memory.history()) == [1, 2, 3, 4]
@@ -113,12 +111,12 @@ async def test_concurrent_deletes_are_all_recorded(config, monkeypatch):
 async def test_restore_does_not_clobber_a_concurrent_append(config, monkeypatch):
     memory = Memory(collection="test:restore-race", config=config)
     await memory._ensure_initialized()
-    await memory._append_supersessions([_record(1)])
+    await memory._ledger.append([_record(1)])
     _make_reads_suspend(memory, monkeypatch)
 
     restored, _ = await asyncio.gather(
         memory.restore(1),
-        memory._append_supersessions([_record(2)]),
+        memory._ledger.append([_record(2)]),
     )
 
     assert restored == 1
@@ -140,8 +138,8 @@ async def test_a_second_instance_does_not_overwrite_the_first(config):
     assert await first.history() == []
     assert await second.history() == []
 
-    await first._append_supersessions([_record(1)])
-    await second._append_supersessions([_record(2)])
+    await first._ledger.append([_record(1)])
+    await second._ledger.append([_record(2)])
 
     assert sorted(r.ordinal for r in await second.history()) == [1, 2]
 
