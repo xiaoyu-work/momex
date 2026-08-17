@@ -1726,7 +1726,13 @@ Response:"""
         conversation = self._conversation
         self._conversation = None
         self._initialized = False
+        # Both caches are backed by the collection's metadata, which is about
+        # to be closed. Dropping them together means the next operation reads
+        # the ledger back from storage rather than trusting a copy that may
+        # have been superseded -- by another process, or by the collection
+        # having been deleted and recreated under the same name.
         self._deleted_semref_ids = None
+        self._supersession_ledger = None
 
         if conversation is not None:
             await conversation.storage_provider.close()

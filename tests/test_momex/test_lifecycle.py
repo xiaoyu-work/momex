@@ -82,3 +82,47 @@ async def test_reinitializes_after_close(config):
     assert stats["total_messages"] == 0
 
     await memory.close()
+
+
+@pytest.mark.asyncio
+async def test_close_drops_the_metadata_caches(config):
+    """Both caches are backed by metadata that close() releases."""
+    from momex.memory import SupersededRecord
+
+    memory = Memory(collection="test:caches", config=config)
+    await memory._ensure_initialized()
+
+    memory._deleted_semref_ids = {1, 2}
+    memory._supersession_ledger = [
+        SupersededRecord(
+            ordinal=7, superseded_by=[], at="2026-01-01T00:00:00Z", reason="delete"
+        )
+    ]
+
+    await memory.close()
+
+    assert memory._deleted_semref_ids is None
+    assert memory._supersession_ledger is None
+
+
+@pytest.mark.asyncio
+async def test_ledger_is_re_read_from_storage_after_close(config):
+    """A stale ledger cache would keep hiding refs the collection no longer has."""
+    from momex.memory import SupersededRecord
+
+    memory = Memory(collection="test:stale-ledger", config=config)
+    await memory._ensure_initialized()
+    assert await memory.history() == []
+
+    # Something that was never persisted must not survive the close.
+    memory._supersession_ledger = [
+        SupersededRecord(
+            ordinal=7, superseded_by=[], at="2026-01-01T00:00:00Z", reason="delete"
+        )
+    ]
+    await memory.close()
+
+    assert await memory.history() == []
+    assert (await memory.stats())["superseded"] == 0
+
+    await memory.close()
