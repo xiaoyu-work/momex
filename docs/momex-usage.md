@@ -167,6 +167,27 @@ This is a deliberate bias toward keeping memories. A missed contradiction
 leaves a stale memory that a later `add()` can still correct; a wrong
 supersession is silent data loss.
 
+**Measuring it.** Contradiction handling is scored against a hand-written set
+of cases in `tests/test_momex/contradiction_cases.py`, covering polarity flips,
+value replacements, multi-valued additions that must *not* be retired, and
+unrelated memories:
+
+```bash
+# Deterministic, offline, runs in CI: what the candidate lookup surfaces.
+# Recall here is a ceiling -- a memory that is never a candidate can never
+# be retired, however good the model is.
+uv run pytest tests/test_momex/test_contradiction_recall.py -s
+
+# Needs an API key: what a real model decides about those candidates.
+# --repeat exposes cases where the same input gets different verdicts.
+make eval-contradictions
+uv run python tools/eval_contradictions.py --repeat 5 -v
+```
+
+The online tool reports the two error kinds separately, because they are not
+equally bad: wrongly retiring a memory is silent data loss, while missing one
+leaves something stale that is still recoverable.
+
 You can disable automatic contradiction detection:
 
 ```python

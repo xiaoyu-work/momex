@@ -15,6 +15,7 @@ if /I "%~1"=="check" goto check
 if /I "%~1"=="test" goto test
 if /I "%~1"=="coverage" goto coverage
 if /I "%~1"=="demo" goto demo
+if /I "%~1"=="eval-contradictions" goto eval-contradictions
 if /I "%~1"=="build" goto build
 if /I "%~1"=="venv" goto venv
 if /I "%~1"=="sync" goto sync
@@ -63,6 +64,12 @@ echo Running query tool...
 uv run python -m tools.query
 goto end
 
+:eval-contradictions
+if not exist ".venv\" call make.bat venv
+echo Scoring contradiction judgments (needs an API key)...
+uv run python tools/eval_contradictions.py
+goto end
+
 :build
 if not exist ".venv\" call make.bat venv
 echo Building package...
@@ -102,7 +109,7 @@ if exist .pytest_cache rmdir /s /q .pytest_cache
 goto end
 
 :help
-echo Usage: .\make [format^|check^|test^|coverage^|demo^|build^|venv^|sync^|install-uv^|clean^|help]
+echo Usage: .\make [format^|check^|test^|coverage^|demo^|eval-contradictions^|build^|venv^|sync^|install-uv^|clean^|help]
 goto end
 
 :end

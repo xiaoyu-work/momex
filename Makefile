@@ -40,6 +40,10 @@ eval: venv
 	uv run python tools/load_json.py --database eval.db tests/testdata/Episode_53_AdrianTchaikovsky_index
 	uv run python tools/query.py --batch --database eval.db --answer-results tests/testdata/Episode_53_Answer_results.json --search-results tests/testdata/Episode_53_Search_results.json $(FLAGS)
 
+.PHONY: eval-contradictions
+eval-contradictions: venv
+	uv run python tools/eval_contradictions.py $(FLAGS)
+
 .PHONY: mcp
 mcp: venv
 	uv run mcp dev src/typeagent/mcp/server.py
@@ -103,6 +107,7 @@ help:
 	@echo "make build       # Build the wheel (under dist/)"
 	@echo "make demo        # python tools/query.py (interactive)"
 	@echo "make compare     # python tools/query.py --batch"
+	@echo "make eval-contradictions  # Score contradiction judgments (needs an API key)"
 	@echo "make venv        # Create .venv/"
 	@echo "make sync        # Sync dependencies with uv"
 	@echo "make clean       # Remove build/, dist/, .venv/, *.egg-info/"
