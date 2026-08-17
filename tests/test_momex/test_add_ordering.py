@@ -48,11 +48,13 @@ class _FakeConversation:
         self.fail_write = fail_write
         self.events: list[str] = []
         self.seen_extract_flag: list[bool] = []
+        self.added_messages: list = []
 
     async def add_messages_with_indexing(self, messages):
         self.seen_extract_flag.append(
             self.settings.semantic_ref_index_settings.auto_extract_knowledge
         )
+        self.added_messages.extend(messages)
         await asyncio.sleep(0)  # force a real suspension point
         if self.fail_write:
             self.events.append("write-failed")
@@ -175,13 +177,16 @@ async def test_malformed_dates_are_rejected_at_write_time(bad, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_valid_dates_are_normalized(monkeypatch):
+    """The stored tags must be padded ISO, whatever accepted form came in."""
     conversation = _FakeConversation()
     memory = _make_memory(conversation)
     _record_contradictions(memory, conversation, monkeypatch)
 
-    result = await memory.add("netflix", valid_from="2026-04-01", valid_to="2026-05-02")
+    result = await memory.add("netflix", valid_from="20260401", valid_to="2026-05-02")
 
-    assert result.success
+    assert result.messages_added == 1
+    (message,) = conversation.added_messages
+    assert sorted(message.tags) == ["valid_from:2026-04-01", "valid_to:2026-05-02"]
 
 
 # --- 3. infer=False settings race ------------------------------------------

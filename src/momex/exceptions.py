@@ -6,7 +6,7 @@ for better error handling in commercial applications.
 Example:
     try:
         memory = Memory(collection="user:xiaoyuzhang")
-        await memory.query("What do I like?")
+        await memory.search("What do I like?")
     except CollectionNotFoundError as e:
         print(f"Error {e.error_code}: {e.message}")
         print(f"Suggestion: {e.suggestion}")
@@ -80,33 +80,6 @@ class CollectionNotFoundError(MomexError):
             details={"collection": collection},
             suggestion=suggestion
             or "Check the collection name or use MemoryManager.list_collections() to see available collections.",
-        )
-
-
-class MemoryNotFoundError(MomexError):
-    """Raised when a memory item does not exist.
-
-    Example:
-        raise MemoryNotFoundError(memory_id=123, collection="user:xiaoyuzhang")
-    """
-
-    def __init__(
-        self,
-        memory_id: int | str,
-        collection: str | None = None,
-        message: str | None = None,
-        suggestion: str | None = None,
-    ) -> None:
-        details = {"memory_id": memory_id}
-        if collection:
-            details["collection"] = collection
-
-        super().__init__(
-            message=message or f"Memory with ID '{memory_id}' not found.",
-            error_code="MOMEX_102",
-            details=details,
-            suggestion=suggestion
-            or "Check the memory ID or use search() to find memories.",
         )
 
 

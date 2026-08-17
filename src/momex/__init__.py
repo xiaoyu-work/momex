@@ -65,7 +65,6 @@ from .exceptions import (
     ConfigurationError,
     ExportError,
     LLMError,
-    MemoryNotFoundError,
     MomexError,
     StorageError,
     ValidationError,
@@ -92,7 +91,6 @@ __all__ = [
     # Exceptions
     "MomexError",
     "CollectionNotFoundError",
-    "MemoryNotFoundError",
     "ConfigurationError",
     "ValidationError",
     "StorageError",

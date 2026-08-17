@@ -254,7 +254,6 @@ class TestMemoryAsync:
             memory = Memory(collection="momex:engineering:xiaoyuzhang", config=config)
 
             result = await memory.add("Xiaoyuzhang likes cats")
-            assert result.success
             assert result.messages_added == 1
 
             results = await memory.search("What does Alice like?")

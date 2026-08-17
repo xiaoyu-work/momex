@@ -88,7 +88,6 @@ class AddResult:
     messages_added: int
     entities_extracted: int
     contradictions_removed: int = 0
-    success: bool = True
     collections: list[str] | None = None
     superseded: list[SupersededRecord] | None = None
     """What add() retired, not just how many. None when nothing was retired."""
@@ -789,7 +788,6 @@ class Memory:
                 messages_added=result.messages_added,
                 entities_extracted=result.semrefs_added,
                 contradictions_removed=len(superseded),
-                success=True,
                 collections=[self.collection],
                 superseded=superseded or None,
             )
@@ -813,7 +811,6 @@ class Memory:
                 messages_added=result.messages_added,
                 entities_extracted=0,
                 contradictions_removed=0,
-                success=True,
                 collections=[self.collection],
             )
 

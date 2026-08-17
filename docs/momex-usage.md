@@ -714,7 +714,6 @@ result = await memory.add("I don't like Python anymore")
 print(f"Messages added: {result.messages_added}")
 print(f"Knowledge extracted: {result.entities_extracted}")
 print(f"Contradictions superseded: {result.contradictions_removed}")
-print(f"Success: {result.success}")
 
 # The records themselves, not just the count (None when nothing was retired)
 for record in result.superseded or []:
