@@ -13,8 +13,10 @@ import logging
 from typing import Any, TYPE_CHECKING
 
 from .config import MomexConfig
+from .contradictions import detect as detect_contradictions
 from .ledger import SupersessionLedger
-from .paths import collection_to_db_path, collection_to_schema, utc_now
+from .paths import collection_to_db_path, utc_now
+from .providers import create_postgres_provider, create_sqlite_provider, DB_FILENAME
 from .results import AddResult, SearchItem, SupersededRecord
 from .search import fuse_results, search_by_embedding, search_structured
 from .timewindow import validate_iso_date, window_tags
@@ -143,29 +145,12 @@ class Memory:
         related_term_index_settings: RelatedTermIndexSettings,
     ):
         """Create SQLite storage provider."""
-        from typeagent.knowpro.universal_message import ConversationMessage
-        from typeagent.storage.sqlite import SqliteStorageProvider
-
-        # Create storage path from collection name
-        db_path = collection_to_db_path(
+        return create_sqlite_provider(
             self.collection,
-            self.config.storage_path,
-            "memory.db",
+            self.config,
+            message_text_index_settings,
+            related_term_index_settings,
         )
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Create SQLite storage provider with the collection-specific database
-        storage_provider = SqliteStorageProvider(
-            db_path=str(db_path),
-            message_type=ConversationMessage,
-            message_text_index_settings=message_text_index_settings,
-            related_term_index_settings=related_term_index_settings,
-        )
-
-        # Commit any pending schema initialization transaction
-        storage_provider.db.commit()
-
-        return storage_provider
 
     async def _create_postgres_provider(
         self,
@@ -173,34 +158,12 @@ class Memory:
         related_term_index_settings: RelatedTermIndexSettings,
     ):
         """Create PostgreSQL storage provider."""
-        from typeagent.knowpro.interfaces import ConversationMetadata
-        from typeagent.knowpro.universal_message import ConversationMessage
-        from typeagent.storage.postgres import PostgresStorageProvider
-
-        # Use collection name as part of table prefix or schema
-        # For now, we'll use a single database with collection stored in metadata
-        schema = (
-            self.config.storage.postgres_schema
-            if self.config.storage.postgres_schema
-            else collection_to_schema(self.collection)
+        return await create_postgres_provider(
+            self.collection,
+            self.config,
+            message_text_index_settings,
+            related_term_index_settings,
         )
-
-        storage_provider = await PostgresStorageProvider.create(
-            connection_string=self.config.storage.postgres_url,
-            message_type=ConversationMessage,
-            message_text_index_settings=message_text_index_settings,
-            related_term_index_settings=related_term_index_settings,
-            min_pool_size=self.config.storage.postgres_pool_min,
-            max_pool_size=self.config.storage.postgres_pool_max,
-            schema=schema,
-            pgbouncer=self.config.storage.postgres_pgbouncer,
-            metadata=ConversationMetadata(
-                name_tag=self.collection,
-                tags=[self.collection],
-            ),
-        )
-
-        return storage_provider
 
     async def add(
         self,
@@ -647,122 +610,15 @@ class Memory:
         Returns:
             The ledger entries appended, empty when nothing was retired.
         """
-        # Only extracted knowledge can contradict; message hits are discarded
-        # below. The embedding half of search() returns nothing but messages,
-        # so run the structured path alone and skip that wasted round trip.
-        #
-        # This lookup is itself an LLM round trip, so it fails for the same
-        # ordinary reasons the write does. It must not escape: add() has
-        # already committed the new messages by this point, and raising here
-        # would report a failure for a write that actually landed.
-        try:
-            results = await self._search_structured(new_content, limit=20)
-        except Exception:
-            logger.warning(
-                "Contradiction detection lookup failed for collection %r; "
-                "the new memory was added without it.",
-                self.collection,
-                exc_info=True,
-            )
-            return []
-
-        if not results:
-            return []
-
-        # Build context of existing memories. Only extracted knowledge can be
-        # retired, and the caller's own just-written refs are excluded. Prompt
-        # indices are dense so a small model has no gaps to misread; candidates
-        # maps them back to the original results.
-        candidates: list[SearchItem] = []
-        for item in results:
-            if item.type == "message":
-                continue
-            if protect_semrefs_from is not None:
-                ordinal = getattr(item.raw, "semantic_ref_ordinal", None)
-                if ordinal is not None and ordinal >= protect_semrefs_from:
-                    continue
-            candidates.append(item)
-
-        existing_memories = [
-            f"{i}: [{item.type}] {item.text}" for i, item in enumerate(candidates)
-        ]
-
-        if not existing_memories:
-            return []
-
-        # Ask LLM to identify contradictions
-        prompt = f"""Given the new information and existing memories, identify which existing memories contradict the new information.
-
-New information: "{new_content}"
-
-Existing memories:
-{chr(10).join(existing_memories)}
-
-Return ONLY the indices (numbers) of memories that directly contradict the new information, separated by commas.
-If no contradictions, return "none".
-Only identify clear contradictions (e.g., "likes X" vs "doesn't like X"), not merely related information.
-
-Response:"""
-
-        try:
-            # Use TypeAgent's LLM abstraction
-            llm = self.config.create_llm()
-            response = await llm.complete(prompt, max_tokens=100)
-            response_text = response.content.strip().lower()
-
-            if response_text == "none" or not response_text:
-                return []
-
-            # Parse indices
-            indices = []
-            for part in response_text.replace(" ", "").split(","):
-                try:
-                    idx = int(part)
-                    if 0 <= idx < len(candidates):
-                        indices.append(idx)
-                except ValueError:
-                    continue
-
-            if not indices:
-                return []
-
-            # Retire the contradicted memories
-            semref_ids = []
-            texts_by_ordinal: dict[int, str] = {}
-            for idx in indices:
-                candidate = candidates[idx]
-                ordinal = getattr(candidate.raw, "semantic_ref_ordinal", None)
-                if ordinal is not None:
-                    semref_ids.append(ordinal)
-                    texts_by_ordinal.setdefault(ordinal, candidate.text)
-
-            if semref_ids:
-                now = utc_now()
-                added = await self._ledger.append(
-                    [
-                        SupersededRecord(
-                            ordinal=ordinal,
-                            superseded_by=list(superseded_by or []),
-                            at=now,
-                            reason="contradiction",
-                            text=texts_by_ordinal.get(ordinal),
-                            query=new_content,
-                        )
-                        for ordinal in dict.fromkeys(semref_ids)
-                    ]
-                )
-                return added
-
-        except Exception:
-            # Contradiction detection is best-effort and must never block add().
-            logger.warning(
-                "Contradiction detection failed for collection %r; "
-                "adding the new memory without it.",
-                self.collection,
-                exc_info=True,
-            )
-
-        return []
+        return await detect_contradictions(
+            new_content,
+            collection=self.collection,
+            search_structured=self._search_structured,
+            create_llm=self.config.create_llm,
+            append=self._ledger.append,
+            protect_semrefs_from=protect_semrefs_from,
+            superseded_by=superseded_by,
+        )
 
     async def history(
         self,
@@ -992,7 +848,7 @@ Response:"""
             collection_to_db_path(
                 self.collection,
                 self.config.storage_path,
-                "memory.db",
+                DB_FILENAME,
             )
         )
 
