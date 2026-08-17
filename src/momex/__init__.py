@@ -71,7 +71,7 @@ from .exceptions import (
     ValidationError,
 )
 from .manager import MemoryManager
-from .memory import AddResult, Memory, SearchItem
+from .memory import AddResult, Memory, SearchItem, SupersededRecord
 from .query import search, stats
 
 __all__ = [
@@ -85,6 +85,7 @@ __all__ = [
     # Data classes
     "AddResult",
     "SearchItem",
+    "SupersededRecord",
     # Prefix search functions (async)
     "search",
     "stats",

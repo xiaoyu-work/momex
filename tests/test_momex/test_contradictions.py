@@ -2,6 +2,10 @@
 
 Contradiction detection only ever considers extracted knowledge, so it must not
 pay for the embedding search, which returns messages exclusively.
+
+Contradicted memories are superseded, not destroyed: the detector appends
+ledger entries and returns them, and the underlying semantic refs stay intact
+so restore() can put them back.
 """
 
 import logging
@@ -17,17 +21,8 @@ class _FakeSemanticRef:
         self.semantic_ref_ordinal = ordinal
 
 
-class _RecordingPropertyIndex:
-    def __init__(self):
-        self.removed: list[int] = []
-
-    async def remove_all_for_semref(self, semref_id: int) -> None:
-        self.removed.append(semref_id)
-
-
 class _FakeStorageProvider:
-    def __init__(self):
-        self.property_index = _RecordingPropertyIndex()
+    pass
 
 
 class _FakeConversation:
@@ -60,12 +55,22 @@ def memory(tmp_path, monkeypatch):
     mem._conversation = _FakeConversation()  # type: ignore[assignment]
     mem._initialized = True
     mem._deleted_semref_ids = set()
+    mem._supersession_ledger = []
 
-    async def _no_persist(deleted_ids):
+    async def _no_persist(_):
         return None
 
+    async def _no_persist_ledger(records):
+        mem._supersession_ledger = records
+
     monkeypatch.setattr(mem, "_store_deleted_semref_ids", _no_persist)
+    monkeypatch.setattr(mem, "_store_ledger", _no_persist_ledger)
     return mem
+
+
+def _hidden(memory) -> list[int]:
+    """Ordinals currently hidden from search, in ledger order."""
+    return [r.ordinal for r in memory._supersession_ledger if r.active]
 
 
 def _knowledge(text, ordinal):
@@ -104,14 +109,22 @@ async def test_does_not_run_embedding_search(memory, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_removes_contradicting_knowledge(memory, monkeypatch):
+async def test_supersedes_contradicting_knowledge(memory, monkeypatch):
     llm = _FakeLLM("0")
     _wire(memory, monkeypatch, llm, [_knowledge("likes sushi", 1)])
 
-    removed = await memory._detect_and_remove_contradictions("I don't like sushi")
+    superseded = await memory._detect_and_remove_contradictions(
+        "I don't like sushi", superseded_by=[9]
+    )
 
-    assert removed == 1
-    assert memory._conversation.storage_provider.property_index.removed == [1]
+    assert [r.ordinal for r in superseded] == [1]
+    assert _hidden(memory) == [1]
+
+    (record,) = superseded
+    assert record.reason == "contradiction"
+    assert record.text == "likes sushi"
+    assert record.query == "I don't like sushi"
+    assert record.superseded_by == [9]
 
 
 @pytest.mark.asyncio
@@ -119,22 +132,31 @@ async def test_no_contradiction_removes_nothing(memory, monkeypatch):
     llm = _FakeLLM("none")
     _wire(memory, monkeypatch, llm, [_knowledge("likes sushi", 1)])
 
-    removed = await memory._detect_and_remove_contradictions("I like ramen")
+    superseded = await memory._detect_and_remove_contradictions("I like ramen")
 
-    assert removed == 0
-    assert memory._conversation.storage_provider.property_index.removed == []
+    assert superseded == []
+    assert _hidden(memory) == []
 
 
 @pytest.mark.asyncio
-async def test_already_deleted_ids_are_not_recounted(memory, monkeypatch):
+async def test_already_superseded_ids_are_not_recounted(memory, monkeypatch):
+    from momex.memory import SupersededRecord
+
     llm = _FakeLLM("0")
     _wire(memory, monkeypatch, llm, [_knowledge("likes sushi", 1)])
-    memory._deleted_semref_ids = {1}
+    memory._supersession_ledger = [
+        SupersededRecord(
+            ordinal=1,
+            superseded_by=[],
+            at="2026-01-01T00:00:00Z",
+            reason="contradiction",
+        )
+    ]
 
-    removed = await memory._detect_and_remove_contradictions("I don't like sushi")
+    superseded = await memory._detect_and_remove_contradictions("I don't like sushi")
 
-    assert removed == 0
-    assert memory._conversation.storage_provider.property_index.removed == []
+    assert superseded == []
+    assert _hidden(memory) == [1]
 
 
 @pytest.mark.asyncio
@@ -142,9 +164,9 @@ async def test_no_existing_knowledge_skips_llm_call(memory, monkeypatch):
     llm = _FakeLLM("0")
     _wire(memory, monkeypatch, llm, [])
 
-    removed = await memory._detect_and_remove_contradictions("I like ramen")
+    superseded = await memory._detect_and_remove_contradictions("I like ramen")
 
-    assert removed == 0
+    assert superseded == []
     assert llm.calls == 0
 
 
@@ -161,8 +183,10 @@ async def test_llm_failure_is_logged_and_does_not_block_add(
     _wire(memory, monkeypatch, _BrokenLLM(), [_knowledge("likes sushi", 1)])
 
     with caplog.at_level(logging.WARNING, logger="momex.memory"):
-        removed = await memory._detect_and_remove_contradictions("I don't like sushi")
+        superseded = await memory._detect_and_remove_contradictions(
+            "I don't like sushi"
+        )
 
-    assert removed == 0
+    assert superseded == []
     assert "Contradiction detection failed" in caplog.text
     assert "llm is down" in caplog.text

@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 
 DELETED_SEMREFS_METADATA_KEY = "momex_deleted_semrefs"
 
+# Append-only supersession ledger. Replaces the tombstone set above, which is
+# still read so collections written by older versions keep their deletions.
+SUPERSESSION_METADATA_KEY = "momex_supersession_ledger"
+SUPERSESSION_LEDGER_VERSION = 1
+
 # Upper bound on how many ordinals a single stored [start, end] pair may expand
 # to, so corrupt metadata cannot exhaust memory on load.
 _MAX_TOMBSTONE_RANGE = 10_000_000
@@ -38,6 +43,41 @@ _MAX_TOMBSTONE_RANGE = 10_000_000
 # Reciprocal rank fusion constant, from the original RRF paper. Damps the
 # influence of the top ranks so one list cannot dominate the merged order.
 RRF_K = 60
+
+
+@dataclass
+class SupersededRecord:
+    """One entry in the append-only supersession ledger.
+
+    A memory is never destroyed. It is marked as superseded by whatever
+    replaced it, hidden from search, and can be restored -- so a bad
+    contradiction judgment is recoverable and the change itself is preserved.
+    """
+
+    ordinal: int
+    """Semantic-ref ordinal of the memory that was retired."""
+
+    superseded_by: list[int]
+    """Ordinals of the memories that replaced it. Empty for explicit delete()."""
+
+    at: str
+    """ISO-8601 UTC timestamp of the supersession."""
+
+    reason: str
+    """One of "contradiction", "delete", or "legacy"."""
+
+    text: str | None = None
+    """Rendered text at the time of supersession, for auditing."""
+
+    query: str | None = None
+    """The content or query that triggered it."""
+
+    restored_at: str | None = None
+    """Set when restore() reversed this record. Non-None means inactive."""
+
+    @property
+    def active(self) -> bool:
+        return self.restored_at is None
 
 
 @dataclass
@@ -49,6 +89,8 @@ class AddResult:
     contradictions_removed: int = 0
     success: bool = True
     collections: list[str] | None = None
+    superseded: list[SupersededRecord] | None = None
+    """What add() retired, not just how many. None when nothing was retired."""
 
 
 @dataclass
@@ -65,6 +107,11 @@ class SearchItem:
     # Rank-fusion score used to order hybrid search() results. None when the
     # item comes from a single-path search such as search_by_embedding().
     fusion_score: float | None = None
+
+
+def _utc_now() -> str:
+    """Current UTC time as an ISO-8601 string."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _collection_to_db_path(collection: str, base_path: str, db_name: str) -> Path:
@@ -145,6 +192,83 @@ def _decode_deleted_ids(parsed: Any) -> set[int]:
     return ids
 
 
+def _encode_ledger(records: list[SupersededRecord]) -> dict[str, Any]:
+    """Serialize the supersession ledger.
+
+    Unlike the tombstone set this replaces, the ledger is append-only: entries
+    are added and marked restored, never removed. It is versioned so the shape
+    can change without silently misreading old data.
+    """
+    return {
+        "version": SUPERSESSION_LEDGER_VERSION,
+        "records": [
+            {
+                "ordinal": r.ordinal,
+                "superseded_by": list(r.superseded_by),
+                "at": r.at,
+                "reason": r.reason,
+                "text": r.text,
+                "query": r.query,
+                "restored_at": r.restored_at,
+            }
+            for r in records
+        ],
+    }
+
+
+def _decode_ledger(parsed: Any) -> list[SupersededRecord]:
+    """Decode the ledger, skipping entries that are not usable.
+
+    A corrupt entry must not take the whole ledger with it: dropping one record
+    hides one fewer memory, while raising would make the collection unreadable.
+    """
+    if not isinstance(parsed, dict):
+        return []
+
+    version = parsed.get("version")
+    if version != SUPERSESSION_LEDGER_VERSION:
+        logger.warning(
+            "Ignoring supersession ledger with unsupported version %r.", version
+        )
+        return []
+
+    raw_records = parsed.get("records")
+    if not isinstance(raw_records, list):
+        return []
+
+    records: list[SupersededRecord] = []
+    for raw in raw_records:
+        if not isinstance(raw, dict):
+            continue
+        ordinal = raw.get("ordinal")
+        if isinstance(ordinal, bool) or not isinstance(ordinal, int):
+            continue
+
+        superseded_by = [
+            o
+            for o in (raw.get("superseded_by") or [])
+            if isinstance(o, int) and not isinstance(o, bool)
+        ]
+        at = raw.get("at")
+        reason = raw.get("reason")
+        records.append(
+            SupersededRecord(
+                ordinal=ordinal,
+                superseded_by=superseded_by,
+                at=at if isinstance(at, str) else "",
+                reason=reason if isinstance(reason, str) else "unknown",
+                text=raw.get("text") if isinstance(raw.get("text"), str) else None,
+                query=raw.get("query") if isinstance(raw.get("query"), str) else None,
+                restored_at=(
+                    raw.get("restored_at")
+                    if isinstance(raw.get("restored_at"), str)
+                    else None
+                ),
+            )
+        )
+    return records
+
+
 class Memory:
     """High-level API for Structured RAG memory using TypeAgent's full indexing.
 
@@ -179,6 +303,7 @@ class Memory:
         self._conversation = None
         self._initialized = False
         self._deleted_semref_ids: set[int] | None = None
+        self._supersession_ledger: list[SupersededRecord] | None = None
         # Guards the temporary auto_extract_knowledge toggle in add(), which
         # mutates state shared by every concurrent call on this instance.
         self._settings_lock = asyncio.Lock()
@@ -249,6 +374,13 @@ class Memory:
         await storage.set_conversation_metadata(**kwds)
 
     async def _load_deleted_semref_ids(self) -> set[int]:
+        """Read the legacy tombstone set.
+
+        Superseded by the supersession ledger. Kept because collections written
+        by older versions still carry this key; `_load_ledger` migrates it once
+        and nothing writes it again except `clear()`, which resets it so an
+        older reader does not resurrect deletions.
+        """
         if self._deleted_semref_ids is not None:
             return self._deleted_semref_ids
 
@@ -284,12 +416,95 @@ class Memory:
             **{DELETED_SEMREFS_METADATA_KEY: serialized}
         )
 
+    async def _load_ledger(self) -> list[SupersededRecord]:
+        """Load the supersession ledger, migrating legacy tombstones once.
+
+        Collections written before the ledger existed only have the tombstone
+        set. Those ordinals are folded in as reason="legacy" records with no
+        `superseded_by` and no text, since that information was never kept.
+        """
+        if self._supersession_ledger is not None:
+            return self._supersession_ledger
+
+        metadata = await self._get_conversation_metadata()
+        raw = ""
+        if metadata.extra and SUPERSESSION_METADATA_KEY in metadata.extra:
+            raw = metadata.extra[SUPERSESSION_METADATA_KEY]
+
+        records: list[SupersededRecord] = []
+        if raw:
+            try:
+                records = _decode_ledger(json.loads(raw))
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Ignoring corrupt %s metadata for collection %r; "
+                    "superseded memories may reappear.",
+                    SUPERSESSION_METADATA_KEY,
+                    self.collection,
+                    exc_info=True,
+                )
+                records = []
+        else:
+            legacy = await self._load_deleted_semref_ids()
+            if legacy:
+                now = _utc_now()
+                records = [
+                    SupersededRecord(
+                        ordinal=ordinal,
+                        superseded_by=[],
+                        at=now,
+                        reason="legacy",
+                    )
+                    for ordinal in sorted(legacy)
+                ]
+                logger.info(
+                    "Migrated %d legacy tombstone(s) to the supersession ledger "
+                    "for collection %r.",
+                    len(records),
+                    self.collection,
+                )
+
+        self._supersession_ledger = records
+        return records
+
+    async def _store_ledger(self, records: list[SupersededRecord]) -> None:
+        self._supersession_ledger = records
+        await self._set_conversation_metadata(
+            **{SUPERSESSION_METADATA_KEY: json.dumps(_encode_ledger(records))}
+        )
+
+    async def _hidden_ordinals(self) -> set[int]:
+        """Ordinals currently hidden from search: superseded and not restored."""
+        return {r.ordinal for r in await self._load_ledger() if r.active}
+
+    async def _append_supersessions(
+        self, records: list[SupersededRecord]
+    ) -> list[SupersededRecord]:
+        """Append entries to the ledger, skipping already-hidden ordinals."""
+        ledger = await self._load_ledger()
+        hidden = {r.ordinal for r in ledger if r.active}
+
+        added: list[SupersededRecord] = []
+        for record in records:
+            if record.ordinal in hidden:
+                continue
+            hidden.add(record.ordinal)
+            added.append(record)
+
+        if added:
+            await self._store_ledger(ledger + added)
+        return added
+
     def _filter_search_results(
         self,
         results,
-        deleted_ids: set[int],
+        hidden_ordinals: set[int],
     ):
-        if not deleted_ids:
+        """Drop superseded knowledge from raw search results.
+
+        The underlying records still exist; the ledger decides what is visible.
+        """
+        if not hidden_ordinals:
             return results
         filtered = []
         for search_result in results:
@@ -298,7 +513,7 @@ class Memory:
                 kept = [
                     match
                     for match in kmatches.semantic_ref_matches
-                    if match.semantic_ref_ordinal not in deleted_ids
+                    if match.semantic_ref_ordinal not in hidden_ordinals
                 ]
                 if kept:
                     kmatches.semantic_ref_matches = kept
@@ -433,10 +648,10 @@ class Memory:
         valid_from = self._validate_iso_date(valid_from, "valid_from")
         valid_to = self._validate_iso_date(valid_to, "valid_to")
 
-        # Contradiction removal runs *after* the write (see below): deleting
-        # first means a failed insert leaves the old facts gone and the
+        # Contradiction handling runs *after* the write (see below): retiring
+        # first means a failed insert leaves the old facts hidden and the
         # replacement missing.
-        contradictions_removed = 0
+        superseded: list[SupersededRecord] = []
 
         from typeagent.knowpro.universal_message import (
             ConversationMessage,
@@ -479,7 +694,7 @@ class Memory:
             return AddResult(
                 messages_added=0,
                 entities_extracted=0,
-                contradictions_removed=contradictions_removed,
+                contradictions_removed=0,
                 collections=[self.collection],
             )
 
@@ -496,24 +711,33 @@ class Memory:
 
             # Only now that the new content is durable do we retire whatever it
             # contradicts. Detection matches the new facts too, so exclude the
-            # semrefs this call just produced.
+            # semrefs this call just produced -- and point the ledger's
+            # superseded_by at them, so the replacement is recorded, not just
+            # the removal.
             if detect_contradictions:
                 content_text = (
                     messages
                     if isinstance(messages, str)
                     else " ".join(m.get("content", "") for m in messages)
                 )
-                contradictions_removed = await self._detect_and_remove_contradictions(
+                new_ordinals: list[int] = []
+                if semref_baseline is not None:
+                    new_ordinals = list(
+                        range(semref_baseline, semref_baseline + result.semrefs_added)
+                    )
+                superseded = await self._detect_and_remove_contradictions(
                     content_text,
                     protect_semrefs_from=semref_baseline,
+                    superseded_by=new_ordinals,
                 )
 
             return AddResult(
                 messages_added=result.messages_added,
                 entities_extracted=result.semrefs_added,
-                contradictions_removed=contradictions_removed,
+                contradictions_removed=len(superseded),
                 success=True,
                 collections=[self.collection],
+                superseded=superseded or None,
             )
         else:
             # Direct add without LLM processing. The toggle below mutates state
@@ -624,6 +848,7 @@ class Memory:
         limit: int = 10,
         *,
         include_expired: bool = False,
+        include_superseded: bool = False,
     ) -> list[SearchItem]:
         """Hybrid search: structured term matching + embedding similarity in parallel.
 
@@ -634,6 +859,9 @@ class Memory:
             query_text: Search query (natural language question or topic).
             limit: Maximum number of results to return.
             include_expired: If True, include memories past their valid_to date.
+            include_superseded: If True, also return memories that have been
+                superseded by newer ones. Off by default, which is the normal
+                "current view" of the collection.
 
         Returns:
             List of SearchItem with type, text, score, and raw TypeAgent object,
@@ -644,7 +872,10 @@ class Memory:
         # Run structured search and embedding search in parallel
         structured_items, embedding_items = await asyncio.gather(
             self._search_structured(
-                query_text, limit=limit, include_expired=include_expired
+                query_text,
+                limit=limit,
+                include_expired=include_expired,
+                include_superseded=include_superseded,
             ),
             self._search_embedding(
                 query_text, limit=limit, include_expired=include_expired
@@ -697,6 +928,7 @@ class Memory:
         limit: int = 10,
         *,
         include_expired: bool = False,
+        include_superseded: bool = False,
     ) -> list[SearchItem]:
         """Structured RAG search using LLM query translation + term matching."""
         conversation = self._conversation_required()
@@ -747,9 +979,10 @@ class Memory:
         items: list[SearchItem] = []
 
         search_results = result.value
-        deleted_ids = await self._load_deleted_semref_ids()
-        if deleted_ids:
-            search_results = self._filter_search_results(search_results, deleted_ids)
+        if not include_superseded:
+            hidden = await self._hidden_ordinals()
+            if hidden:
+                search_results = self._filter_search_results(search_results, hidden)
 
         # Collect all ordinals first for batch fetching
         semref_requests: list[tuple[int, float]] = []  # (ordinal, score)
@@ -1033,59 +1266,57 @@ class Memory:
         results = await self.search(query, limit=limit)
 
         candidate_ids: list[int] = []
+        texts_by_ordinal: dict[int, str] = {}
         for item in results:
             if item.type == "message" or item.score < min_score:
                 continue
             ordinal = getattr(item.raw, "semantic_ref_ordinal", None)
             if ordinal is not None:
                 candidate_ids.append(ordinal)
+                texts_by_ordinal.setdefault(ordinal, item.text)
 
         if not candidate_ids:
             return 0
 
-        # Items already tombstoned are filtered out of search, but guard anyway
+        # Superseded items are filtered out of search already, but guard anyway
         # so repeated calls do not inflate the reported count.
-        deleted_ids = await self._load_deleted_semref_ids()
+        hidden = await self._hidden_ordinals()
         new_ids = [
-            ordinal
-            for ordinal in dict.fromkeys(candidate_ids)
-            if ordinal not in deleted_ids
+            ordinal for ordinal in dict.fromkeys(candidate_ids) if ordinal not in hidden
         ]
 
         if not new_ids or dry_run:
             return len(new_ids)
 
-        deleted_ids.update(new_ids)
-        await self._store_deleted_semref_ids(deleted_ids)
-
-        await self._delete_by_ids(new_ids)
+        now = _utc_now()
+        await self._append_supersessions(
+            [
+                SupersededRecord(
+                    ordinal=ordinal,
+                    superseded_by=[],
+                    at=now,
+                    reason="delete",
+                    text=texts_by_ordinal.get(ordinal),
+                    query=query,
+                )
+                for ordinal in new_ids
+            ]
+        )
 
         return len(new_ids)
-
-    async def _delete_by_ids(self, semref_ids: list[int]) -> None:
-        """Internal: drop index entries for the given semantic refs.
-
-        The tombstone list recorded by the caller is what actually hides these
-        from search; this additionally clears the property index so stale
-        entries do not accumulate.
-        """
-        storage = self._conversation_required().storage_provider
-        prop_index = storage.property_index
-
-        for semref_id in semref_ids:
-            await prop_index.remove_all_for_semref(semref_id)
-
-        # Commit for SQLite
-        if self.config.is_sqlite and hasattr(storage, "db"):
-            storage.db.commit()  # type: ignore[attr-defined]
 
     async def _detect_and_remove_contradictions(
         self,
         new_content: str,
         *,
         protect_semrefs_from: int | None = None,
-    ) -> int:
-        """Internal: Use LLM to detect and remove contradicting memories.
+        superseded_by: list[int] | None = None,
+    ) -> list[SupersededRecord]:
+        """Internal: use an LLM to retire memories the new content contradicts.
+
+        Nothing is destroyed. Contradicted memories are appended to the
+        supersession ledger, which hides them from search and keeps enough
+        context to undo the judgment later.
 
         Args:
             new_content: The new content being added.
@@ -1093,9 +1324,11 @@ class Memory:
                 knowledge extracted by the caller's own write. Those refs match
                 the query by construction and must be excluded, or the new
                 memory would be retired as a contradiction of itself.
+            superseded_by: Ordinals of the knowledge that replaced them,
+                recorded on each ledger entry.
 
         Returns:
-            Number of contradicting memories removed.
+            The ledger entries appended, empty when nothing was retired.
         """
         # Only extracted knowledge can contradict; message hits are discarded
         # below. The embedding half of search() returns nothing but messages,
@@ -1103,7 +1336,7 @@ class Memory:
         results = await self._search_structured(new_content, limit=20)
 
         if not results:
-            return 0
+            return []
 
         # Build context of existing memories. Only extracted knowledge can be
         # retired, and the caller's own just-written refs are excluded. Prompt
@@ -1124,7 +1357,7 @@ class Memory:
         ]
 
         if not existing_memories:
-            return 0
+            return []
 
         # Ask LLM to identify contradictions
         prompt = f"""Given the new information and existing memories, identify which existing memories contradict the new information.
@@ -1147,7 +1380,7 @@ Response:"""
             response_text = response.content.strip().lower()
 
             if response_text == "none" or not response_text:
-                return 0
+                return []
 
             # Parse indices
             indices = []
@@ -1160,24 +1393,34 @@ Response:"""
                     continue
 
             if not indices:
-                return 0
+                return []
 
-            # Delete contradicting memories
+            # Retire the contradicted memories
             semref_ids = []
+            texts_by_ordinal: dict[int, str] = {}
             for idx in indices:
-                ordinal = getattr(candidates[idx].raw, "semantic_ref_ordinal", None)
+                candidate = candidates[idx]
+                ordinal = getattr(candidate.raw, "semantic_ref_ordinal", None)
                 if ordinal is not None:
                     semref_ids.append(ordinal)
+                    texts_by_ordinal.setdefault(ordinal, candidate.text)
 
             if semref_ids:
-                deleted_ids = await self._load_deleted_semref_ids()
-                new_ids = [i for i in dict.fromkeys(semref_ids) if i not in deleted_ids]
-                if not new_ids:
-                    return 0
-                deleted_ids.update(new_ids)
-                await self._store_deleted_semref_ids(deleted_ids)
-                await self._delete_by_ids(new_ids)
-                return len(new_ids)
+                now = _utc_now()
+                added = await self._append_supersessions(
+                    [
+                        SupersededRecord(
+                            ordinal=ordinal,
+                            superseded_by=list(superseded_by or []),
+                            at=now,
+                            reason="contradiction",
+                            text=texts_by_ordinal.get(ordinal),
+                            query=new_content,
+                        )
+                        for ordinal in dict.fromkeys(semref_ids)
+                    ]
+                )
+                return added
 
         except Exception:
             # Contradiction detection is best-effort and must never block add().
@@ -1188,7 +1431,72 @@ Response:"""
                 exc_info=True,
             )
 
-        return 0
+        return []
+
+    async def history(
+        self,
+        *,
+        include_restored: bool = False,
+    ) -> list[SupersededRecord]:
+        """Return the supersession ledger, oldest first.
+
+        This is the audit trail: what was retired, when, why, what replaced it,
+        and the text it had at the time. Nothing here was destroyed -- every
+        entry can be undone with restore().
+
+        Args:
+            include_restored: If True, also return entries already reversed by
+                restore(). Off by default.
+
+        Returns:
+            List of SupersededRecord in insertion order.
+
+        Example:
+            for record in await memory.history():
+                print(record.at, record.text, "->", record.superseded_by)
+        """
+        await self._ensure_initialized()
+        ledger = await self._load_ledger()
+        if include_restored:
+            return list(ledger)
+        return [r for r in ledger if r.active]
+
+    async def restore(self, ordinals: int | list[int]) -> int:
+        """Undo a supersession, making the memory visible to search again.
+
+        The point of an append-only ledger: a wrong contradiction judgment is
+        recoverable, because the underlying record was never deleted.
+
+        Args:
+            ordinals: Semantic-ref ordinal(s) to restore. Ordinals that are not
+                currently superseded are ignored.
+
+        Returns:
+            Number of memories restored.
+
+        Example:
+            # The LLM decided "works in Portland" contradicted "works in
+            # Seattle", but they were two offices.
+            (record,) = await memory.history()
+            await memory.restore(record.ordinal)
+        """
+        await self._ensure_initialized()
+
+        wanted = {ordinals} if isinstance(ordinals, int) else set(ordinals)
+        if not wanted:
+            return 0
+
+        ledger = await self._load_ledger()
+        now = _utc_now()
+        restored = 0
+        for record in ledger:
+            if record.active and record.ordinal in wanted:
+                record.restored_at = now
+                restored += 1
+
+        if restored:
+            await self._store_ledger(ledger)
+        return restored
 
     async def clear(self) -> bool:
         """Clear all memories for this collection.
@@ -1204,8 +1512,11 @@ Response:"""
         if self.config.is_sqlite and hasattr(conversation.storage_provider, "db"):
             conversation.storage_provider.db.commit()  # type: ignore[attr-defined]
 
+        # clear() is the one genuinely destructive operation, and it drops the
+        # underlying records too -- so the ledger has nothing left to describe.
         self._deleted_semref_ids = set()
         await self._store_deleted_semref_ids(self._deleted_semref_ids)
+        await self._store_ledger([])
 
         return True
 
@@ -1221,12 +1532,20 @@ Response:"""
         message_count = await conversation.messages.size()
         semref_count = await conversation.semantic_refs.size()
 
+        ledger = await self._load_ledger()
+        active_supersessions = sum(1 for r in ledger if r.active)
+
         backend_name = "postgres" if self.config.is_postgres else "sqlite"
 
         return {
             "collection": self.collection,
             "total_messages": message_count,
             "total_semantic_refs": semref_count,
+            # Superseded refs are still counted above: they exist, they are
+            # just not part of the current view.
+            "visible_semantic_refs": max(semref_count - active_supersessions, 0),
+            "superseded": active_supersessions,
+            "ledger_entries": len(ledger),
             "backend": backend_name,
         }
 

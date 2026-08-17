@@ -128,10 +128,18 @@ async def main():
     # Initial preference
     await memory.add("I like sushi")
 
-    # Later, preference changed - add() automatically removes contradicting memory
+    # Later, preference changed - add() automatically supersedes the old memory
     result = await memory.add("I don't like sushi anymore")
-    print(f"Added {result.messages_added}, removed {result.contradictions_removed} contradictions")
+    print(f"Added {result.messages_added}, superseded {result.contradictions_removed}")
+
+    # Nothing was destroyed. What was retired, and what replaced it:
+    for record in result.superseded or []:
+        print(record.text, "->", record.superseded_by, record.reason)
 ```
+
+The old memory is hidden from search, not deleted. See
+[Supersession and history](#supersession-and-history) for how to review and
+undo it.
 
 You can disable automatic contradiction detection:
 
@@ -206,8 +214,57 @@ still surface through `search_by_embedding()`, and therefore through the
 embedding half of `search()`. Use `clear()` to remove everything in a
 collection.
 
-The return value is the number of knowledge items newly deleted. Deleting the
+The return value is the number of knowledge items newly hidden. Deleting the
 same query twice returns `0` the second time.
+
+**delete() is reversible.** It records a supersession rather than destroying
+anything, so a query that matched more broadly than you intended can be undone
+with `restore()`. `clear()` is the one genuinely destructive operation.
+
+### Supersession and history
+
+Memories are never destroyed by `add()` or `delete()`. They are appended to a
+supersession ledger, which hides them from search and records what replaced
+them. Three reasons this beats deleting:
+
+- A wrong contradiction judgment is recoverable. Contradiction detection is an
+  LLM call, and "works in Seattle" vs "works in Portland" may be a job change,
+  two offices, or a headquarters — the model cannot always tell.
+- The change itself is information. "Liked sushi until August" often says more
+  than either fact alone.
+- Deleting leaves ordinal gaps in the indexes; hiding does not.
+
+```python
+async def main():
+    memory = Memory(collection="user:xiaoyuzhang")
+
+    await memory.add("I work in Seattle")
+    await memory.add("I work in Portland")   # may supersede the Seattle fact
+
+    # What has been retired, and why
+    for record in await memory.history():
+        print(record.ordinal, record.text, record.reason, record.at)
+        print("  replaced by:", record.superseded_by)
+
+    # It was two offices, not a move — put it back
+    await memory.restore(record.ordinal)
+
+    # Or read the collection including everything superseded
+    everything = await memory.search("where I work", include_superseded=True)
+```
+
+**history(include_restored=False)** returns `list[SupersededRecord]`, oldest
+first. Each record carries `ordinal`, `superseded_by`, `at`, `reason`
+(`"contradiction"`, `"delete"`, or `"legacy"`), the `text` at the time, the
+`query` that triggered it, and `restored_at`.
+
+**restore(ordinals)** takes one ordinal or a list, returns how many were
+restored. Restoring does not erase the ledger entry — it timestamps it, so the
+history of the history survives too. Pass `include_restored=True` to see those.
+
+Collections written before the ledger existed are migrated automatically on
+first read; their entries have `reason="legacy"` and no `superseded_by`, since
+that was never recorded. They are restorable like any other.
 
 ### Search Across Collections
 
@@ -559,7 +616,9 @@ All methods are async:
 | `await add(messages)` | Add memories (auto-detects contradictions) |
 | `await search(query, limit=10)` | Search, returns `list[SearchItem]` |
 | `await search_by_embedding(query, limit=10)` | Embedding-only search, no LLM needed |
-| `await delete(query)` | Delete memories matching query (advanced) |
+| `await delete(query)` | Supersede memories matching query (advanced, reversible) |
+| `await history()` | Audit trail of superseded memories |
+| `await restore(ordinals)` | Undo a supersession |
 | `await stats()` | Get memory statistics |
 | `await export(path)` | Export to JSON file |
 | `await clear()` | Delete all memories in this collection |
@@ -568,12 +627,16 @@ All methods are async:
 **add() parameters:**
 - `messages`: str or list[dict] - Content to add
 - `infer`: bool (default True) - Use LLM to extract knowledge
-- `detect_contradictions`: bool (default True) - Auto-remove contradicting memories
+- `detect_contradictions`: bool (default True) - Auto-supersede contradicting memories
 - `valid_from`: str or None - ISO date, memory relevant from this date
 - `valid_to`: str or None - ISO date, memory expires after this date
 
 **search() / search_by_embedding() parameters:**
 - `include_expired`: bool (default False) - Include memories past their valid_to date
+
+**search() only:**
+- `include_superseded`: bool (default False) - Include memories that have been
+  superseded by newer ones
 
 **Releasing resources:**
 
@@ -650,6 +713,10 @@ result = await memory.add("I don't like Python anymore")
 
 print(f"Messages added: {result.messages_added}")
 print(f"Knowledge extracted: {result.entities_extracted}")
-print(f"Contradictions removed: {result.contradictions_removed}")
+print(f"Contradictions superseded: {result.contradictions_removed}")
 print(f"Success: {result.success}")
+
+# The records themselves, not just the count (None when nothing was retired)
+for record in result.superseded or []:
+    print(record.ordinal, record.text, "->", record.superseded_by)
 ```

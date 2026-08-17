@@ -1,4 +1,4 @@
-"""Tests for Momex search result filtering (expiry windows, tombstones).
+"""Tests for Momex search result filtering (expiry windows, supersession).
 
 These exercise Memory._search_structured / Memory.search with fake collections
 so they run offline, without an LLM or embedding API key.
@@ -82,6 +82,7 @@ def _make_memory(conversation) -> Memory:
     memory._conversation = conversation  # type: ignore[assignment]
     memory._initialized = True
     memory._deleted_semref_ids = set()  # avoid touching real metadata storage
+    memory._supersession_ledger = []
     return memory
 
 
@@ -211,3 +212,80 @@ async def test_expired_messages_are_filtered_out(monkeypatch):
     texts = [item.text for item in results]
     assert "Netflix renews May 1" not in texts
     assert "I like Python" in texts
+
+
+@pytest.mark.asyncio
+async def test_superseded_knowledge_is_hidden_from_search(monkeypatch):
+    """The ledger, not deletion, is what removes a memory from the current view."""
+    from momex.memory import SupersededRecord
+
+    messages = [_FakeMessage("I like sushi"), _FakeMessage("I don't like sushi")]
+    semantic_refs = [
+        _FakeSemanticRef(Topic(text="likes sushi"), 0),
+        _FakeSemanticRef(Topic(text="dislikes sushi"), 1),
+    ]
+    memory = _make_memory(_FakeConversation(messages, semantic_refs))
+    memory._supersession_ledger = [
+        SupersededRecord(
+            ordinal=0,
+            superseded_by=[1],
+            at="2026-08-17T00:00:00Z",
+            reason="contradiction",
+        )
+    ]
+
+    _stub_language_search(
+        monkeypatch,
+        {
+            "topic": SemanticRefSearchResult(
+                term_matches=set(),
+                semantic_ref_matches=[
+                    ScoredSemanticRefOrdinal(semantic_ref_ordinal=0, score=9.0),
+                    ScoredSemanticRefOrdinal(semantic_ref_ordinal=1, score=8.0),
+                ],
+            )
+        },
+    )
+
+    texts = [item.text for item in await memory.search("sushi", limit=10)]
+    assert texts == ["dislikes sushi"]
+
+
+@pytest.mark.asyncio
+async def test_include_superseded_returns_the_full_history(monkeypatch):
+    """Nothing was destroyed, so the old fact is still retrievable on request."""
+    from momex.memory import SupersededRecord
+
+    messages = [_FakeMessage("I like sushi"), _FakeMessage("I don't like sushi")]
+    semantic_refs = [
+        _FakeSemanticRef(Topic(text="likes sushi"), 0),
+        _FakeSemanticRef(Topic(text="dislikes sushi"), 1),
+    ]
+    memory = _make_memory(_FakeConversation(messages, semantic_refs))
+    memory._supersession_ledger = [
+        SupersededRecord(
+            ordinal=0,
+            superseded_by=[1],
+            at="2026-08-17T00:00:00Z",
+            reason="contradiction",
+        )
+    ]
+
+    _stub_language_search(
+        monkeypatch,
+        {
+            "topic": SemanticRefSearchResult(
+                term_matches=set(),
+                semantic_ref_matches=[
+                    ScoredSemanticRefOrdinal(semantic_ref_ordinal=0, score=9.0),
+                    ScoredSemanticRefOrdinal(semantic_ref_ordinal=1, score=8.0),
+                ],
+            )
+        },
+    )
+
+    texts = [
+        item.text
+        for item in await memory.search("sushi", limit=10, include_superseded=True)
+    ]
+    assert sorted(texts) == ["dislikes sushi", "likes sushi"]

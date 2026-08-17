@@ -2,6 +2,9 @@
 
 delete() used to report one deletion per candidate id regardless of what
 actually happened, and re-deleting the same query inflated the count further.
+
+Deletion is now a supersession: the semantic ref is never destroyed, it is
+appended to the ledger with reason="delete" and hidden from search.
 """
 
 import pytest
@@ -15,17 +18,8 @@ class _FakeSemanticRef:
         self.semantic_ref_ordinal = ordinal
 
 
-class _RecordingPropertyIndex:
-    def __init__(self):
-        self.removed: list[int] = []
-
-    async def remove_all_for_semref(self, semref_id: int) -> None:
-        self.removed.append(semref_id)
-
-
 class _FakeStorageProvider:
-    def __init__(self):
-        self.property_index = _RecordingPropertyIndex()
+    pass
 
 
 class _FakeConversation:
@@ -43,12 +37,18 @@ def memory(tmp_path, monkeypatch):
     mem._conversation = _FakeConversation()  # type: ignore[assignment]
     mem._initialized = True
     mem._deleted_semref_ids = set()
+    mem._supersession_ledger = []
 
-    async def _no_persist(deleted_ids):
-        return None
+    async def _no_persist_ledger(records):
+        mem._supersession_ledger = records
 
-    monkeypatch.setattr(mem, "_store_deleted_semref_ids", _no_persist)
+    monkeypatch.setattr(mem, "_store_ledger", _no_persist_ledger)
     return mem
+
+
+def _hidden(memory) -> list[int]:
+    """Ordinals currently hidden from search, in ledger order."""
+    return [r.ordinal for r in memory._supersession_ledger if r.active]
 
 
 def _stub_search(memory, items):
@@ -73,8 +73,7 @@ async def test_deletes_knowledge_and_reports_accurate_count(memory):
     _stub_search(memory, [_knowledge("likes sushi", 1), _knowledge("sushi", 2)])
 
     assert await memory.delete("likes sushi") == 2
-    assert memory._conversation.storage_provider.property_index.removed == [1, 2]
-    assert memory._deleted_semref_ids == {1, 2}
+    assert _hidden(memory) == [1, 2]
 
 
 @pytest.mark.asyncio
@@ -82,7 +81,7 @@ async def test_messages_are_not_deleted(memory):
     _stub_search(memory, [_message("I like sushi"), _knowledge("likes sushi", 1)])
 
     assert await memory.delete("sushi") == 1
-    assert memory._conversation.storage_provider.property_index.removed == [1]
+    assert _hidden(memory) == [1]
 
 
 @pytest.mark.asyncio
@@ -91,7 +90,7 @@ async def test_repeat_delete_does_not_inflate_count(memory):
 
     assert await memory.delete("likes sushi") == 1
     assert await memory.delete("likes sushi") == 0
-    assert memory._conversation.storage_provider.property_index.removed == [1]
+    assert _hidden(memory) == [1]
 
 
 @pytest.mark.asyncio
@@ -99,7 +98,7 @@ async def test_duplicate_ids_counted_once(memory):
     _stub_search(memory, [_knowledge("a", 7), _knowledge("b", 7)])
 
     assert await memory.delete("whatever") == 1
-    assert memory._conversation.storage_provider.property_index.removed == [7]
+    assert _hidden(memory) == [7]
 
 
 @pytest.mark.asyncio
@@ -110,7 +109,7 @@ async def test_min_score_filters_weak_matches(memory):
     )
 
     assert await memory.delete("sushi", min_score=1.0) == 1
-    assert memory._conversation.storage_provider.property_index.removed == [1]
+    assert _hidden(memory) == [1]
 
 
 @pytest.mark.asyncio
@@ -118,8 +117,7 @@ async def test_dry_run_changes_nothing(memory):
     _stub_search(memory, [_knowledge("likes sushi", 1), _knowledge("sushi", 2)])
 
     assert await memory.delete("likes sushi", dry_run=True) == 2
-    assert memory._conversation.storage_provider.property_index.removed == []
-    assert memory._deleted_semref_ids == set()
+    assert _hidden(memory) == []
 
     # A real delete afterwards still reports both.
     assert await memory.delete("likes sushi") == 2
@@ -130,4 +128,21 @@ async def test_no_matches_returns_zero(memory):
     _stub_search(memory, [])
 
     assert await memory.delete("nothing") == 0
-    assert memory._conversation.storage_provider.property_index.removed == []
+    assert _hidden(memory) == []
+
+
+@pytest.mark.asyncio
+async def test_ledger_entry_records_why_and_what(memory):
+    """The audit trail must carry enough to review the decision later."""
+    _stub_search(memory, [_knowledge("likes sushi", 1)])
+
+    await memory.delete("sushi preferences")
+
+    (record,) = memory._supersession_ledger
+    assert record.ordinal == 1
+    assert record.reason == "delete"
+    assert record.text == "likes sushi"
+    assert record.query == "sushi preferences"
+    assert record.superseded_by == []
+    assert record.at
+    assert record.active
