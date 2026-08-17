@@ -344,6 +344,9 @@ class Memory:
         # Guards the temporary auto_extract_knowledge toggle in add(), which
         # mutates state shared by every concurrent call on this instance.
         self._settings_lock = asyncio.Lock()
+        # Serializes the ledger's read-modify-write. It lives in one metadata
+        # blob, so two concurrent writers would otherwise clobber each other.
+        self._ledger_lock = asyncio.Lock()
 
         # Auto-load dotenv
         self._load_dotenv()
@@ -517,20 +520,34 @@ class Memory:
     async def _append_supersessions(
         self, records: list[SupersededRecord]
     ) -> list[SupersededRecord]:
-        """Append entries to the ledger, skipping already-hidden ordinals."""
-        ledger = await self._load_ledger()
-        hidden = {r.ordinal for r in ledger if r.active}
+        """Append entries to the ledger, skipping already-hidden ordinals.
 
-        added: list[SupersededRecord] = []
-        for record in records:
-            if record.ordinal in hidden:
-                continue
-            hidden.add(record.ordinal)
-            added.append(record)
+        The ledger is stored as a single metadata blob, so appending to it is a
+        read-modify-write. Concurrent add() and delete() calls therefore raced:
+        each read the same list and wrote back its own version, and whichever
+        finished last erased the other's entries -- leaving memories that had
+        been judged contradictory visible again.
 
-        if added:
-            await self._store_ledger(ledger + added)
-        return added
+        The lock serializes those writers, and the cache is dropped inside it
+        so the merge starts from what is actually stored rather than from a
+        copy this instance read earlier. Concurrency *between processes* is
+        still not covered: the underlying blob has no compare-and-swap.
+        """
+        async with self._ledger_lock:
+            self._supersession_ledger = None
+            ledger = await self._load_ledger()
+            hidden = {r.ordinal for r in ledger if r.active}
+
+            added: list[SupersededRecord] = []
+            for record in records:
+                if record.ordinal in hidden:
+                    continue
+                hidden.add(record.ordinal)
+                added.append(record)
+
+            if added:
+                await self._store_ledger(ledger + added)
+            return added
 
     def _filter_search_results(
         self,
@@ -1573,17 +1590,22 @@ Response:"""
         if not wanted:
             return 0
 
-        ledger = await self._load_ledger()
-        now = _utc_now()
-        restored = 0
-        for record in ledger:
-            if record.active and record.ordinal in wanted:
-                record.restored_at = now
-                restored += 1
+        # Same read-modify-write as _append_supersessions, and the same lock:
+        # restoring against a stale copy would resurrect entries that a
+        # concurrent add() had just appended.
+        async with self._ledger_lock:
+            self._supersession_ledger = None
+            ledger = await self._load_ledger()
+            now = _utc_now()
+            restored = 0
+            for record in ledger:
+                if record.active and record.ordinal in wanted:
+                    record.restored_at = now
+                    restored += 1
 
-        if restored:
-            await self._store_ledger(ledger)
-        return restored
+            if restored:
+                await self._store_ledger(ledger)
+            return restored
 
     async def clear(self) -> bool:
         """Clear all memories for this collection.
@@ -1601,9 +1623,12 @@ Response:"""
 
         # clear() is the one genuinely destructive operation, and it drops the
         # underlying records too -- so the ledger has nothing left to describe.
-        self._deleted_semref_ids = set()
-        await self._store_deleted_semref_ids(self._deleted_semref_ids)
-        await self._store_ledger([])
+        # Under the same lock as the appenders, so a concurrent supersession
+        # cannot land entries pointing at refs that no longer exist.
+        async with self._ledger_lock:
+            self._deleted_semref_ids = set()
+            await self._store_deleted_semref_ids(self._deleted_semref_ids)
+            await self._store_ledger([])
 
         return True
 

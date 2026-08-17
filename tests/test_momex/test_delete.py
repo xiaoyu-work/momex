@@ -18,8 +18,30 @@ class _FakeSemanticRef:
         self.semantic_ref_ordinal = ordinal
 
 
+class _FakeMetadata:
+    def __init__(self):
+        self.extra: dict[str, str] = {}
+
+
 class _FakeStorageProvider:
-    pass
+    """Enough of the storage API for the ledger's metadata round trip.
+
+    The ledger is re-read from storage on every append, so a provider that
+    cannot persist would make each call start from an empty ledger.
+    """
+
+    def __init__(self):
+        self._metadata = _FakeMetadata()
+
+    async def get_conversation_metadata(self):
+        return self._metadata
+
+    async def set_conversation_metadata(self, **kwds):
+        for key, value in kwds.items():
+            if value is None:
+                self._metadata.extra.pop(key, None)
+            else:
+                self._metadata.extra[key] = value
 
 
 class _FakeConversation:
@@ -38,11 +60,6 @@ def memory(tmp_path, monkeypatch):
     mem._initialized = True
     mem._deleted_semref_ids = set()
     mem._supersession_ledger = []
-
-    async def _no_persist_ledger(records):
-        mem._supersession_ledger = records
-
-    monkeypatch.setattr(mem, "_store_ledger", _no_persist_ledger)
     return mem
 
 

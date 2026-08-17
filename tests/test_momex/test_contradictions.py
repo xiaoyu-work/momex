@@ -21,8 +21,30 @@ class _FakeSemanticRef:
         self.semantic_ref_ordinal = ordinal
 
 
+class _FakeMetadata:
+    def __init__(self):
+        self.extra: dict[str, str] = {}
+
+
 class _FakeStorageProvider:
-    pass
+    """Enough of the storage API for the ledger's metadata round trip.
+
+    The ledger is re-read from storage on every append, so a provider that
+    cannot persist would make each call start from an empty ledger.
+    """
+
+    def __init__(self):
+        self._metadata = _FakeMetadata()
+
+    async def get_conversation_metadata(self):
+        return self._metadata
+
+    async def set_conversation_metadata(self, **kwds):
+        for key, value in kwds.items():
+            if value is None:
+                self._metadata.extra.pop(key, None)
+            else:
+                self._metadata.extra[key] = value
 
 
 class _FakeConversation:
@@ -60,11 +82,7 @@ def memory(tmp_path, monkeypatch):
     async def _no_persist(_):
         return None
 
-    async def _no_persist_ledger(records):
-        mem._supersession_ledger = records
-
     monkeypatch.setattr(mem, "_store_deleted_semref_ids", _no_persist)
-    monkeypatch.setattr(mem, "_store_ledger", _no_persist_ledger)
     return mem
 
 
@@ -144,14 +162,16 @@ async def test_already_superseded_ids_are_not_recounted(memory, monkeypatch):
 
     llm = _FakeLLM("0")
     _wire(memory, monkeypatch, llm, [_knowledge("likes sushi", 1)])
-    memory._supersession_ledger = [
-        SupersededRecord(
-            ordinal=1,
-            superseded_by=[],
-            at="2026-01-01T00:00:00Z",
-            reason="contradiction",
-        )
-    ]
+    await memory._store_ledger(
+        [
+            SupersededRecord(
+                ordinal=1,
+                superseded_by=[],
+                at="2026-01-01T00:00:00Z",
+                reason="contradiction",
+            )
+        ]
+    )
 
     superseded = await memory._detect_and_remove_contradictions("I don't like sushi")
 
