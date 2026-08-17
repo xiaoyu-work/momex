@@ -1684,10 +1684,15 @@ Response:"""
 
         from .exceptions import ExportError
 
-        # Get all messages
-        messages = await conversation.messages.get_slice(0, 999999)
-        # Get all semantic refs
-        semrefs = await conversation.semantic_refs.get_slice(0, 999999)
+        # Sized from the collections themselves. A fixed upper bound silently
+        # truncated anything larger, and an export that drops records without
+        # saying so is worse than one that fails.
+        messages = await conversation.messages.get_slice(
+            0, await conversation.messages.size()
+        )
+        semrefs = await conversation.semantic_refs.get_slice(
+            0, await conversation.semantic_refs.size()
+        )
 
         from typeagent.knowpro import knowledge_schema as kplib
 
