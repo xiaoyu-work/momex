@@ -10,7 +10,7 @@ import pytest
 from momex import LLMConfig, Memory, MomexConfig, StorageConfig
 from momex.identity import canonical_knowledge, memory_id, new_source_id
 from typeagent.knowpro.interfaces import Topic
-from typeagent.knowpro.knowledge_schema import Action, ConcreteEntity, Facet
+from typeagent.knowpro.knowledge_schema import Action, ConcreteEntity, Facet, VerbTense
 from typeagent.knowpro.universal_message import ConversationMessage
 
 
@@ -23,7 +23,7 @@ def _entity(name="Xiaoyu", type_=None, facets=None, aliases=None):
     )
 
 
-def _action(subject="user", verbs=None, obj="sushi", tense="present"):
+def _action(subject="user", verbs=None, obj="sushi", tense: VerbTense = "present"):
     return Action(
         verbs=list(verbs or ["like"]),
         verb_tense=tense,

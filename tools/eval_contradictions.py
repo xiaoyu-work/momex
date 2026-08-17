@@ -34,20 +34,22 @@ from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import sys
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from momex.config import LLMConfig, MomexConfig  # noqa: E402
-from momex.contradictions import detect  # noqa: E402
+from momex.contradictions import detect, is_propositional  # noqa: E402
 from momex.results import SearchItem  # noqa: E402
 from momex.search import render_knowledge  # noqa: E402
 from tests.test_momex.contradiction_cases import Case, CASES  # noqa: E402
 
 
 class _Ref:
-    def __init__(self, ordinal: int):
+    def __init__(self, ordinal: int, knowledge: Any):
         self.semantic_ref_ordinal = ordinal
+        self.knowledge = knowledge
 
 
 @dataclass
@@ -93,29 +95,27 @@ class Report:
 def build_candidates(case: Case) -> tuple[list[SearchItem], dict[int, str]]:
     """The candidates the offline lookup would surface, as the judge sees them.
 
-    Taken from the case's expectations rather than by running the lookup: this
-    tool measures the judgment in isolation, so that a lookup regression shows
-    up in the offline harness rather than being blamed on the model.
+    Eligibility is decided by production's own is_propositional, not a copy of
+    the rule, so this cannot quietly drift from what actually happens.
+
+    Which memories are *reachable* is taken from the case rather than by
+    running the lookup: this tool measures the judgment in isolation, so a
+    lookup regression shows up in the offline harness rather than being blamed
+    on the model.
     """
     items: list[SearchItem] = []
     names: dict[int, str] = {}
     for ordinal, memory in enumerate(case.existing):
-        knowledge = memory.knowledge
-        if getattr(knowledge, "knowledge_type", None) not in ("action", "entity"):
-            continue
-        if getattr(knowledge, "knowledge_type", None) == "entity" and not getattr(
-            knowledge, "facets", None
-        ):
+        item = SearchItem(
+            type=str(getattr(memory.knowledge, "knowledge_type", "unknown")),
+            text=render_knowledge(memory.knowledge),
+            score=1.0,
+            raw=_Ref(ordinal, memory.knowledge),
+        )
+        if not is_propositional(item):
             continue
         names[ordinal] = memory.id
-        items.append(
-            SearchItem(
-                type=knowledge.knowledge_type,
-                text=render_knowledge(knowledge),
-                score=1.0,
-                raw=_Ref(ordinal),
-            )
-        )
+        items.append(item)
     return items, names
 
 

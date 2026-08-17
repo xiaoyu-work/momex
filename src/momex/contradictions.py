@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable
 
-from .identity import memory_id
 from .paths import utc_now
 from .results import SearchItem, SupersededRecord
 from .search import items_for_semrefs, lookup_property_ordinals

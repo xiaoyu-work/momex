@@ -7,8 +7,6 @@ no correct answer, and the only thing it can produce is a memory retired for
 contradicting something it could not have contradicted.
 """
 
-import pytest
-
 from momex.contradictions import is_propositional
 from momex.results import SearchItem
 from typeagent.knowpro.knowledge_schema import Action, ConcreteEntity, Facet

@@ -69,6 +69,10 @@ packages = ["src/momex", "src/typeagent"]
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+# The repo root, so tests can import `tools`. It is not part of the wheel, so
+# it is not installed, and `uv run pytest` (unlike `python -m pytest`) does not
+# put the working directory on sys.path.
+pythonpath = ["."]
 
 [tool.pyright]
 reportUnusedVariable = true

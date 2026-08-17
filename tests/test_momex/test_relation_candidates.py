@@ -70,7 +70,9 @@ class _Conversation:
     def __init__(self, semrefs, property_mapping):
         self.semantic_refs = _Collection(semrefs)
         self.messages = _Collection({})
-        self.secondary_indexes = _Indexes(_PropertyIndex(property_mapping))
+        self.secondary_indexes: _Indexes | None = _Indexes(
+            _PropertyIndex(property_mapping)
+        )
 
 
 class TestRelationProbes:
