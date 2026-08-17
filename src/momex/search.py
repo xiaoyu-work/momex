@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .identity import memory_id
 from .results import SearchItem
 from .timewindow import extract_time_window, is_outside_window
 
@@ -238,10 +239,12 @@ async def search_structured(
             src_timestamp: str | None = None
             valid_from: str | None = None
             valid_to: str | None = None
+            source_id: str | None = None
             if getattr(sem_ref, "range", None):
                 src_msg = src_msg_map.get(sem_ref.range.start.message_ordinal)
                 if src_msg is not None:
                     src_timestamp = getattr(src_msg, "timestamp", None)
+                    source_id = getattr(src_msg, "source_id", None)
                     valid_from, valid_to = extract_time_window(src_msg)
 
             if not include_expired and is_outside_window(valid_from, valid_to):
@@ -256,6 +259,7 @@ async def search_structured(
                     timestamp=src_timestamp,
                     valid_from=valid_from,
                     valid_to=valid_to,
+                    memory_id=memory_id(source_id, sem_ref.knowledge),
                 )
             )
 

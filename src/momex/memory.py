@@ -14,6 +14,7 @@ from typing import Any, TYPE_CHECKING
 
 from .config import MomexConfig
 from .contradictions import detect as detect_contradictions
+from .identity import new_source_id
 from .ledger import SupersessionLedger
 from .paths import collection_to_db_path, utc_now
 from .providers import create_postgres_provider, create_sqlite_provider, DB_FILENAME
@@ -260,6 +261,10 @@ class Memory:
                 metadata=ConversationMessageMeta(speaker=speaker),
                 tags=list(time_tags),
                 timestamp=utc_now(),
+                # What every memory extracted from this message will be
+                # identified by. Ordinals shift; this does not. See
+                # momex.identity.
+                source_id=new_source_id(),
             )
             ta_messages.append(ta_message)
 
@@ -547,6 +552,7 @@ class Memory:
 
         candidate_ids: list[int] = []
         texts_by_ordinal: dict[int, str] = {}
+        ids_by_ordinal: dict[int, str | None] = {}
         for item in results:
             if item.type == "message" or item.score < min_score:
                 continue
@@ -554,6 +560,7 @@ class Memory:
             if ordinal is not None:
                 candidate_ids.append(ordinal)
                 texts_by_ordinal.setdefault(ordinal, item.text)
+                ids_by_ordinal.setdefault(ordinal, item.memory_id)
 
         if not candidate_ids:
             return 0
@@ -578,6 +585,7 @@ class Memory:
                     reason="delete",
                     text=texts_by_ordinal.get(ordinal),
                     query=query,
+                    memory_id=ids_by_ordinal.get(ordinal),
                 )
                 for ordinal in new_ids
             ]

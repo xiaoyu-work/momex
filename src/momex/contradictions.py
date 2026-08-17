@@ -128,6 +128,7 @@ def records_for(
 ) -> list[SupersededRecord]:
     """Turn chosen indices into ledger entries, one per distinct ordinal."""
     texts_by_ordinal: dict[int, str] = {}
+    ids_by_ordinal: dict[int, str | None] = {}
     ordinals: list[int] = []
     for idx in indices:
         candidate = candidates[idx]
@@ -135,6 +136,7 @@ def records_for(
         if ordinal is not None:
             ordinals.append(ordinal)
             texts_by_ordinal.setdefault(ordinal, candidate.text)
+            ids_by_ordinal.setdefault(ordinal, candidate.memory_id)
 
     now = utc_now()
     return [
@@ -145,6 +147,7 @@ def records_for(
             reason="contradiction",
             text=texts_by_ordinal.get(ordinal),
             query=new_content,
+            memory_id=ids_by_ordinal.get(ordinal),
         )
         for ordinal in dict.fromkeys(ordinals)
     ]

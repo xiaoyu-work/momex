@@ -42,6 +42,15 @@ class SupersededRecord:
     restored_at: str | None = None
     """Set when restore() reversed this record. Non-None means inactive."""
 
+    memory_id: str | None = None
+    """Stable identity of the retired memory; see momex.identity.
+
+    `ordinal` is a position, and positions move. This does not, so an entry
+    written today can still be matched to its memory after a reindex. None for
+    entries written before this existed, and for memories whose source message
+    has no source_id.
+    """
+
     @property
     def active(self) -> bool:
         return self.restored_at is None
@@ -73,3 +82,6 @@ class SearchItem:
     # Rank-fusion score used to order hybrid search() results. None when the
     # item comes from a single-path search such as search_by_embedding().
     fusion_score: float | None = None
+    # Stable identity of this memory (see momex.identity). None for messages,
+    # and for knowledge whose source message predates source_id being set.
+    memory_id: str | None = None

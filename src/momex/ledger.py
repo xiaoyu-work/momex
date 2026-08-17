@@ -105,6 +105,7 @@ def encode_ledger(records: list[SupersededRecord]) -> dict[str, Any]:
                 "text": r.text,
                 "query": r.query,
                 "restored_at": r.restored_at,
+                "memory_id": r.memory_id,
             }
             for r in records
         ],
@@ -157,6 +158,11 @@ def decode_ledger(parsed: Any) -> list[SupersededRecord]:
                 restored_at=(
                     raw.get("restored_at")
                     if isinstance(raw.get("restored_at"), str)
+                    else None
+                ),
+                memory_id=(
+                    raw.get("memory_id")
+                    if isinstance(raw.get("memory_id"), str)
                     else None
                 ),
             )
