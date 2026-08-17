@@ -69,10 +69,10 @@ def _hidden(memory) -> list[int]:
 
 
 def _stub_search(memory, items):
-    async def fake_search(query_text, limit=10, **kwargs):
+    async def fake_structured(query_text, limit=10, **kwargs):
         return items
 
-    memory.search = fake_search  # type: ignore[method-assign]
+    memory._search_structured = fake_structured  # type: ignore[method-assign]
 
 
 def _knowledge(text, ordinal, score=10.0):
@@ -163,3 +163,33 @@ async def test_ledger_entry_records_why_and_what(memory):
     assert record.superseded_by == []
     assert record.at
     assert record.active
+
+
+@pytest.mark.asyncio
+async def test_identically_rendered_refs_are_both_deleted(memory):
+    """Distinct refs can render to the same text; both must go.
+
+    delete() used to go through search(), whose rank fusion keys on rendered
+    text. The same topic extracted from two messages collapsed into one result,
+    so one ordinal was retired and the other stayed visible.
+    """
+    _stub_search(memory, [_knowledge("sushi", 1), _knowledge("sushi", 2)])
+
+    assert await memory.delete("sushi") == 2
+    assert _hidden(memory) == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_does_not_run_the_embedding_search(memory, monkeypatch):
+    """Its results are all messages, which delete() discards anyway."""
+    calls = {"embedding": 0}
+
+    async def fake_embedding(query_text, limit=10, **kwargs):
+        calls["embedding"] += 1
+        return []
+
+    monkeypatch.setattr(memory, "search_by_embedding", fake_embedding)
+    _stub_search(memory, [_knowledge("likes sushi", 1)])
+
+    assert await memory.delete("sushi") == 1
+    assert calls["embedding"] == 0

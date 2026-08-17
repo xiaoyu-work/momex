@@ -1335,9 +1335,8 @@ class Memory:
             query: Search query to find memories to delete.
             limit: Maximum number of items to consider (default 50).
             min_score: Drop candidates whose native index score is below this.
-                Note the scales differ per index: structured term weights are
-                unbounded, embedding similarities are in [0, 1]. Defaults to
-                0.0, which keeps every candidate.
+                Scores here are structured term-match weights, which are
+                unbounded. Defaults to 0.0, which keeps every candidate.
             dry_run: If True, report how many items *would* be deleted without
                 changing anything.
 
@@ -1353,7 +1352,20 @@ class Memory:
         """
         await self._ensure_initialized()
 
-        results = await self.search(query, limit=limit)
+        # The structured path alone, not search(). Two reasons, and the second
+        # one is a correctness bug rather than a cost:
+        #
+        #   - Only extracted knowledge can be superseded, and the embedding
+        #     half of search() returns nothing but messages, so all of its work
+        #     was discarded by the type check below.
+        #   - search() merges the two paths with reciprocal rank fusion, which
+        #     collapses items by rendered text. Two distinct semantic refs that
+        #     render identically -- the same topic extracted from two messages,
+        #     say -- became one result, so delete() retired one ordinal and
+        #     silently left the other visible.
+        #
+        # This mirrors what _detect_and_remove_contradictions already does.
+        results = await self._search_structured(query, limit=limit)
 
         candidate_ids: list[int] = []
         texts_by_ordinal: dict[int, str] = {}
