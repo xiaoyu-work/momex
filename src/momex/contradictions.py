@@ -39,20 +39,51 @@ Only identify clear contradictions (e.g., "likes X" vs "doesn't like X"), not me
 Response:"""
 
 
+def is_propositional(item: SearchItem) -> bool:
+    """True when this piece of knowledge asserts something that can be false.
+
+    Contradiction is a relation between propositions, and most extracted
+    knowledge is not one:
+
+      - An action is. "user like sushi" has a truth value, and "user not-like
+        sushi" denies it.
+      - A bare entity is not. "sushi (type: food)" names a thing and
+        categorises it; no statement about preferences can make it false.
+      - An entity *with facets* is, through them. "Xiaoyu (type: person)
+        [employer: Microsoft]" asserts an employer, which a later "I work at
+        Google" replaces.
+      - A topic is not. "dietary preferences" is a label, not a claim.
+
+    Passing the others to the judge asks it a question with no correct answer,
+    and the only outcome it can produce is a false positive -- a memory retired
+    for contradicting something it cannot contradict. Missing a real
+    contradiction merely leaves a stale memory, which the next add() can still
+    correct; retiring a good one is silent data loss. So this errs toward
+    keeping memories.
+    """
+    if item.type == "action":
+        return True
+    if item.type == "entity":
+        knowledge = getattr(item.raw, "knowledge", None)
+        return bool(getattr(knowledge, "facets", None))
+    return False
+
+
 def select_candidates(
     results: list[SearchItem],
     protect_semrefs_from: int | None,
 ) -> list[SearchItem]:
     """Narrow search results to what may legitimately be retired.
 
-    Messages are dropped: only extracted knowledge can be superseded. So are
-    the semantic refs at or above `protect_semrefs_from`, which is where the
-    caller's own write starts -- those match the query by construction, and
-    retiring them would make the new memory contradict itself.
+    Two exclusions. Anything that is not a proposition cannot be contradicted
+    (see is_propositional). And the semantic refs at or above
+    `protect_semrefs_from` are where the caller's own write starts -- those
+    match the query by construction, and retiring them would make the new
+    memory contradict itself.
     """
     candidates: list[SearchItem] = []
     for item in results:
-        if item.type == "message":
+        if not is_propositional(item):
             continue
         if protect_semrefs_from is not None:
             ordinal = getattr(item.raw, "semantic_ref_ordinal", None)

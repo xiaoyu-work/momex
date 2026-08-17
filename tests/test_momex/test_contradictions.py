@@ -1,7 +1,8 @@
 """Tests for automatic contradiction detection during add().
 
 Contradiction detection only ever considers extracted knowledge, so it must not
-pay for the embedding search, which returns messages exclusively.
+pay for the embedding search, which returns messages exclusively. It considers
+only knowledge that asserts something -- see test_candidate_selection.py.
 
 Contradicted memories are superseded, not destroyed: the detector appends
 ledger entries and returns them, and the underlying semantic refs stay intact
@@ -17,8 +18,9 @@ from momex.results import SearchItem
 
 
 class _FakeSemanticRef:
-    def __init__(self, ordinal: int):
+    def __init__(self, ordinal: int, knowledge=None):
         self.semantic_ref_ordinal = ordinal
+        self.knowledge = knowledge
 
 
 class _FakeMetadata:
@@ -87,8 +89,9 @@ def _hidden(memory) -> list[int]:
 
 
 def _knowledge(text, ordinal):
+    """An action: the one knowledge type that is always propositional."""
     return SearchItem(
-        type="entity", text=text, score=10.0, raw=_FakeSemanticRef(ordinal)
+        type="action", text=text, score=10.0, raw=_FakeSemanticRef(ordinal)
     )
 
 
