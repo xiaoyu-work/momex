@@ -60,8 +60,8 @@ postgres = [
 ]
 
 [project.urls]
-GitHub = "https://github.com/xiaoyu-work/typeagent-py"
-Documentation = "https://github.com/xiaoyu-work/typeagent-py/tree/main/docs/momex.md"
+GitHub = "https://github.com/xiaoyu-work/momex"
+Documentation = "https://github.com/xiaoyu-work/momex/blob/main/docs/momex.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/momex", "src/typeagent"]
