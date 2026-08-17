@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import hashlib
 import json
 import logging
@@ -179,6 +179,9 @@ class Memory:
         self._conversation = None
         self._initialized = False
         self._deleted_semref_ids: set[int] | None = None
+        # Guards the temporary auto_extract_knowledge toggle in add(), which
+        # mutates state shared by every concurrent call on this instance.
+        self._settings_lock = asyncio.Lock()
 
         # Auto-load dotenv
         self._load_dotenv()
@@ -424,17 +427,16 @@ class Memory:
         await self._ensure_initialized()
         conversation_obj = self._conversation_required()
 
-        # Detect and remove contradictions before adding
+        # Reject unusable dates before anything is written. The window checks
+        # compare these lexicographically, so a non-padded value would fail
+        # silently rather than loudly.
+        valid_from = self._validate_iso_date(valid_from, "valid_from")
+        valid_to = self._validate_iso_date(valid_to, "valid_to")
+
+        # Contradiction removal runs *after* the write (see below): deleting
+        # first means a failed insert leaves the old facts gone and the
+        # replacement missing.
         contradictions_removed = 0
-        if infer and detect_contradictions:
-            content_text = (
-                messages
-                if isinstance(messages, str)
-                else " ".join(m.get("content", "") for m in messages)
-            )
-            contradictions_removed = await self._detect_and_remove_contradictions(
-                content_text
-            )
 
         from typeagent.knowpro.universal_message import (
             ConversationMessage,
@@ -483,7 +485,29 @@ class Memory:
 
         # Use TypeAgent's add_messages_with_indexing for full knowledge extraction
         if infer:
+            # Ordinals at or above this baseline belong to the write below, and
+            # must never be retired as contradictions of themselves.
+            try:
+                semref_baseline = await conversation_obj.semantic_refs.size()
+            except Exception:  # pragma: no cover - defensive
+                semref_baseline = None
+
             result = await conversation_obj.add_messages_with_indexing(ta_messages)
+
+            # Only now that the new content is durable do we retire whatever it
+            # contradicts. Detection matches the new facts too, so exclude the
+            # semrefs this call just produced.
+            if detect_contradictions:
+                content_text = (
+                    messages
+                    if isinstance(messages, str)
+                    else " ".join(m.get("content", "") for m in messages)
+                )
+                contradictions_removed = await self._detect_and_remove_contradictions(
+                    content_text,
+                    protect_semrefs_from=semref_baseline,
+                )
+
             return AddResult(
                 messages_added=result.messages_added,
                 entities_extracted=result.semrefs_added,
@@ -492,20 +516,20 @@ class Memory:
                 collections=[self.collection],
             )
         else:
-            # Direct add without LLM processing
-            # Temporarily disable auto_extract_knowledge
-            old_setting = (
-                conversation_obj.settings.semantic_ref_index_settings.auto_extract_knowledge
-            )
-            conversation_obj.settings.semantic_ref_index_settings.auto_extract_knowledge = (
-                False
-            )
-            try:
-                result = await conversation_obj.add_messages_with_indexing(ta_messages)
-            finally:
-                conversation_obj.settings.semantic_ref_index_settings.auto_extract_knowledge = (
-                    old_setting
-                )
+            # Direct add without LLM processing. The toggle below mutates state
+            # shared by every concurrent add() on this instance, so serialize
+            # the whole window -- an interleaved call would otherwise have its
+            # extraction silently disabled and could restore a stale value.
+            async with self._settings_lock:
+                index_settings = conversation_obj.settings.semantic_ref_index_settings
+                old_setting = index_settings.auto_extract_knowledge
+                index_settings.auto_extract_knowledge = False
+                try:
+                    result = await conversation_obj.add_messages_with_indexing(
+                        ta_messages
+                    )
+                finally:
+                    index_settings.auto_extract_knowledge = old_setting
 
             return AddResult(
                 messages_added=result.messages_added,
@@ -530,12 +554,44 @@ class Memory:
         return valid_from, valid_to
 
     @staticmethod
+    def _validate_iso_date(value: str | None, field: str) -> str | None:
+        """Normalize an ISO date, or raise if it cannot be compared safely.
+
+        The window checks compare these values lexicographically against
+        `YYYY-MM-DD`, which is only correct for zero-padded ISO dates. An
+        unpadded string like "2026-4-1" would sort *after* "2026-08-17" and
+        silently never expire, so reject it at write time instead.
+        """
+        if value is None:
+            return None
+        try:
+            parsed = date.fromisoformat(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"{field} must be an ISO date string (YYYY-MM-DD); got {value!r}"
+            ) from exc
+        return parsed.isoformat()
+
+    @staticmethod
     def _is_expired(valid_to: str | None) -> bool:
         """Check if a time window has expired (valid_to < today UTC)."""
         if not valid_to:
             return False
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return valid_to < today
+
+    @staticmethod
+    def _is_not_yet_active(valid_from: str | None) -> bool:
+        """Check if a time window has not opened yet (valid_from > today UTC)."""
+        if not valid_from:
+            return False
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return valid_from > today
+
+    @classmethod
+    def _is_outside_window(cls, valid_from: str | None, valid_to: str | None) -> bool:
+        """True when today falls outside [valid_from, valid_to]."""
+        return cls._is_expired(valid_to) or cls._is_not_yet_active(valid_from)
 
     async def _get_source_messages(self, sem_refs) -> dict[int, Any]:
         """Batch-fetch the source message of each semantic ref, keyed by ordinal."""
@@ -741,7 +797,9 @@ class Memory:
                         src_timestamp = getattr(src_msg, "timestamp", None)
                         valid_from, valid_to = self._extract_time_window(src_msg)
 
-                if not include_expired and self._is_expired(valid_to):
+                if not include_expired and self._is_outside_window(
+                    valid_from, valid_to
+                ):
                     continue
 
                 if isinstance(knowledge, kplib.ConcreteEntity):
@@ -799,7 +857,7 @@ class Memory:
                     continue
 
                 vf, vt = self._extract_time_window(msg)
-                if not include_expired and self._is_expired(vt):
+                if not include_expired and self._is_outside_window(vf, vt):
                     continue
 
                 text = (
@@ -903,7 +961,7 @@ class Memory:
                 msg = await conversation.messages.get_item(scored.message_ordinal)
 
                 vf, vt = self._extract_time_window(msg)
-                if not include_expired and self._is_expired(vt):
+                if not include_expired and self._is_outside_window(vf, vt):
                     continue
 
                 text = (
@@ -1021,11 +1079,20 @@ class Memory:
         if self.config.is_sqlite and hasattr(storage, "db"):
             storage.db.commit()  # type: ignore[attr-defined]
 
-    async def _detect_and_remove_contradictions(self, new_content: str) -> int:
+    async def _detect_and_remove_contradictions(
+        self,
+        new_content: str,
+        *,
+        protect_semrefs_from: int | None = None,
+    ) -> int:
         """Internal: Use LLM to detect and remove contradicting memories.
 
         Args:
             new_content: The new content being added.
+            protect_semrefs_from: Semantic-ref ordinal marking the start of the
+                knowledge extracted by the caller's own write. Those refs match
+                the query by construction and must be excluded, or the new
+                memory would be retired as a contradiction of itself.
 
         Returns:
             Number of contradicting memories removed.
@@ -1038,11 +1105,23 @@ class Memory:
         if not results:
             return 0
 
-        # Build context of existing memories
-        existing_memories = []
-        for i, item in enumerate(results):
-            if item.type != "message":
-                existing_memories.append(f"{i}: [{item.type}] {item.text}")
+        # Build context of existing memories. Only extracted knowledge can be
+        # retired, and the caller's own just-written refs are excluded. Prompt
+        # indices are dense so a small model has no gaps to misread; candidates
+        # maps them back to the original results.
+        candidates: list[SearchItem] = []
+        for item in results:
+            if item.type == "message":
+                continue
+            if protect_semrefs_from is not None:
+                ordinal = getattr(item.raw, "semantic_ref_ordinal", None)
+                if ordinal is not None and ordinal >= protect_semrefs_from:
+                    continue
+            candidates.append(item)
+
+        existing_memories = [
+            f"{i}: [{item.type}] {item.text}" for i, item in enumerate(candidates)
+        ]
 
         if not existing_memories:
             return 0
@@ -1075,7 +1154,7 @@ Response:"""
             for part in response_text.replace(" ", "").split(","):
                 try:
                     idx = int(part)
-                    if 0 <= idx < len(results):
+                    if 0 <= idx < len(candidates):
                         indices.append(idx)
                 except ValueError:
                     continue
@@ -1086,11 +1165,9 @@ Response:"""
             # Delete contradicting memories
             semref_ids = []
             for idx in indices:
-                item = results[idx]
-                if item.type != "message":
-                    ordinal = getattr(item.raw, "semantic_ref_ordinal", None)
-                    if ordinal is not None:
-                        semref_ids.append(ordinal)
+                ordinal = getattr(candidates[idx].raw, "semantic_ref_ordinal", None)
+                if ordinal is not None:
+                    semref_ids.append(ordinal)
 
             if semref_ids:
                 deleted_ids = await self._load_deleted_semref_ids()
