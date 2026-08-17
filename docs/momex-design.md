@@ -57,6 +57,21 @@ Collection names map to directory structure. The `:` separator creates subdirect
 | `user:xiaoyuzhang` | `./momex_data/user/xiaoyuzhang/memory.db` |
 | `momex:engineering:xiaoyuzhang` | `./momex_data/momex/engineering/xiaoyuzhang/memory.db` |
 
+Collection names reach the filesystem, so each `:`-delimited segment must be
+usable as exactly one directory name:
+
+- Characters that are path separators or are forbidden on Windows
+  (`< > " | ? * : \ /`) are replaced with `_`. A segment containing `/` stays
+  one directory, so `user:a/b` becomes `momex_data/user/a_b`.
+- A segment made only of dots or whitespace (`.`, `..`, empty) is rejected with
+  `ValidationError`. Such a segment names no directory of its own and would
+  resolve outside the storage path.
+- Substitution can make two different names collide (`a-b` and `a_b` both
+  become `a_b`). Treat collection names as you would filenames.
+
+Names are usually caller-supplied — in the multi-tenant pattern, user-supplied —
+so these rules are enforced rather than advisory.
+
 ### PostgreSQL
 
 Collections are isolated by PostgreSQL schema. By default, Momex derives a
