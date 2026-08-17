@@ -61,8 +61,8 @@ Collection names map to directory structure. The `:` separator creates subdirect
 
 Collections are isolated by PostgreSQL schema. By default, Momex derives a
 schema name from the collection name and sets `search_path` so all tables are
-created inside that schema. You can also set `postgres.schema` (or
-`MOMEX_POSTGRES_SCHEMA`) to override this.
+created inside that schema. You can also set `storage.postgres_schema` (or
+`MOMEX_STORAGE_POSTGRES_SCHEMA`) to override this.
 
 Schema naming notes:
 - Collection names are lowercased and any non `[a-zA-Z0-9_]` characters are
