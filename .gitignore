@@ -57,3 +57,6 @@ momex_data/
 
 # LongMemEval benchmark
 /longmemeval_bench/
+# LOCOMO benchmark: downloaded data and the collections it ingests into.
+/benchmarks/data/
+/benchmarks/store/
