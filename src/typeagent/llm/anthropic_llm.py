@@ -20,7 +20,7 @@ class AnthropicLLM(LLMBase):
 
         self._client = AsyncAnthropic(api_key=self.config.api_key)
 
-    async def chat(
+    async def _chat(
         self,
         messages: list[dict[str, str]],
         temperature: float | None = None,
@@ -38,16 +38,4 @@ class AnthropicLLM(LLMBase):
         return LLMResponse(
             content=response.content[0].text if response.content else "",
             raw=response,
-        )
-
-    async def complete(
-        self,
-        prompt: str,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-    ) -> LLMResponse:
-        return await self.chat(
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=max_tokens,
         )

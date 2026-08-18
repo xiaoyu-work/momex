@@ -21,7 +21,7 @@ class OpenAILLM(LLMBase):
             base_url=self.config.api_base or None,
         )
 
-    async def chat(
+    async def _chat(
         self,
         messages: list[dict[str, str]],
         temperature: float | None = None,
@@ -39,16 +39,4 @@ class OpenAILLM(LLMBase):
         return LLMResponse(
             content=response.choices[0].message.content or "",
             raw=response,
-        )
-
-    async def complete(
-        self,
-        prompt: str,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-    ) -> LLMResponse:
-        return await self.chat(
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=max_tokens,
         )
