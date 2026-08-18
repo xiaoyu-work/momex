@@ -197,7 +197,11 @@ class PostgresMessageTextIndex(IMessageTextEmbeddingIndex):
         threshold_score: float | None = None,
     ) -> list[interfaces.ScoredMessageOrdinal]:
         """Look up messages by text content."""
-        scored_locations = await self.lookup_text(message_text, None, threshold_score)
+        # See the note in the SQLite implementation: passing None here does not
+        # mean "no limit", it means VectorBase's default of ten.
+        scored_locations = await self.lookup_text(
+            message_text, max_matches, threshold_score
+        )
         return self._scored_locations_to_message_ordinals(scored_locations, max_matches)
 
     async def lookup_messages_in_subset(

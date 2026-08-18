@@ -237,7 +237,15 @@ class SqliteMessageTextIndex(IMessageTextEmbeddingIndex):
         threshold_score: float | None = None,
     ) -> list[interfaces.ScoredMessageOrdinal]:
         """Look up messages by text content."""
-        scored_locations = await self.lookup_text(message_text, None, threshold_score)
+        # max_matches has to reach the vector search. Passing None here does
+        # not mean "no limit" further down: VectorBase.fuzzy_lookup_embedding
+        # substitutes 10 for a missing max_hits, so every caller silently got
+        # ten messages however many it asked for, and trimming afterwards
+        # could only make that smaller. The in-memory implementation has
+        # always passed it through; this makes the backends agree.
+        scored_locations = await self.lookup_text(
+            message_text, max_matches, threshold_score
+        )
         return self._scored_locations_to_message_ordinals(scored_locations, max_matches)
 
     async def lookup_messages_in_subset(
@@ -248,7 +256,11 @@ class SqliteMessageTextIndex(IMessageTextEmbeddingIndex):
         threshold_score: float | None = None,
     ) -> list[interfaces.ScoredMessageOrdinal]:
         """Look up messages in a subset of ordinals."""
-        # Get all matches first
+        # Scoring happens across every message, so the candidates have to be
+        # fetched before the subset filter can be applied. `None` here still
+        # means VectorBase's default of ten candidates, which is rarely enough
+        # to leave anything once filtered -- pass an explicit max_matches if
+        # you start using this.
         all_matches = await self.lookup_messages(message_text, None, threshold_score)
 
         # Filter to only include the specified ordinals
