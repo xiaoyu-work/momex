@@ -51,7 +51,9 @@ async def main() -> int:
     await memory._ensure_initialized()
     conv = memory._conversation_required()
 
-    index = conv.secondary_indexes.message_index
+    indexes = conv.secondary_indexes
+    assert indexes is not None and indexes.message_index is not None
+    index = indexes.message_index
     print(f"messages stored:   {await conv.messages.size()}")
     print(f"message index size:{await index.size()}")
     print(f"semantic refs:     {await conv.semantic_refs.size()}\n")
