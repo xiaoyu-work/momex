@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Any, TYPE_CHECKING
 
-from .config import MomexConfig
+from .config import load_dotenv_once, MomexConfig
 from .contradictions import detect as detect_contradictions
 from .contradictions import find_candidates as find_contradiction_candidates
 from .identity import new_source_id
@@ -77,16 +77,7 @@ class Memory:
         self._settings_lock = asyncio.Lock()
 
         # Auto-load dotenv
-        self._load_dotenv()
-
-    def _load_dotenv(self) -> None:
-        """Load environment variables from .env file."""
-        try:
-            from dotenv import load_dotenv
-
-            load_dotenv()
-        except ImportError:
-            pass
+        load_dotenv_once()
 
     async def _ensure_initialized(self) -> None:
         """Ensure the TypeAgent conversation is initialized."""

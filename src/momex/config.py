@@ -34,6 +34,35 @@ _EMBEDDING_ENV_KEYS = (
 )
 
 
+def load_dotenv_once() -> None:
+    """Make a .env file visible to os.environ, if one is present.
+
+    Anything that reads configuration from the environment has to do this
+    first. Momex documents that it "automatically loads .env files from the
+    current or parent directory", and until now only Memory.__init__ did --
+    which is too late for the documented pattern `MomexConfig.from_env()`,
+    since the config is fully built before any Memory exists. The result was a
+    config with empty fields and a "model is required" error naming the setting
+    the user had in fact set.
+
+    `usecwd=True` matters. Bare `load_dotenv()` searches upward from the
+    *calling file* rather than the working directory, so for an installed
+    Momex it walks up out of site-packages and never sees the .env sitting in
+    the user's project. It only appeared to work when running from a checkout,
+    where the two happen to coincide.
+
+    python-dotenv does not override variables already exported, so a real
+    environment variable still wins over the file.
+    """
+    try:
+        from dotenv import find_dotenv, load_dotenv
+    except ImportError:  # pragma: no cover - dotenv is a declared dependency
+        return
+    path = find_dotenv(usecwd=True)
+    if path:
+        load_dotenv(path)
+
+
 def _env_int(name: str, default: int) -> int:
     """Read an int env var, falling back to default when unset or malformed."""
     try:
@@ -211,6 +240,8 @@ class MomexConfig:
                 MOMEX_STORAGE_POSTGRES_POOL_MAX - Maximum pool connections
                 MOMEX_STORAGE_POSTGRES_PGBOUNCER - "true" for Supabase/PgBouncer
         """
+        load_dotenv_once()
+
         # LLM config
         llm = LLMConfig(
             provider=os.getenv("MOMEX_LLM_PROVIDER", "openai"),
@@ -378,6 +409,10 @@ class MomexConfig:
               postgres_schema: ""
         """
         import yaml
+
+        # The secret fallbacks at the end of this method read the environment,
+        # so a .env file has to be visible before they run.
+        load_dotenv_once()
 
         path = Path(path)
         if not path.exists():
