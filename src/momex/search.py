@@ -25,6 +25,13 @@ logger = logging.getLogger(__name__)
 # influence of the top ranks so one list cannot dominate the merged order.
 RRF_K = 60
 
+# How far past `limit` to look for candidates when deduplicating. Extraction
+# writes one semantic ref per message, so a frequently mentioned entity
+# produces long runs of identical renderings that all score alike; the window
+# has to be wide enough to reach past such a run and still find the results
+# that differ. Bounded, so a broad query cannot turn into an unbounded fetch.
+_DEDUPE_CANDIDATE_FACTOR = 10
+
 
 async def fetch_many(collection: Any, ordinals: list[int]) -> dict[int, Any]:
     """Fetch ordinals in one call, falling back to one at a time.
@@ -241,11 +248,26 @@ async def search_structured(
     *,
     hidden_ordinals: set[int] | None = None,
     include_expired: bool = False,
+    dedupe: bool = True,
 ) -> list[SearchItem]:
     """Structured RAG search using LLM query translation + term matching.
 
     `hidden_ordinals` are dropped from the raw results before anything is
     fetched, so superseded knowledge never reaches the caller.
+
+    `dedupe` collapses knowledge that renders identically, keeping the
+    highest-scoring occurrence. This matters more than it sounds. Extraction
+    produces one semantic ref per message, so an entity mentioned in two
+    hundred messages becomes two hundred refs that all render to
+    "Caroline (type: person)" and all score the same for a term query naming
+    her. Without collapsing them, the entire top-k budget goes to copies of
+    one entity: measured on LOCOMO, the top 20 structured results were 20
+    duplicates and answered 0% of questions, while the same search deduped
+    leaves room for the refs that actually differ.
+
+    Turn it off when you need every matching ordinal rather than every
+    distinct memory -- delete() does, because two refs that read the same are
+    still two refs and retiring one would leave the other visible.
     """
     import typechat
 
@@ -284,15 +306,21 @@ async def search_structured(
     if hidden_ordinals:
         search_results = filter_search_results(search_results, hidden_ordinals)
 
-    # Collect all ordinals first for batch fetching
+    # Collect all ordinals first for batch fetching. When deduping, take a
+    # wider window than the caller asked for: the duplicates are only visible
+    # once the knowledge is fetched and rendered, so slicing at `limit` here
+    # would discard the distinct results before anything could tell them
+    # apart. A run of one entity's copies is routinely longer than `limit`.
+    window = limit * _DEDUPE_CANDIDATE_FACTOR if dedupe else limit
+
     semref_requests: list[tuple[int, float]] = []  # (ordinal, score)
     msg_requests: list[tuple[int, float]] = []  # (ordinal, score)
 
     for search_result in search_results:
         for _, matches in search_result.knowledge_matches.items():
-            for scored in matches.semantic_ref_matches[:limit]:
+            for scored in matches.semantic_ref_matches[:window]:
                 semref_requests.append((scored.semantic_ref_ordinal, scored.score))
-        for msg_match in search_result.message_matches[:limit]:
+        for msg_match in search_result.message_matches[:window]:
             msg_requests.append((msg_match.message_ordinal, msg_match.score))
 
     items: list[SearchItem] = []
@@ -338,6 +366,20 @@ async def search_structured(
             )
 
     items.sort(key=lambda x: x.score, reverse=True)
+
+    if dedupe:
+        # Already sorted, so the first occurrence of a rendering is also its
+        # highest-scoring one.
+        seen: set[tuple[str, str]] = set()
+        distinct: list[SearchItem] = []
+        for item in items:
+            key = (item.type, item.text)
+            if key in seen:
+                continue
+            seen.add(key)
+            distinct.append(item)
+        items = distinct
+
     return items[:limit]
 
 

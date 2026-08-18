@@ -387,6 +387,7 @@ class Memory:
         *,
         include_expired: bool = False,
         include_superseded: bool = False,
+        dedupe: bool = True,
     ) -> list[SearchItem]:
         """Structured RAG search using LLM query translation + term matching."""
         hidden = set() if include_superseded else await self._ledger.hidden_ordinals()
@@ -396,6 +397,7 @@ class Memory:
             limit=limit,
             hidden_ordinals=hidden,
             include_expired=include_expired,
+            dedupe=dedupe,
         )
 
     async def _search_structured_guarded(
@@ -538,8 +540,9 @@ class Memory:
         #     say -- became one result, so delete() retired one ordinal and
         #     silently left the other visible.
         #
-        # This mirrors what _detect_and_remove_contradictions already does.
-        results = await self._search_structured(query, limit=limit)
+        # dedupe=False for the same reason: here two refs that read the same
+        # are still two refs, and the caller asked for both to go.
+        results = await self._search_structured(query, limit=limit, dedupe=False)
 
         candidate_ids: list[int] = []
         texts_by_ordinal: dict[int, str] = {}
