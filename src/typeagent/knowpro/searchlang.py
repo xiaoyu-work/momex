@@ -694,7 +694,7 @@ def datetime_from_date_time(date_time: DateTime) -> Datetime:
 
 
 # LRU cache for LLM query translations (avoids repeated API calls for same query)
-_query_translation_cache: dict[str, "SearchQuery"] = {}
+_query_translation_cache: dict[tuple[str, str, str], "SearchQuery"] = {}
 _QUERY_CACHE_MAX_SIZE = 128
 
 
@@ -705,12 +705,21 @@ async def search_query_from_language(
     query_text: str,
     model_instructions: list[typechat.PromptSection] | None = None,
 ) -> typechat.Result[SearchQuery]:
-    # Check cache first
-    cache_key = query_text.strip().lower()
+    # The translation depends on more than the query text: the conversation's
+    # time range goes into the prompt below, and callers can add instructions
+    # of their own. Keying on the text alone made this cache return one
+    # conversation's compiled query for another's question -- and since this
+    # dict is process-global, "another" means any collection in the process.
+    # For a multi-tenant memory that is every other tenant.
+    time_range = await get_time_range_prompt_section_for_conversation(conversation)
+    cache_key = (
+        query_text.strip().lower(),
+        getattr(conversation, "name_tag", "") or "",
+        time_range["content"] if time_range else "",
+    )
     if cache_key in _query_translation_cache:
         return typechat.Success(_query_translation_cache[cache_key])
 
-    time_range = await get_time_range_prompt_section_for_conversation(conversation)
     prompt_preamble: list[typechat.PromptSection] = []
     if model_instructions:
         prompt_preamble.extend(model_instructions)

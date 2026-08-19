@@ -21,7 +21,11 @@ from .paths import collection_to_db_path, utc_now
 from .providers import create_postgres_provider, create_sqlite_provider, DB_FILENAME
 from .results import AddResult, SearchItem, SupersededRecord
 from .search import fuse_results, search_by_embedding, search_structured
-from .timewindow import validate_iso_date, window_tags
+from .timewindow import (
+    validate_iso_date,
+    validate_timestamp,
+    window_tags,
+)
 
 if TYPE_CHECKING:
     from typeagent.knowpro.conversation_base import ConversationBase
@@ -166,6 +170,7 @@ class Memory:
         detect_contradictions: bool = True,
         valid_from: str | None = None,
         valid_to: str | None = None,
+        timestamp: str | None = None,
     ) -> AddResult:
         """Add memories with TypeAgent's knowledge extraction.
 
@@ -185,6 +190,13 @@ class Memory:
                    from this date. None means no start constraint.
             valid_to: ISO date string (e.g., "2026-05-01"). Memory expires after this
                    date and will be excluded from search results. None means no expiry.
+            timestamp: When the memory happened, as ISO-8601 UTC
+                   ("2023-05-08T13:56:00Z"). Defaults to now, which is only
+                   right for something being said as it is stored. Anything
+                   backfilled -- an imported chat log, a migrated database, a
+                   summary of last week -- needs its real time, or the whole
+                   collection collapses onto the moment it was ingested and
+                   every temporal query becomes meaningless.
 
         Returns:
             AddResult with statistics about what was added.
@@ -217,6 +229,7 @@ class Memory:
         # silently rather than loudly.
         valid_from = validate_iso_date(valid_from, "valid_from")
         valid_to = validate_iso_date(valid_to, "valid_to")
+        occurred_at = validate_timestamp(timestamp) if timestamp else utc_now()
 
         # Contradiction handling runs *after* the write (see below): retiring
         # first means a failed insert leaves the old facts hidden and the
@@ -252,7 +265,7 @@ class Memory:
                 text_chunks=[content],
                 metadata=ConversationMessageMeta(speaker=speaker),
                 tags=list(time_tags),
-                timestamp=utc_now(),
+                timestamp=occurred_at,
                 # What every memory extracted from this message will be
                 # identified by. Ordinals shift; this does not. See
                 # momex.identity.

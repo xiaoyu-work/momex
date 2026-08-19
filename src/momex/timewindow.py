@@ -35,6 +35,27 @@ def validate_iso_date(value: str | None, field: str) -> str | None:
     return parsed.isoformat()
 
 
+def validate_timestamp(value: str) -> str:
+    """Normalize a moment to the `YYYY-MM-DDTHH:MM:SSZ` form messages carry.
+
+    TypeAgent parses these back when building the timestamp index and when
+    telling a query translator what period a conversation covers, so a value
+    it cannot read costs the collection its temporal dimension silently. A
+    date alone is accepted and means midnight UTC.
+    """
+    text = value.strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "timestamp must be ISO-8601 (e.g. '2023-05-08T13:56:00Z'); "
+            f"got {value!r}"
+        ) from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def window_tags(valid_from: str | None, valid_to: str | None) -> list[str]:
     """Render a window as message tags, so it survives serialization."""
     tags: list[str] = []

@@ -32,6 +32,7 @@ import argparse
 import asyncio
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import random
@@ -227,6 +228,28 @@ def select_questions(
 # ---------------------------------------------------------------- ingest
 
 
+def session_timestamp(label: str) -> str | None:
+    """Turn LOCOMO's session date into something add() can store.
+
+    They read like "1:56 pm on 8 May, 2023". Without this the whole
+    conversation lands on the moment it was imported, and every temporal
+    question is asked of the wrong timeline.
+    """
+    if not label:
+        return None
+    cleaned = label.replace(",", "").strip()
+    for fmt in ("%I:%M %p on %d %B %Y", "%d %B %Y", "%I:%M %p on %d %b %Y"):
+        try:
+            return (
+                datetime.strptime(cleaned, fmt)
+                .replace(tzinfo=timezone.utc)
+                .strftime("%Y-%m-%dT%H:%M:%SZ")
+            )
+        except ValueError:
+            continue
+    return None
+
+
 async def ingest(
     memory: Memory,
     conversation: Conversation,
@@ -239,8 +262,12 @@ async def ingest(
     Batching by session is what a caller would naturally do, and it keeps the
     number of add() round trips proportional to sessions rather than turns.
     Knowledge extraction still runs per message inside TypeAgent.
+
+    Each session is stored with the date it happened, so the collection covers
+    the months the conversation does rather than the minutes the import took.
     """
     started = time.monotonic()
+    unparsed = 0
     for index, (_key, date, turns) in enumerate(conversation.sessions, 1):
         messages = [
             {
@@ -252,13 +279,22 @@ async def ingest(
         ]
         if not messages:
             continue
-        await memory.add(messages, infer=True, detect_contradictions=contradictions)
+        when = session_timestamp(date)
+        unparsed += when is None
+        await memory.add(
+            messages,
+            infer=True,
+            detect_contradictions=contradictions,
+            timestamp=when,
+        )
         if verbose:
             print(
                 f"    session {index}/{len(conversation.sessions)} "
-                f"({len(messages)} turns)",
+                f"({len(messages)} turns) at {when}",
                 flush=True,
             )
+    if unparsed:
+        print(f"    warning: {unparsed} session dates were not parsed", flush=True)
     return time.monotonic() - started
 
 
