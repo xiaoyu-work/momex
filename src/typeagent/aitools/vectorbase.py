@@ -13,6 +13,11 @@ from .embeddings import (
 )
 from .model_adapters import create_embedding_model
 
+# Safety bound applied when a lookup is given no max_hits. It is a bound, not
+# a semantic default: with no score threshold either, "unlimited" would mean
+# the whole index. Callers that need more results pass an explicit number.
+DEFAULT_MAX_HITS = 10
+
 
 @dataclass
 class ScoredInt:
@@ -25,7 +30,10 @@ class TextEmbeddingIndexSettings:
     embedding_model: IEmbeddingModel
     embedding_size: int
     min_score: float  # Between 0.0 and 1.0
-    max_matches: int | None  # >= 1; None means no limit
+    # >= 1. None leaves the choice to the lookup, which applies
+    # DEFAULT_MAX_HITS as a safety bound -- it does *not* mean "no limit".
+    # Callers wanting more must ask for it explicitly.
+    max_matches: int | None
     batch_size: int  # >= 1
 
     def __init__(
@@ -135,8 +143,17 @@ class VectorBase:
         min_score: float | None = None,
         predicate: Callable[[int], bool] | None = None,
     ) -> list[ScoredInt]:
+        """Nearest vectors by cosine similarity.
+
+        `max_hits=None` falls back to DEFAULT_MAX_HITS rather than returning
+        everything: with `min_score` also absent the score filter is 0.0, so
+        "no limit" would mean the entire index. Callers that need more must
+        say how many -- and must actually pass it down. Dropping it on the way
+        here is what silently capped Momex's message search at ten results
+        regardless of what was asked for.
+        """
         if max_hits is None:
-            max_hits = 10
+            max_hits = DEFAULT_MAX_HITS
         if min_score is None:
             min_score = 0.0
         if len(self._vectors) == 0:
@@ -176,7 +193,7 @@ class VectorBase:
         min_score: float | None = None,
     ) -> list[ScoredInt]:
         if max_hits is None:
-            max_hits = 10
+            max_hits = DEFAULT_MAX_HITS
         if min_score is None:
             min_score = 0.0
         if not ordinals_of_subset or len(self._vectors) == 0:
