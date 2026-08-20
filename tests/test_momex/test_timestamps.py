@@ -115,9 +115,7 @@ class TestAdd:
         assert stamps == {"2023-05-08T00:00:00Z"}
 
     @pytest.mark.asyncio
-    async def test_a_bad_timestamp_is_rejected_before_anything_is_written(
-        self, memory
-    ):
+    async def test_a_bad_timestamp_is_rejected_before_anything_is_written(self, memory):
         with pytest.raises(ValueError):
             await memory.add("anything", infer=False, timestamp="last Tuesday")
 

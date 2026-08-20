@@ -36,7 +36,14 @@ class SqliteMessageTextIndex(IMessageTextEmbeddingIndex):
         self._vectorbase = VectorBase(settings=settings.embedding_index_settings)
         if self._size():
             cursor = self.db.cursor()
-            cursor.execute("SELECT embedding FROM MessageTextIndex")
+            # Ordered by the position each embedding was stored under, because
+            # that is the key fuzzy_lookup results are resolved through. An
+            # unordered SELECT only happens to line up while the stored
+            # positions are 0..N-1; after a clear() and re-ingest they are not,
+            # and every lookup silently resolves to nothing.
+            cursor.execute(
+                "SELECT embedding FROM MessageTextIndex ORDER BY index_position"
+            )
             rows = cursor.fetchall()
             if rows:
                 embeddings: list[NormalizedEmbedding] = [
@@ -73,15 +80,24 @@ class SqliteMessageTextIndex(IMessageTextEmbeddingIndex):
             [chunk for _, _, chunk in chunks_to_embed], cache=False
         )
 
+        # Positions are derived from what is stored, not from the in-memory
+        # VectorBase. The two agree only until something empties the table:
+        # clear() deletes the rows but leaves this instance's VectorBase
+        # populated, so the next ingest wrote positions starting at the old
+        # count while a later process loaded the same rows at 0..N-1. Nothing
+        # matched after that, and nothing said so.
+        current_size = self._size()
         insertion_data: list[tuple[int, int, bytes, int]] = []
         for idx, ((msg_ord, chunk_ord, _), embedding) in enumerate(
             zip(chunks_to_embed, embeddings)
         ):
-            # Get the current VectorBase size to determine the index position
-            current_size = len(self._vectorbase)
-            index_position = current_size + idx
             insertion_data.append(
-                (msg_ord, chunk_ord, serialize_embedding(embedding), index_position)
+                (
+                    msg_ord,
+                    chunk_ord,
+                    serialize_embedding(embedding),
+                    current_size + idx,
+                )
             )
 
         # Bulk insert into DB
@@ -415,3 +431,9 @@ class SqliteMessageTextIndex(IMessageTextEmbeddingIndex):
         """Clear the message text index."""
         cursor = self.db.cursor()
         cursor.execute("DELETE FROM MessageTextIndex")
+        # And the vectors held alongside them. Leaving those behind left this
+        # instance believing it had N embeddings for an empty table, so the
+        # next ingest numbered its rows from N while any later process loaded
+        # them from 0 -- two disjoint position spaces, and lookups that
+        # resolved to nothing without failing.
+        self._vectorbase.clear()
