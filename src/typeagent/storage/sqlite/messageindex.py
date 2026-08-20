@@ -34,6 +34,7 @@ class SqliteMessageTextIndex(IMessageTextEmbeddingIndex):
         self.settings = settings
         self._message_collection = message_collection
         self._vectorbase = VectorBase(settings=settings.embedding_index_settings)
+        self._align_stored_positions()
         if self._size():
             cursor = self.db.cursor()
             # Ordered by the position each embedding was stored under, because
@@ -53,6 +54,37 @@ class SqliteMessageTextIndex(IMessageTextEmbeddingIndex):
                     np.float32, copy=False
                 )
                 self._vectorbase.add_embeddings(None, embeddings_array)
+
+    def _align_stored_positions(self) -> int:
+        """Renumber index_position to 0..N-1, returning how many rows moved.
+
+        Rows written before the position bug was fixed can start from a stale
+        offset -- 419..837 on a collection that had been cleared and re-ingested
+        once. Deleting a message leaves a hole the same way. Loading orders by
+        this column, so the vectors keep the right relative order, but the
+        stored values no longer name VectorBase slots and every lookup resolves
+        to nothing. The data is intact and only the numbering is wrong, so
+        renumbering in place repairs it without needing a re-ingest.
+
+        Healthy collections are already 0..N-1 and nothing is written.
+        """
+        cursor = self.db.cursor()
+        rows = cursor.execute(
+            "SELECT msg_id, chunk_ordinal, index_position FROM MessageTextIndex"
+            " ORDER BY index_position"
+        ).fetchall()
+        updates = [
+            (expected, msg_id, chunk_ordinal)
+            for expected, (msg_id, chunk_ordinal, stored) in enumerate(rows)
+            if stored != expected
+        ]
+        if updates:
+            cursor.executemany(
+                "UPDATE MessageTextIndex SET index_position = ?"
+                " WHERE msg_id = ? AND chunk_ordinal = ?",
+                updates,
+            )
+        return len(updates)
 
     async def size(self) -> int:
         return self._size()

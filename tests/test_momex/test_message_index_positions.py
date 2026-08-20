@@ -179,3 +179,75 @@ async def test_incremental_ingest_keeps_positions_contiguous(db, settings):
     reopened = SqliteMessageTextIndex(db, settings)
     hits = await reopened.lookup_messages(TEXTS[2], max_matches=5, threshold_score=0.0)
     assert hits and hits[0].message_ordinal == 2
+
+
+@pytest.mark.asyncio
+async def test_a_database_written_before_the_fix_repairs_itself(db, settings):
+    """Fixing the write path does not help collections already on disk.
+
+    A store written by the buggy version holds rows numbered from a stale
+    offset. The vectors are intact and in the right relative order, so the
+    numbering is repairable, and it has to be -- otherwise those collections
+    return nothing forever and nothing says why.
+    """
+    index = SqliteMessageTextIndex(db, settings)
+    await _ingest(index, TEXTS)
+    # Exactly the shape the old code produced: dense, ordered, wrong origin.
+    db.execute("UPDATE MessageTextIndex SET index_position = index_position + 419")
+    assert _positions(db) == [419, 420, 421]
+
+    reopened = SqliteMessageTextIndex(db, settings)
+
+    assert _positions(db) == [0, 1, 2]
+    hits = await reopened.lookup_messages(TEXTS[1], max_matches=5, threshold_score=0.0)
+    assert hits, "a repaired index still resolved nothing"
+    assert hits[0].message_ordinal == 1
+
+
+@pytest.mark.asyncio
+async def test_repair_preserves_which_message_each_vector_names(db, settings):
+    """Renumbering must not shuffle the vector-to-message pairing.
+
+    Every text must still find itself, not merely find something.
+    """
+    index = SqliteMessageTextIndex(db, settings)
+    await _ingest(index, TEXTS)
+    db.execute("UPDATE MessageTextIndex SET index_position = index_position + 7")
+
+    reopened = SqliteMessageTextIndex(db, settings)
+
+    for expected_ordinal, text in enumerate(TEXTS):
+        hits = await reopened.lookup_messages(text, max_matches=1, threshold_score=0.0)
+        assert hits and hits[0].message_ordinal == expected_ordinal, text
+
+
+@pytest.mark.asyncio
+async def test_repair_leaves_a_healthy_index_untouched(db, settings):
+    """The common path must not pay for the broken one."""
+    index = SqliteMessageTextIndex(db, settings)
+    await _ingest(index, TEXTS)
+
+    reopened = SqliteMessageTextIndex(db, settings)
+
+    assert reopened._align_stored_positions() == 0
+    assert _positions(db) == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_repair_handles_gaps_left_by_deleted_messages(db, settings):
+    """Deleting a message cascades to its embedding row and leaves a hole.
+
+    The rows that remain then name VectorBase slots that no longer exist,
+    which is the same failure by a different route.
+    """
+    index = SqliteMessageTextIndex(db, settings)
+    await _ingest(index, TEXTS)
+    db.execute("DELETE FROM MessageTextIndex WHERE index_position = 0")
+    assert _positions(db) == [1, 2]
+
+    reopened = SqliteMessageTextIndex(db, settings)
+
+    assert _positions(db) == [0, 1]
+    for text, expected_ordinal in [(TEXTS[1], 1), (TEXTS[2], 2)]:
+        hits = await reopened.lookup_messages(text, max_matches=1, threshold_score=0.0)
+        assert hits and hits[0].message_ordinal == expected_ordinal, text
