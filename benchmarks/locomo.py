@@ -309,6 +309,38 @@ def render_context(items: list[SearchItem], limit: int) -> str:
     return "\n".join(lines) if lines else "(no memories retrieved)"
 
 
+def render_full_context(conversation: Conversation) -> str:
+    """The whole conversation, chronologically, grouped by session.
+
+    This is the baseline that says what the reader could do if retrieval were
+    perfect and free. Published LOCOMO numbers are usually quoted against
+    retrieval systems without one, which makes it impossible to tell how much
+    of a score belongs to the memory and how much to the reader. Comparing
+    against this, with the same model, prompt, judge and questions, is the only
+    comparison here that isolates retrieval.
+    """
+    blocks = []
+    for _, date, turns in conversation.sessions:
+        lines = [f"=== Session ({date}) ==="]
+        for turn in turns:
+            text = turn.get("text")
+            if not text:
+                continue  # ingest() skips these too, so the baseline must
+            lines.append(f"{turn.get('speaker', '?')}: {text}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+async def answer_from_context(llm, question: Question, context: str) -> str:
+    """Answer with a pre-rendered context, skipping retrieval entirely."""
+    prompt = ANSWER_PROMPT.format(context=context, question=question.question)
+    try:
+        response = await llm.complete(prompt, max_tokens=80)
+        return response.content.strip()
+    except Exception as exc:  # pragma: no cover
+        return f"LLM_ERROR: {exc}"
+
+
 async def answer_question(
     memory: Memory,
     llm,
@@ -502,6 +534,33 @@ async def run(args: argparse.Namespace) -> int:
             f"{len(questions)} questions"
         )
 
+        if args.full_context:
+            full_context = render_full_context(conversation)
+            print(f"  full context: {len(full_context.split())} words, no retrieval")
+            started = time.monotonic()
+            for index, question in enumerate(questions, 1):
+                predicted = await answer_from_context(llm, question, full_context)
+                judged = None
+                if args.judge:
+                    try:
+                        judged = await judge_answer(llm, question, predicted)
+                    except Exception:
+                        judged = None
+                results.append(
+                    Result(
+                        question,
+                        predicted,
+                        token_f1(predicted, question.answer),
+                        judged,
+                        conversation.turn_count,
+                        [],
+                    )
+                )
+                if index % 10 == 0:
+                    print(f"    {index}/{len(questions)}", flush=True)
+            query_seconds += time.monotonic() - started
+            continue
+
         stats = await memory.stats()
         if stats["total_messages"] and args.reuse:
             print(f"  reusing {stats['total_messages']} ingested messages")
@@ -585,6 +644,13 @@ def main() -> int:
         help=f"LOCOMO categories. Default {list(DEFAULT_CATEGORIES)}.",
     )
     parser.add_argument("--top-k", type=int, default=20)
+    parser.add_argument(
+        "--full-context",
+        action="store_true",
+        help="Skip retrieval and hand the reader the entire conversation. "
+        "This is the only comparison here that isolates retrieval: same "
+        "model, prompt, judge and questions, unlimited context.",
+    )
     parser.add_argument(
         "--fallback-score",
         type=float,
