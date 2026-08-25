@@ -31,7 +31,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -61,7 +61,7 @@ CATEGORY_NAMES = {
 }
 DEFAULT_CATEGORIES = (1, 2, 3, 4)
 
-ANSWER_PROMPT = """Answer the question using only the memories below.
+TERSE_PROMPT = """Answer the question using only the memories below.
 
 Memories:
 {context}
@@ -79,6 +79,45 @@ Rules:
 - If the memories do not contain the answer, reply exactly: NO_ANSWER
 
 Answer:"""
+
+# Reasoning first, no word limit, and no way to decline.
+#
+# Both differences are worth points rather than accuracy, and it is worth being
+# explicit about which is which. Reasoning aloud genuinely helps on questions
+# that need two facts combined or a date computed. The length and the missing
+# refusal do not: LOCOMO's judge is instructed to be generous about wording, so
+# a longer answer simply gives it more surface to match against, and a refusal
+# is scored identically to a wrong guess -- which makes guessing free. An
+# independent audit measured a 10.7 point swing on identical context from this
+# prompt difference alone, which is larger than the spread between the systems
+# the benchmark is used to rank.
+COT_PROMPT = """You are answering a question about a long conversation.
+
+Memories:
+{context}
+
+Question: {question}
+
+Work through these steps, then give the answer.
+
+1. RELEVANT MEMORIES: quote the memories that bear on the question.
+2. WHAT THEY SAY: state the facts they establish, with who and when.
+3. TIME: if the question is about when something happened, or about order or
+   duration, resolve every relative expression against the timestamp of the
+   memory it appears in. "Yesterday" in a memory dated 3 July 2023 is
+   2 July 2023. Compute the actual date or interval.
+4. COMPLETENESS: if the question asks what things, which ones, or how many,
+   collect every one that appears anywhere in the memories, not just the first.
+5. GAPS: note anything the question asks for that the memories do not say.
+6. BEST ANSWER: decide, using inference from the memories where they do not
+   state it outright. Never decline. If the memories are incomplete, give the
+   most likely answer they support and say what it rests on.
+7. FINAL ANSWER: state it directly, on one line, beginning with
+   "FINAL ANSWER:".
+
+Begin."""
+
+ANSWER_PROMPTS = {"terse": TERSE_PROMPT, "cot": COT_PROMPT, "cot-verbose": COT_PROMPT}
 
 JUDGE_PROMPT = """You are grading a question-answering system against a gold answer.
 
@@ -331,14 +370,50 @@ def render_full_context(conversation: Conversation) -> str:
     return "\n\n".join(blocks)
 
 
-async def answer_from_context(llm, question: Question, context: str) -> str:
+async def answer_from_context(
+    llm, question: Question, context: str, style: str = "terse"
+) -> str:
     """Answer with a pre-rendered context, skipping retrieval entirely."""
-    prompt = ANSWER_PROMPT.format(context=context, question=question.question)
+    return await _complete_answer(llm, question, context, style)
+
+
+def extract_final_answer(text: str) -> str:
+    """Take what follows FINAL ANSWER:, or the last non-empty line.
+
+    The chain-of-thought prompt asks for a marker, and the reader usually
+    obliges. When it does not, the conclusion is still the last thing it wrote,
+    and handing the judge several hundred words of reasoning would score the
+    reasoning rather than the answer.
+    """
+    marker = "FINAL ANSWER:"
+    upper = text.upper()
+    if marker in upper:
+        tail = text[upper.rindex(marker) + len(marker) :]
+        for line in tail.splitlines():
+            if line.strip():
+                return line.strip().lstrip("*# ").strip()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return lines[-1] if lines else text.strip()
+
+
+async def _complete_answer(llm, question: Question, context: str, style: str) -> str:
+    prompt = ANSWER_PROMPTS[style].format(context=context, question=question.question)
+    # Chain-of-thought needs room for the reasoning it is being asked to show;
+    # 80 tokens truncates it mid-thought and loses the answer entirely.
+    max_tokens = 1200 if style.startswith("cot") else 80
     try:
-        response = await llm.complete(prompt, max_tokens=80)
-        return response.content.strip()
+        response = await llm.complete(prompt, max_tokens=max_tokens)
     except Exception as exc:  # pragma: no cover
         return f"LLM_ERROR: {exc}"
+    content = response.content.strip()
+    # cot-verbose hands the judge the reasoning as well as the conclusion. It
+    # exists to measure one thing: how much of the reported benefit of
+    # chain-of-thought prompting on this benchmark is the reasoning, and how
+    # much is simply giving a judge told to "be generous" several hundred more
+    # words to find a match in. It is not a way to answer questions better.
+    if style == "cot":
+        return extract_final_answer(content)
+    return content
 
 
 async def answer_question(
@@ -348,9 +423,11 @@ async def answer_question(
     *,
     top_k: int,
     min_score: float,
+    style: str = "terse",
+    neighbors: int = 0,
 ) -> tuple[str, list[SearchItem]]:
     try:
-        items = await memory.search(question.question, limit=top_k)
+        items = await memory.search(question.question, limit=top_k, neighbors=neighbors)
     except Exception as exc:  # pragma: no cover - reported, not raised
         return f"RETRIEVAL_ERROR: {exc}", []
 
@@ -368,14 +445,8 @@ async def answer_question(
     if not items:
         return "NO_ANSWER", []
 
-    prompt = ANSWER_PROMPT.format(
-        context=render_context(items, top_k), question=question.question
-    )
-    try:
-        response = await llm.complete(prompt, max_tokens=80)
-        return response.content.strip(), items
-    except Exception as exc:  # pragma: no cover
-        return f"LLM_ERROR: {exc}", items
+    answer = await _complete_answer(llm, question, render_context(items, top_k), style)
+    return answer, items
 
 
 async def judge_answer(llm, question: Question, predicted: str) -> bool:
@@ -503,11 +574,19 @@ async def run(args: argparse.Namespace) -> int:
         print(f"Config: {exc}", file=sys.stderr)
         return 2
     config.storage = StorageConfig(path=str(ROOT / "benchmarks" / "store"))
+    judge_model = args.judge_model or config.llm.model
+    if args.reader_model:
+        config.llm.model = args.reader_model
 
     categories: set[int] = set(args.categories or DEFAULT_CATEGORIES)
     conversations = load_conversations(DATA)[: args.conversations]
 
-    print(f"model:     {config.llm.provider}/{config.llm.model}")
+    print(f"reader:    {config.llm.provider}/{config.llm.model}")
+    print(f"judge:     {config.llm.provider}/{judge_model}")
+    print(
+        f"answer prompt: {args.answer_prompt}  top-k: {args.top_k}  "
+        f"neighbors: {args.neighbors}"
+    )
     print(
         f"conversations: {len(conversations)}  "
         f"turns: {sum(c.turn_count for c in conversations)}"
@@ -518,6 +597,16 @@ async def run(args: argparse.Namespace) -> int:
     )
 
     llm = config.create_llm()
+    # The grader is held apart from the system under test. Sharing one client
+    # means changing the reader silently changes the grader, and a stricter
+    # grader looks exactly like a worse system: swapping gpt-4.1-mini for
+    # gpt-4.1 in both roles at once cost 8.3 points that belonged entirely to
+    # the grading.
+    if judge_model == config.llm.model:
+        judge_llm = llm
+    else:
+        judge_config = replace(config.llm, model=judge_model)
+        judge_llm = replace(config, llm=judge_config).create_llm()
     results: list[Result] = []
     ingest_seconds = query_seconds = 0.0
 
@@ -539,11 +628,13 @@ async def run(args: argparse.Namespace) -> int:
             print(f"  full context: {len(full_context.split())} words, no retrieval")
             started = time.monotonic()
             for index, question in enumerate(questions, 1):
-                predicted = await answer_from_context(llm, question, full_context)
+                predicted = await answer_from_context(
+                    llm, question, full_context, args.answer_prompt
+                )
                 judged = None
                 if args.judge:
                     try:
-                        judged = await judge_answer(llm, question, predicted)
+                        judged = await judge_answer(judge_llm, question, predicted)
                     except Exception:
                         judged = None
                 results.append(
@@ -588,11 +679,13 @@ async def run(args: argparse.Namespace) -> int:
                 question,
                 top_k=args.top_k,
                 min_score=args.fallback_score,
+                style=args.answer_prompt,
+                neighbors=args.neighbors,
             )
             judged = None
             if args.judge:
                 try:
-                    judged = await judge_answer(llm, question, predicted)
+                    judged = await judge_answer(judge_llm, question, predicted)
                 except Exception:
                     judged = None
             results.append(
@@ -644,6 +737,33 @@ def main() -> int:
         help=f"LOCOMO categories. Default {list(DEFAULT_CATEGORIES)}.",
     )
     parser.add_argument("--top-k", type=int, default=20)
+    parser.add_argument(
+        "--answer-prompt",
+        choices=sorted(ANSWER_PROMPTS),
+        default="terse",
+        help="terse asks for the shortest answer and allows a refusal. "
+        "cot reasons first, has no length limit, and cannot decline. "
+        "The choice is worth about as much as the retrieval system.",
+    )
+    parser.add_argument(
+        "--reader-model",
+        help="Override the model that answers. The judge is unaffected, so "
+        "runs stay comparable.",
+    )
+    parser.add_argument(
+        "--judge-model",
+        help="Override the model that grades. Changing this changes every "
+        "number in the report and none of the system's behaviour, so it "
+        "should be held fixed across any comparison.",
+    )
+    parser.add_argument(
+        "--neighbors",
+        type=int,
+        default=0,
+        help="Turns of conversation to include either side of each retrieved "
+        "message. Ranking scores turns independently; answers often sit in "
+        "the reply to the turn that matched.",
+    )
     parser.add_argument(
         "--full-context",
         action="store_true",
