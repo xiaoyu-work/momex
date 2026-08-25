@@ -12,6 +12,7 @@ cosine similarities live in [0, 1] -- which is why the merge is by rank.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import logging
 from typing import Any
 
@@ -105,6 +106,60 @@ def render_knowledge(knowledge: Any) -> str:
 
 def message_text(msg: Any) -> str:
     return " ".join(msg.text_chunks) if hasattr(msg, "text_chunks") else str(msg)
+
+
+async def expand_with_neighbors(
+    conversation: Any,
+    items: list[SearchItem],
+    *,
+    radius: int,
+) -> list[SearchItem]:
+    """Widen each message result to the turns spoken around it.
+
+    Retrieval scores every turn on its own, but conversation does not work that
+    way: a turn often names the subject while the answer sits in the reply, or
+    the other way round. "I finally bought a clarinet" / "Nice, so that's two
+    instruments now" -- asked which instruments someone plays, the second turn
+    matches nothing on its own, so ranking cannot reach it at any depth. The
+    adjacency that would answer the question is recorded in the collection and
+    simply never consulted.
+
+    Each message keeps its own score and position; only the text it carries
+    grows. The number of results is unchanged, so `limit` still means what the
+    caller thinks it means.
+    """
+    if radius <= 0:
+        return items
+
+    wanted: set[int] = set()
+    for item in items:
+        if item.type == "message" and item.ordinal is not None:
+            wanted.update(
+                range(max(0, item.ordinal - radius), item.ordinal + radius + 1)
+            )
+    if not wanted:
+        return items
+
+    try:
+        size = await conversation.messages.size()
+    except Exception:  # pragma: no cover - size is informational here
+        size = None
+    ordinals = sorted(o for o in wanted if size is None or o < size)
+    neighbors = await fetch_many(conversation.messages, ordinals)
+
+    expanded: list[SearchItem] = []
+    for item in items:
+        if item.type != "message" or item.ordinal is None:
+            expanded.append(item)
+            continue
+        window = [
+            message_text(neighbors[o])
+            for o in range(item.ordinal - radius, item.ordinal + radius + 1)
+            if o in neighbors
+        ]
+        text = "\n".join(t for t in window if t) or item.text
+        expanded.append(replace(item, text=text))
+    return expanded
 
 
 def filter_search_results(results, hidden_ordinals: set[int]):
@@ -362,6 +417,7 @@ async def search_structured(
                     timestamp=getattr(msg, "timestamp", None),
                     valid_from=vf,
                     valid_to=vt,
+                    ordinal=ordinal,
                 )
             )
 
@@ -476,6 +532,7 @@ async def search_by_embedding(
                 timestamp=getattr(msg, "timestamp", None),
                 valid_from=vf,
                 valid_to=vt,
+                ordinal=scored.message_ordinal,
             )
         )
 

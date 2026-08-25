@@ -85,3 +85,8 @@ class SearchItem:
     # Stable identity of this memory (see momex.identity). None for messages,
     # and for knowledge whose source message predates source_id being set.
     memory_id: str | None = None
+    # Position of the source message in the collection, counting from zero.
+    # Lets a caller locate a result in the conversation it came from -- to show
+    # what was said around it, or to order results by when they were said
+    # rather than by score. None when the item did not come from a message.
+    ordinal: int | None = None

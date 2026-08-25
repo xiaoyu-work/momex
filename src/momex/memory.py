@@ -20,7 +20,12 @@ from .ledger import SupersessionLedger
 from .paths import collection_to_db_path, utc_now
 from .providers import create_postgres_provider, create_sqlite_provider, DB_FILENAME
 from .results import AddResult, SearchItem, SupersededRecord
-from .search import fuse_results, search_by_embedding, search_structured
+from .search import (
+    expand_with_neighbors,
+    fuse_results,
+    search_by_embedding,
+    search_structured,
+)
 from .timewindow import (
     validate_iso_date,
     validate_timestamp,
@@ -360,6 +365,7 @@ class Memory:
         *,
         include_expired: bool = False,
         include_superseded: bool = False,
+        neighbors: int = 0,
     ) -> list[SearchItem]:
         """Hybrid search: structured term matching + embedding similarity in parallel.
 
@@ -373,6 +379,11 @@ class Memory:
             include_superseded: If True, also return memories that have been
                 superseded by newer ones. Off by default, which is the normal
                 "current view" of the collection.
+            neighbors: Widen each message result to include this many turns on
+                either side of it. Retrieval scores turns independently, but an
+                answer is often in the reply to the turn that matched, and that
+                reply may match nothing on its own. Costs one batch read and
+                does not change how many results come back.
 
         Returns:
             List of SearchItem with type, text, score, and raw TypeAgent object,
@@ -410,7 +421,12 @@ class Memory:
             ),
         )
 
-        return fuse_results(structured_items, embedding_items, limit=limit)
+        fused = fuse_results(structured_items, embedding_items, limit=limit)
+        if neighbors:
+            fused = await expand_with_neighbors(
+                self._conversation_required(), fused, radius=neighbors
+            )
+        return fused
 
     async def _search_structured(
         self,
