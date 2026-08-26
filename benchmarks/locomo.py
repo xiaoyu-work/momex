@@ -618,14 +618,15 @@ async def run(args: argparse.Namespace) -> int:
         print(f"Config: {exc}", file=sys.stderr)
         return 2
     config.storage = StorageConfig(path=str(ROOT / "benchmarks" / "store"))
+    retrieval_model = config.llm.model
+    reader_model = args.reader_model or retrieval_model
     judge_model = args.judge_model or config.llm.model
-    if args.reader_model:
-        config.llm.model = args.reader_model
 
     categories: set[int] = set(args.categories or DEFAULT_CATEGORIES)
     conversations = load_conversations(DATA)[: args.conversations]
 
-    print(f"reader:    {config.llm.provider}/{config.llm.model}")
+    print(f"retriever: {config.llm.provider}/{retrieval_model}")
+    print(f"reader:    {config.llm.provider}/{reader_model}")
     print(f"judge:     {config.llm.provider}/{judge_model}")
     print(
         f"answer prompt: {args.answer_prompt}  top-k: {args.top_k}  "
@@ -640,14 +641,20 @@ async def run(args: argparse.Namespace) -> int:
         f"contradiction detection: {args.contradictions}"
     )
 
-    llm = config.create_llm()
-    # The grader is held apart from the system under test. Sharing one client
-    # means changing the reader silently changes the grader, and a stricter
-    # grader looks exactly like a worse system: swapping gpt-4.1-mini for
-    # gpt-4.1 in both roles at once cost 8.3 points that belonged entirely to
-    # the grading.
-    if judge_model == config.llm.model:
+    if reader_model == retrieval_model:
+        llm = config.create_llm()
+    else:
+        reader_config = replace(config.llm, model=reader_model)
+        llm = replace(config, llm=reader_config).create_llm()
+
+    # Retrieval, reading and grading are three separate experimental
+    # variables. Sharing one mutable config made changing the "reader" also
+    # change the structured-query compiler, while sharing one client made a
+    # stricter grader look exactly like a worse system.
+    if judge_model == reader_model:
         judge_llm = llm
+    elif judge_model == retrieval_model:
+        judge_llm = config.create_llm()
     else:
         judge_config = replace(config.llm, model=judge_model)
         judge_llm = replace(config, llm=judge_config).create_llm()
