@@ -23,10 +23,12 @@ from .results import AddResult, SearchItem, SupersededRecord
 from .search import (
     expand_with_neighbors,
     fuse_results,
+    message_text,
     search_by_embedding,
     search_structured,
 )
 from .timewindow import (
+    extract_time_window,
     validate_iso_date,
     validate_timestamp,
     window_tags,
@@ -778,6 +780,60 @@ class Memory:
             "ledger_entries": len(ledger),
             "backend": backend_name,
         }
+
+    async def transcript(
+        self,
+        *,
+        start: int = 0,
+        limit: int | None = None,
+    ) -> list[SearchItem]:
+        """Return source messages in conversation order.
+
+        Search is the normal way to build a small context. Callers optimizing
+        only for answer quality may instead want the entire transcript, or may
+        append it after retrieved evidence so no turn can be missed. This reads
+        that transcript from Momex's durable store rather than requiring the
+        caller to retain a second copy of the input.
+
+        Args:
+            start: Zero-based message ordinal to start from.
+            limit: Maximum messages to return. ``None`` means through the end.
+
+        Returns:
+            Message SearchItems ordered by ordinal. Scores are zero because
+            history is chronological, not a ranked retrieval.
+        """
+        if start < 0:
+            raise ValueError("start cannot be negative")
+        if limit is not None and limit < 0:
+            raise ValueError("limit cannot be negative")
+        if limit == 0:
+            return []
+
+        await self._ensure_initialized()
+        messages = self._conversation_required().messages
+        size = await messages.size()
+        if start >= size:
+            return []
+        end = size if limit is None else min(start + limit, size)
+        stored = await messages.get_slice(start, end)
+
+        items: list[SearchItem] = []
+        for ordinal, message in enumerate(stored, start):
+            valid_from, valid_to = extract_time_window(message)
+            items.append(
+                SearchItem(
+                    type="message",
+                    text=message_text(message),
+                    score=0.0,
+                    raw=message,
+                    timestamp=getattr(message, "timestamp", None),
+                    valid_from=valid_from,
+                    valid_to=valid_to,
+                    ordinal=ordinal,
+                )
+            )
+        return items
 
     async def export(self, path: str) -> None:
         """Export all memories to a JSON file.
