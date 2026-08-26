@@ -624,6 +624,44 @@ def dump(results: list[Result], count: int) -> None:
             print(f"          [{item.type}] {item.text[:105]}")
 
 
+def save_results(path: Path, args: argparse.Namespace, results: list[Result]) -> None:
+    """Persist question-level outcomes so strategies can be compared directly."""
+    config = {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in vars(args).items()
+    }
+    rows = []
+    for result in results:
+        rows.append(
+            {
+                "question": result.question.question,
+                "gold": result.question.answer,
+                "category": result.question.category,
+                "evidence": result.question.evidence,
+                "predicted": result.predicted,
+                "f1": result.f1,
+                "judged": result.judged,
+                "retrieved": result.retrieved,
+                "context": [
+                    {
+                        "type": item.type,
+                        "text": item.text,
+                        "score": item.score,
+                        "fusion_score": item.fusion_score,
+                        "timestamp": item.timestamp,
+                        "ordinal": item.ordinal,
+                    }
+                    for item in result.context
+                ],
+            }
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"config": config, "results": rows}, indent=2),
+        encoding="utf-8",
+    )
+
+
 # ---------------------------------------------------------------- main
 
 
@@ -788,6 +826,9 @@ async def run(args: argparse.Namespace) -> int:
     report(results, ingest_seconds, query_seconds)
     if args.dump:
         dump(results, args.dump)
+    if args.output:
+        save_results(args.output, args, results)
+        print(f"  results saved:    {args.output}")
     return 0
 
 
@@ -881,6 +922,12 @@ def main() -> int:
         type=int,
         default=0,
         help="Print this many answers with their retrieved context.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Write question-level answers, judgments and retrieved context "
+        "to a JSON file for paired comparisons.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
