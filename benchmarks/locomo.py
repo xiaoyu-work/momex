@@ -414,6 +414,24 @@ def render_full_context(conversation: Conversation) -> str:
     return "\n\n".join(blocks)
 
 
+def render_hybrid_context(
+    items: list[SearchItem], limit: int, transcript: list[SearchItem]
+) -> str:
+    """Put retrieved evidence first, followed by the complete transcript.
+
+    Full context cannot miss a turn, while retrieval makes the likely evidence
+    prominent enough that it is not lost in 15,000 words of unrelated chat.
+    With cost unconstrained, these are complementary rather than competing
+    strategies.
+    """
+    return (
+        "=== RETRIEVED EVIDENCE (inspect this first) ===\n"
+        f"{render_context(items, limit)}\n\n"
+        "=== COMPLETE CONVERSATION (use it to fill gaps and verify) ===\n"
+        f"{render_context(transcript, len(transcript))}"
+    )
+
+
 async def answer_from_context(
     llm, question: Question, context: str, style: str = "terse"
 ) -> str:
@@ -469,6 +487,7 @@ async def answer_question(
     min_score: float,
     style: str = "terse",
     neighbors: int = 0,
+    full_context: list[SearchItem] | None = None,
 ) -> tuple[str, list[SearchItem]]:
     try:
         items = await memory.search(question.question, limit=top_k, neighbors=neighbors)
@@ -489,7 +508,12 @@ async def answer_question(
     if not items:
         return "NO_ANSWER", []
 
-    answer = await _complete_answer(llm, question, render_context(items, top_k), style)
+    context = (
+        render_hybrid_context(items, top_k, full_context)
+        if full_context is not None
+        else render_context(items, top_k)
+    )
+    answer = await _complete_answer(llm, question, context, style)
     return answer, items
 
 
@@ -721,6 +745,7 @@ async def run(args: argparse.Namespace) -> int:
             f"  {stats['total_messages']} messages, "
             f"{stats['total_semantic_refs']} semantic refs"
         )
+        transcript = await memory.transcript() if args.hybrid_context else None
 
         started = time.monotonic()
         for index, question in enumerate(questions, 1):
@@ -732,6 +757,7 @@ async def run(args: argparse.Namespace) -> int:
                 min_score=args.fallback_score,
                 style=args.answer_prompt,
                 neighbors=args.neighbors,
+                full_context=transcript,
             )
             judged = None
             if args.judge:
@@ -823,6 +849,13 @@ def main() -> int:
         "model, prompt, judge and questions, unlimited context.",
     )
     parser.add_argument(
+        "--hybrid-context",
+        action="store_true",
+        help="Put retrieved evidence first, then append the complete "
+        "conversation. This spends context to combine retrieval's focus with "
+        "full context's perfect coverage.",
+    )
+    parser.add_argument(
         "--fallback-score",
         type=float,
         default=0.1,
@@ -850,7 +883,12 @@ def main() -> int:
         help="Print this many answers with their retrieved context.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
-    return asyncio.run(run(parser.parse_args()))
+    args = parser.parse_args()
+    if args.neighbors < 0:
+        parser.error("--neighbors cannot be negative")
+    if args.full_context and args.hybrid_context:
+        parser.error("--full-context and --hybrid-context are mutually exclusive")
+    return asyncio.run(run(args))
 
 
 if __name__ == "__main__":
