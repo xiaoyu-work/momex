@@ -159,6 +159,9 @@ ANSWER_PROMPTS = {
     "cot": COT_PROMPT,
     "cot-verbose": COT_PROMPT,
 }
+# Existing diagnostic scripts import the historical default by name. Keep the
+# alias so adding selectable prompts does not make every tool fail at import.
+ANSWER_PROMPT = TERSE_PROMPT
 
 JUDGE_PROMPT = """You are grading a question-answering system against a gold answer.
 
