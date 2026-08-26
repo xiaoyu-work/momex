@@ -117,7 +117,48 @@ Work through these steps, then give the answer.
 
 Begin."""
 
-ANSWER_PROMPTS = {"terse": TERSE_PROMPT, "cot": COT_PROMPT, "cot-verbose": COT_PROMPT}
+# Short answers, like TERSE_PROMPT, but without two habits that cost real
+# points on questions the memories do support.
+#
+# Brevity was being read as vagueness: asked which console someone owns, the
+# reader answered "Nintendo" where the answer was "Nintendo Switch". And the
+# refusal clause was actively harmful -- a refusal scores the same as a wrong
+# guess, so declining can only lose. Open-domain questions are the ones that
+# suffer, because their answers are meant to be inferred ("what underlying
+# condition might she have", answer: asthma) rather than quoted, and a prompt
+# that says "using only the memories" reads as a ban on inferring at all.
+#
+# Unlike cot-verbose this does not lengthen the answer, so token F1 stays
+# meaningful and can be used to check that answers really did improve rather
+# than merely giving the judge more to match against.
+DIRECT_PROMPT = """Answer the question from the memories below.
+
+Memories:
+{context}
+
+Question: {question}
+
+Rules:
+- Answer in one short phrase or sentence. No reasoning, no restating.
+- Be specific. Give the full name of a thing, not a shortened form:
+  "Nintendo Switch", not "Nintendo".
+- Yes/no questions get "Yes" or "No" first, then the reason if one is asked for.
+- "When" questions get an absolute date. Memories are timestamped, so resolve
+  relative words against the timestamp of the memory they appear in:
+  "yesterday" in a memory dated 3 July 2023 means 2 July 2023.
+- List every item the question asks for, not just the first one you find.
+- The answer may not be stated outright. Infer it from what the memories imply,
+  and say what the evidence best supports.
+- Never refuse and never say you do not know. Give your best answer.
+
+Answer:"""
+
+ANSWER_PROMPTS = {
+    "terse": TERSE_PROMPT,
+    "direct": DIRECT_PROMPT,
+    "cot": COT_PROMPT,
+    "cot-verbose": COT_PROMPT,
+}
 
 JUDGE_PROMPT = """You are grading a question-answering system against a gold answer.
 
