@@ -56,6 +56,9 @@ class SearchItem:
     timestamp: str | None  # When the memory was recorded (UTC, ISO format)
     valid_from: str | None # Memory active start date (if set)
     valid_to: str | None   # Memory expiration date (if set)
+    fusion_score: float | None # Hybrid rank-fusion score
+    memory_id: str | None  # Stable identity for extracted knowledge
+    ordinal: int | None    # Source-message position, for message results
 ```
 
 Example output:
@@ -73,3 +76,24 @@ Use `search()` when you want structured results as context for your own agent/LL
 Use `search_by_embedding()` as a fast fallback when the LLM is unavailable.
 
 Both automatically filter out expired memories (those past their `valid_to` date). Pass `include_expired=True` to include them.
+
+Conversation answers often depend on a reply next to the turn that matched.
+Ask `search()` to widen each message result without increasing the number of
+results:
+
+```python
+results = await memory.search("Which instruments does she play?", neighbors=2)
+```
+
+When answer quality matters more than context size, read the durable source
+transcript and place it after the retrieved results. `transcript()` reads from
+Momex storage; callers do not need to retain a second copy of every input:
+
+```python
+focused = await memory.search(question, limit=20, neighbors=2)
+complete = await memory.transcript()  # chronological SearchItems
+context = focused + complete
+
+# Bounded chronological slices are also available.
+recent = await memory.transcript(start=100, limit=50)
+```
