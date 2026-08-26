@@ -453,7 +453,7 @@ def extract_final_answer(text: str) -> str:
         tail = text[upper.rindex(marker) + len(marker) :]
         for line in tail.splitlines():
             if line.strip():
-                return line.strip().lstrip("*# ").strip()
+                return line.strip().strip("*# ").strip()
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return lines[-1] if lines else text.strip()
 

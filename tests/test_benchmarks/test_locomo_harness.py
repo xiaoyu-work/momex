@@ -4,6 +4,7 @@ import argparse
 import json
 
 from benchmarks.locomo import (
+    extract_final_answer,
     Question,
     render_hybrid_context,
     Result,
@@ -31,6 +32,12 @@ def test_hybrid_context_prioritizes_retrieval_then_keeps_every_turn():
     assert context.index("important") < context.index("turn zero")
     assert "turn zero" in context
     assert "turn one" in context
+
+
+def test_extract_final_answer_does_not_hand_reasoning_to_the_judge():
+    response = "1. Evidence\n2. Reasoning\nFINAL ANSWER: **Nintendo Switch**\n"
+
+    assert extract_final_answer(response) == "Nintendo Switch"
 
 
 def test_question_level_results_are_persisted(tmp_path):
