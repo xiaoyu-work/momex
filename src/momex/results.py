@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .visibility import MemoryStatus
+
 
 @dataclass
 class SupersededRecord:
@@ -90,3 +92,5 @@ class SearchItem:
     # what was said around it, or to order results by when they were said
     # rather than by score. None when the item did not come from a message.
     ordinal: int | None = None
+    status: MemoryStatus = "current"
+    """Whether this item is current, superseded, expired, or not yet effective."""

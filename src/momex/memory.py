@@ -22,6 +22,7 @@ from .providers import create_postgres_provider, create_sqlite_provider, DB_FILE
 from .results import AddResult, SearchItem, SupersededRecord
 from .search import (
     expand_with_neighbors,
+    fetch_many,
     fuse_results,
     message_text,
     search_by_embedding,
@@ -33,6 +34,7 @@ from .timewindow import (
     validate_timestamp,
     window_tags,
 )
+from .visibility import SearchView
 
 if TYPE_CHECKING:
     from typeagent.knowpro.conversation_base import ConversationBase
@@ -360,6 +362,27 @@ class Memory:
     # Search
     # =========================================================================
 
+    async def _search_view(
+        self, *, include_expired: bool = False, include_superseded: bool = False
+    ) -> SearchView:
+        hidden = await self._ledger.hidden_ordinals()
+        source_ordinals: set[int] = set()
+        if hidden:
+            refs = await fetch_many(
+                self._conversation_required().semantic_refs, sorted(hidden)
+            )
+            source_ordinals = {
+                ref.range.start.message_ordinal
+                for ref in refs.values()
+                if getattr(ref, "range", None)
+            }
+        return SearchView(
+            superseded_knowledge=hidden,
+            superseded_messages=source_ordinals,
+            include_expired=include_expired,
+            include_superseded=include_superseded,
+        )
+
     async def search(
         self,
         query_text: str,
@@ -419,14 +442,23 @@ class Memory:
                 include_superseded=include_superseded,
             ),
             self._search_embedding(
-                query_text, limit=fetch_limit, include_expired=include_expired
+                query_text,
+                limit=fetch_limit,
+                include_expired=include_expired,
+                include_superseded=include_superseded,
             ),
         )
 
         fused = fuse_results(structured_items, embedding_items, limit=limit)
         if neighbors:
             fused = await expand_with_neighbors(
-                self._conversation_required(), fused, radius=neighbors
+                self._conversation_required(),
+                fused,
+                radius=neighbors,
+                view=await self._search_view(
+                    include_expired=include_expired,
+                    include_superseded=include_superseded,
+                ),
             )
         return fused
 
@@ -440,14 +472,16 @@ class Memory:
         dedupe: bool = True,
     ) -> list[SearchItem]:
         """Structured RAG search using LLM query translation + term matching."""
-        hidden = set() if include_superseded else await self._ledger.hidden_ordinals()
+        view = await self._search_view(
+            include_expired=include_expired, include_superseded=include_superseded
+        )
         return await search_structured(
             self._conversation_required(),
             query_text,
             limit=limit,
-            hidden_ordinals=hidden,
             include_expired=include_expired,
             dedupe=dedupe,
+            view=view,
         )
 
     async def _search_structured_guarded(
@@ -488,11 +522,15 @@ class Memory:
         limit: int = 10,
         *,
         include_expired: bool = False,
+        include_superseded: bool = False,
     ) -> list[SearchItem]:
         """Internal embedding search. Logs and degrades to empty on failure."""
         try:
             return await self.search_by_embedding(
-                query_text, limit=limit, include_expired=include_expired
+                query_text,
+                limit=limit,
+                include_expired=include_expired,
+                include_superseded=include_superseded,
             )
         except Exception:
             logger.warning(
@@ -510,6 +548,7 @@ class Memory:
         min_score: float = 0.3,
         *,
         include_expired: bool = False,
+        include_superseded: bool = False,
     ) -> list[SearchItem]:
         """Embedding-only search without LLM. Used as fallback when structured search fails.
 
@@ -533,6 +572,10 @@ class Memory:
             limit=limit,
             min_score=min_score,
             include_expired=include_expired,
+            view=await self._search_view(
+                include_expired=include_expired,
+                include_superseded=include_superseded,
+            ),
         )
 
     async def delete(
@@ -549,9 +592,10 @@ class Memory:
         Normal users can rely on add() which automatically handles contradictions.
 
         This removes extracted *knowledge*, not the source messages. The
-        original message text stays in the collection and can still surface via
-        search_by_embedding() (and therefore via the embedding half of
-        search()). Use clear() to remove everything in the collection.
+        original message text stays in the collection as historical evidence.
+        Search excludes that source by default; include_superseded=True returns
+        it with status="superseded". Unrelated active knowledge extracted from
+        the same message remains searchable. Use clear() to remove everything.
 
         Because matching is semantic, a bare query can match more loosely than
         intended. Prefer previewing with ``dry_run=True``, and/or raising
@@ -817,6 +861,7 @@ class Memory:
             return []
         end = size if limit is None else min(start + limit, size)
         stored = await messages.get_slice(start, end)
+        view = await self._search_view(include_expired=True, include_superseded=True)
 
         items: list[SearchItem] = []
         for ordinal, message in enumerate(stored, start):
@@ -831,6 +876,9 @@ class Memory:
                     valid_from=valid_from,
                     valid_to=valid_to,
                     ordinal=ordinal,
+                    status=view.status(
+                        message, superseded=ordinal in view.superseded_messages
+                    ),
                 )
             )
         return items

@@ -137,7 +137,8 @@ async def main():
         print(record.text, "->", record.superseded_by, record.reason)
 ```
 
-The old memory is hidden from search, not deleted. See
+The old memory and its source message are hidden from current search, not
+deleted. Unrelated active knowledge from that message remains searchable. See
 [Supersession and history](#supersession-and-history) for how to review and
 undo it.
 
@@ -255,11 +256,12 @@ async def main():
   embedding similarities are in `[0, 1]`.
 - `dry_run`: bool (default False) - Report the count without deleting
 
-**What delete() removes:** extracted knowledge (entities, actions, topics), not
-the source messages. The original message text stays in the collection and can
-still surface through `search_by_embedding()`, and therefore through the
-embedding half of `search()`. Use `clear()` to remove everything in a
-collection.
+**What delete() removes:** extracted knowledge is retired, not destroyed.
+Its source message is retained as historical evidence, but is excluded from
+both search paths and neighbor expansion by default. Other active knowledge
+from the same source remains searchable. Pass `include_superseded=True` to
+either search method to read historical sources, labeled with
+`SearchItem.status == "superseded"`. Use `clear()` to remove the collection.
 
 The return value is the number of knowledge items newly hidden. Deleting the
 same query twice returns `0` the second time.
@@ -308,6 +310,14 @@ first. Each record carries `ordinal`, `superseded_by`, `at`, `reason`
 **restore(ordinals)** takes one ordinal or a list, returns how many were
 restored. Restoring does not erase the ledger entry — it timestamps it, so the
 history of the history survives too. Pass `include_restored=True` to see those.
+
+**Current versus historical evidence.** Search results carry `status`:
+`"current"`, `"superseded"`, `"expired"`, or `"future"`. Both search paths and
+`neighbors` follow the same policy. `include_expired=True` admits out-of-window
+memories; `include_superseded=True` admits retired knowledge and its sources.
+Both flags are needed for a source that is both retired and out of its window.
+Historical neighbors are explicitly labeled in the expanded text.
+`transcript()` remains a complete historical read and labels each source.
 
 Collections written before the ledger existed are migrated automatically on
 first read; their entries have `reason="legacy"` and no `superseded_by`, since

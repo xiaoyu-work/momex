@@ -18,7 +18,8 @@ from typing import Any
 
 from .identity import memory_id
 from .results import SearchItem
-from .timewindow import extract_time_window, is_outside_window
+from .timewindow import extract_time_window
+from .visibility import SearchView
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,7 @@ async def expand_with_neighbors(
     items: list[SearchItem],
     *,
     radius: int,
+    view: SearchView | None = None,
 ) -> list[SearchItem]:
     """Widen each message result to the turns spoken around it.
 
@@ -130,6 +132,7 @@ async def expand_with_neighbors(
     """
     if radius <= 0:
         return items
+    view = view or SearchView()
 
     wanted: set[int] = set()
     for item in items:
@@ -152,22 +155,31 @@ async def expand_with_neighbors(
         if item.type != "message" or item.ordinal is None:
             expanded.append(item)
             continue
-        window = [
-            message_text(neighbors[o])
-            for o in range(item.ordinal - radius, item.ordinal + radius + 1)
-            if o in neighbors
-        ]
-        text = "\n".join(t for t in window if t) or item.text
-        expanded.append(replace(item, text=text))
+        window: list[str] = []
+        for ordinal in range(item.ordinal - radius, item.ordinal + radius + 1):
+            if ordinal not in neighbors:
+                continue
+            message = neighbors[ordinal]
+            superseded = ordinal in view.superseded_messages
+            if not view.allows(message, superseded=superseded):
+                continue
+            status = view.status(message, superseded=superseded)
+            text = message_text(message)
+            window.append(f"[{status}] {text}" if status != "current" else text)
+        if window:
+            expanded.append(replace(item, text="\n".join(t for t in window if t)))
     return expanded
 
 
-def filter_search_results(results, hidden_ordinals: set[int]):
+def filter_search_results(
+    results, hidden_ordinals: set[int], hidden_messages: set[int] | None = None
+):
     """Drop superseded knowledge from raw search results.
 
     The underlying records still exist; the ledger decides what is visible.
     """
-    if not hidden_ordinals:
+    hidden_messages = hidden_messages or set()
+    if not hidden_ordinals and not hidden_messages:
         return results
     filtered = []
     for search_result in results:
@@ -182,6 +194,11 @@ def filter_search_results(results, hidden_ordinals: set[int]):
                 kmatches.semantic_ref_matches = kept
                 knowledge_matches[ktype] = kmatches
         search_result.knowledge_matches = knowledge_matches
+        search_result.message_matches = [
+            match
+            for match in search_result.message_matches
+            if match.message_ordinal not in hidden_messages
+        ]
         if search_result.knowledge_matches or search_result.message_matches:
             filtered.append(search_result)
     return filtered
@@ -228,6 +245,7 @@ async def items_for_semrefs(
     *,
     scores: dict[int, float] | None = None,
     include_expired: bool = False,
+    view: SearchView | None = None,
 ) -> list[SearchItem]:
     """Build SearchItems for the given semantic refs.
 
@@ -236,6 +254,7 @@ async def items_for_semrefs(
     attached here. Refs that no longer resolve, or whose window has closed, are
     dropped.
     """
+    view = view or SearchView(include_expired=include_expired)
     sem_ref_map = await fetch_many(conversation.semantic_refs, ordinals)
     src_msg_map = await get_source_messages(conversation, sem_ref_map.values())
 
@@ -249,6 +268,7 @@ async def items_for_semrefs(
         valid_from: str | None = None
         valid_to: str | None = None
         source_id: str | None = None
+        src_msg = None
         if getattr(sem_ref, "range", None):
             src_msg = src_msg_map.get(sem_ref.range.start.message_ordinal)
             if src_msg is not None:
@@ -256,7 +276,8 @@ async def items_for_semrefs(
                 source_id = getattr(src_msg, "source_id", None)
                 valid_from, valid_to = extract_time_window(src_msg)
 
-        if not include_expired and is_outside_window(valid_from, valid_to):
+        superseded = ordinal in view.superseded_knowledge
+        if not view.allows(src_msg, superseded=superseded):
             continue
 
         items.append(
@@ -269,6 +290,7 @@ async def items_for_semrefs(
                 valid_from=valid_from,
                 valid_to=valid_to,
                 memory_id=memory_id(source_id, sem_ref.knowledge),
+                status=view.status(src_msg, superseded=superseded),
             )
         )
     return items
@@ -304,6 +326,7 @@ async def search_structured(
     hidden_ordinals: set[int] | None = None,
     include_expired: bool = False,
     dedupe: bool = True,
+    view: SearchView | None = None,
 ) -> list[SearchItem]:
     """Structured RAG search using LLM query translation + term matching.
 
@@ -324,6 +347,10 @@ async def search_structured(
     distinct memory -- delete() does, because two refs that read the same are
     still two refs and retiring one would leave the other visible.
     """
+    view = view or SearchView(
+        superseded_knowledge=hidden_ordinals or set(),
+        include_expired=include_expired,
+    )
     import typechat
 
     from typeagent.aitools import utils
@@ -358,8 +385,10 @@ async def search_structured(
         return []
 
     search_results = result.value
-    if hidden_ordinals:
-        search_results = filter_search_results(search_results, hidden_ordinals)
+    if not view.include_superseded:
+        search_results = filter_search_results(
+            search_results, view.superseded_knowledge, view.superseded_messages
+        )
 
     # Collect all ordinals first for batch fetching. When deduping, take a
     # wider window than the caller asked for: the duplicates are only visible
@@ -393,6 +422,7 @@ async def search_structured(
                 list(scores),
                 scores=scores,
                 include_expired=include_expired,
+                view=view,
             )
         )
 
@@ -405,7 +435,8 @@ async def search_structured(
                 continue
 
             vf, vt = extract_time_window(msg)
-            if not include_expired and is_outside_window(vf, vt):
+            superseded = ordinal in view.superseded_messages
+            if not view.allows(msg, superseded=superseded):
                 continue
 
             items.append(
@@ -418,6 +449,7 @@ async def search_structured(
                     valid_from=vf,
                     valid_to=vt,
                     ordinal=ordinal,
+                    status=view.status(msg, superseded=superseded),
                 )
             )
 
@@ -481,12 +513,14 @@ async def search_by_embedding(
     min_score: float = 0.3,
     *,
     include_expired: bool = False,
+    view: SearchView | None = None,
 ) -> list[SearchItem]:
     """Embedding similarity search over message text, without an LLM.
 
     Queries the MessageTextIndex directly, bypassing query translation. Returns
     messages only -- extracted knowledge is not embedded.
     """
+    view = view or SearchView(include_expired=include_expired)
     if (
         conversation.secondary_indexes is None
         or conversation.secondary_indexes.message_index is None
@@ -520,7 +554,8 @@ async def search_by_embedding(
             continue
 
         vf, vt = extract_time_window(msg)
-        if not include_expired and is_outside_window(vf, vt):
+        superseded = scored.message_ordinal in view.superseded_messages
+        if not view.allows(msg, superseded=superseded):
             continue
 
         items.append(
@@ -533,6 +568,7 @@ async def search_by_embedding(
                 valid_from=vf,
                 valid_to=vt,
                 ordinal=scored.message_ordinal,
+                status=view.status(msg, superseded=superseded),
             )
         )
 

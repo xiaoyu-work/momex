@@ -77,6 +77,11 @@ Use `search_by_embedding()` as a fast fallback when the LLM is unavailable.
 
 Both automatically filter out expired memories (those past their `valid_to` date). Pass `include_expired=True` to include them.
 
+Both also exclude superseded knowledge and its source messages by default.
+Use `include_superseded=True` for historical evidence. Each result has a
+`status` (`current`, `superseded`, `expired`, or `future`); neighbor expansion
+uses the same visibility rules. `transcript()` includes and labels history.
+
 Conversation answers often depend on a reply next to the turn that matched.
 Ask `search()` to widen each message result without increasing the number of
 results:

@@ -43,6 +43,7 @@ class _Conversation:
 def _memory(config, count=5):
     memory = Memory(collection="test:history", config=config)
     memory._initialized = True
+    memory._ledger._records = []
     memory._conversation = _Conversation(  # type: ignore[assignment]
         [_Message(f"message-{i}", i) for i in range(count)]
     )
