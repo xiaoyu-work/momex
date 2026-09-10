@@ -406,6 +406,39 @@ async def main():
     context = "\n".join([f"- [{coll}] {item.text}" for coll, items in results for item in items])
 ```
 
+### Bounded, cited agent context
+
+`format_context()` is a framework-neutral formatter; it does not generate
+answers or call an LLM. Its token budget includes citation labels, timestamps,
+collection names and speakers. It preserves retrieval order, merges overlapping
+source turns, and labels non-current evidence. `truncated` reports omitted or
+shortened content, and `token_count` is measured with the selected tokenizer.
+
+```python
+from momex import format_context, search
+
+items = await memory.search("What does the user prefer?", neighbors=2)
+context = format_context(items, token_budget=2048, encoding_name="cl100k_base")
+# Add context.text to your agent's prompt as quoted evidence.
+for citation in context.citations:
+    print(citation.label, citation.sources)
+
+# limit remains per collection; total_limit adds a global rank-fusion budget.
+groups = await search("user", "preferences", limit=10, total_limit=20, neighbors=2)
+context = format_context(
+    [item for _, items in groups for item in items], token_budget=2048
+)
+```
+
+`SearchItem.sources` retains every cited turn's collection, source ID, ordinal,
+timestamp, speaker, role, text and status, including expanded neighbors and
+duplicate facts merged during ranking. Matching text from different collections
+or different visibility states is not collapsed.
+
+The default tokenizer is `cl100k_base`; select the encoding used by your answer
+model when enforcing its budget. This bounds the memory context, not your whole
+system prompt, tool schemas or generated response.
+
 ### Embedding-Only Search (Fallback)
 
 `search_by_embedding()` does pure vector similarity search without any LLM call. Useful as a fallback when the LLM is unavailable, or for low-latency scenarios:

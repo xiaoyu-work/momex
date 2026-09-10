@@ -25,13 +25,13 @@ from .search import (
     expand_with_neighbors,
     fetch_many,
     fuse_results,
+    item_for_message,
     items_for_semrefs,
     message_text,
     search_by_embedding,
     search_structured,
 )
 from .timewindow import (
-    extract_time_window,
     normalize_as_of,
     validate_iso_date,
     validate_timestamp,
@@ -352,6 +352,7 @@ class Memory:
             include_superseded=include_superseded,
             include_unconfirmed=include_unconfirmed,
             as_of=as_of,
+            collection=self.collection,
         )
 
     async def search(
@@ -392,6 +393,10 @@ class Memory:
         returned on their own. Both failing yields an empty list.
         """
         as_of = normalize_as_of(as_of)
+        if limit < 0 or neighbors < 0:
+            raise ValueError("limit and neighbors cannot be negative")
+        if limit == 0:
+            return []
         await self._ensure_initialized()
 
         # Retrieval depth is decoupled from presentation depth. Asking each
@@ -560,6 +565,10 @@ class Memory:
             List of SearchItem with type="message".
         """
         as_of = normalize_as_of(as_of)
+        if limit < 0:
+            raise ValueError("limit cannot be negative")
+        if limit == 0:
+            return []
         await self._ensure_initialized()
         return await search_by_embedding(
             self._conversation_required(),
@@ -877,22 +886,7 @@ class Memory:
         for ordinal, message in enumerate(stored, start):
             if not view.allows(message):
                 continue
-            valid_from, valid_to = extract_time_window(message)
-            items.append(
-                SearchItem(
-                    type="message",
-                    text=message_text(message),
-                    score=0.0,
-                    raw=message,
-                    timestamp=getattr(message, "timestamp", None),
-                    valid_from=valid_from,
-                    valid_to=valid_to,
-                    ordinal=ordinal,
-                    status=view.status(
-                        message, superseded=ordinal in view.superseded_messages
-                    ),
-                )
-            )
+            items.append(item_for_message(message, ordinal, 0.0, view))
         return items
 
     async def export(self, path: str) -> None:

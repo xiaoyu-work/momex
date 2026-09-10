@@ -23,6 +23,7 @@ class SearchView:
     include_expired: bool = False
     include_unconfirmed: bool = False
     as_of: str | None = None
+    collection: str | None = None
     _now: str = field(default_factory=utc_now)
 
     def __post_init__(self) -> None:

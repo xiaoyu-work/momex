@@ -60,6 +60,7 @@ Configuration:
 import logging
 
 from .config import EmbeddingConfig, LLMConfig, MomexConfig, StorageConfig
+from .context import format_context
 from .exceptions import (
     CollectionNotFoundError,
     ConfigurationError,
@@ -72,7 +73,14 @@ from .exceptions import (
 from .manager import MemoryManager
 from .memory import Memory
 from .query import search, stats
-from .results import AddResult, SearchItem, SupersededRecord
+from .results import (
+    AddResult,
+    ContextCitation,
+    ContextResult,
+    SearchItem,
+    SourceReference,
+    SupersededRecord,
+)
 
 __all__ = [
     # Core classes
@@ -86,6 +94,10 @@ __all__ = [
     "AddResult",
     "SearchItem",
     "SupersededRecord",
+    "SourceReference",
+    "ContextCitation",
+    "ContextResult",
+    "format_context",
     # Prefix search functions (async)
     "search",
     "stats",

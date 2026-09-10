@@ -16,8 +16,9 @@ from dataclasses import replace
 import logging
 from typing import Any
 
+from .attribution import ROLE_TAG, tag_value
 from .identity import memory_id
-from .results import SearchItem
+from .results import SearchItem, SourceReference
 from .timewindow import extract_time_window
 from .visibility import SearchView
 
@@ -109,6 +110,46 @@ def message_text(msg: Any) -> str:
     return " ".join(msg.text_chunks) if hasattr(msg, "text_chunks") else str(msg)
 
 
+def source_for_message(message: Any, ordinal: int, view: SearchView) -> SourceReference:
+    return SourceReference(
+        text=message_text(message),
+        collection=view.collection,
+        ordinal=ordinal,
+        source_id=getattr(message, "source_id", None),
+        timestamp=getattr(message, "timestamp", None),
+        speaker=getattr(getattr(message, "metadata", None), "speaker", None),
+        role=tag_value(message, ROLE_TAG),
+        status=view.status(message, superseded=ordinal in view.superseded_messages),
+    )
+
+
+def item_for_message(
+    message: Any, ordinal: int, score: float, view: SearchView
+) -> SearchItem:
+    source = source_for_message(message, ordinal, view)
+    valid_from, valid_to = extract_time_window(message)
+    return SearchItem(
+        type="message",
+        text=source.text,
+        score=score,
+        raw=message,
+        timestamp=source.timestamp,
+        valid_from=valid_from,
+        valid_to=valid_to,
+        ordinal=ordinal,
+        status=source.status,
+        collection=source.collection,
+        source_id=source.source_id,
+        speaker=source.speaker,
+        role=source.role,
+        sources=(source,),
+    )
+
+
+def merge_sources(*groups: tuple[SourceReference, ...]) -> tuple[SourceReference, ...]:
+    return tuple({source.key: source for group in groups for source in group}.values())
+
+
 async def expand_with_neighbors(
     conversation: Any,
     items: list[SearchItem],
@@ -156,6 +197,7 @@ async def expand_with_neighbors(
             expanded.append(item)
             continue
         window: list[str] = []
+        sources: list[SourceReference] = []
         for ordinal in range(item.ordinal - radius, item.ordinal + radius + 1):
             if ordinal not in neighbors:
                 continue
@@ -166,8 +208,13 @@ async def expand_with_neighbors(
             status = view.status(message, superseded=superseded)
             text = message_text(message)
             window.append(f"[{status}] {text}" if status != "current" else text)
+            sources.append(source_for_message(message, ordinal, view))
         if window:
-            expanded.append(replace(item, text="\n".join(t for t in window if t)))
+            expanded.append(
+                replace(
+                    item, text="\n".join(t for t in window if t), sources=tuple(sources)
+                )
+            )
     return expanded
 
 
@@ -212,21 +259,23 @@ def fuse_results(*result_lists: list[SearchItem], limit: int) -> list[SearchItem
     in [0, 1]. Sorting the two together by raw score is meaningless, so they
     are combined by rank instead of by magnitude.
     """
-    best: dict[str, SearchItem] = {}
-    fused_scores: dict[str, float] = {}
+    best: dict[tuple[str | None, str, str], SearchItem] = {}
+    fused_scores: dict[tuple[str | None, str, str], float] = {}
 
     for items in result_lists:
-        seen: set[str] = set()
+        seen: set[tuple[str | None, str, str]] = set()
         for rank, item in enumerate(items):
             # Same text from two indexes is one memory, and should be
             # rewarded for appearing in both -- but only once per list.
-            if item.text in seen:
+            key = item.collection, item.status, item.text
+            if key in best:
+                best[key].sources = merge_sources(best[key].sources, item.sources)
+            else:
+                best[key] = replace(item)
+            if key in seen:
                 continue
-            seen.add(item.text)
-            fused_scores[item.text] = fused_scores.get(item.text, 0.0) + 1.0 / (
-                RRF_K + rank + 1
-            )
-            best.setdefault(item.text, item)
+            seen.add(key)
+            fused_scores[key] = fused_scores.get(key, 0.0) + 1.0 / (RRF_K + rank + 1)
 
     for text, item in best.items():
         item.fusion_score = fused_scores[text]
@@ -279,6 +328,11 @@ async def items_for_semrefs(
         superseded = ordinal in view.superseded_knowledge
         if not view.allows(src_msg, superseded=superseded):
             continue
+        sources = (
+            (source_for_message(src_msg, sem_ref.range.start.message_ordinal, view),)
+            if src_msg is not None
+            else ()
+        )
 
         items.append(
             SearchItem(
@@ -291,6 +345,11 @@ async def items_for_semrefs(
                 valid_to=valid_to,
                 memory_id=memory_id(source_id, sem_ref.knowledge),
                 status=view.status(src_msg, superseded=superseded),
+                collection=view.collection,
+                source_id=source_id,
+                speaker=sources[0].speaker if sources else None,
+                role=sources[0].role if sources else None,
+                sources=sources,
             )
         )
     return items
@@ -439,39 +498,27 @@ async def search_structured(
             if msg is None:
                 continue
 
-            vf, vt = extract_time_window(msg)
             superseded = ordinal in view.superseded_messages
             if not view.allows(msg, superseded=superseded):
                 continue
 
-            items.append(
-                SearchItem(
-                    type="message",
-                    text=message_text(msg),
-                    score=score,
-                    raw=msg,
-                    timestamp=getattr(msg, "timestamp", None),
-                    valid_from=vf,
-                    valid_to=vt,
-                    ordinal=ordinal,
-                    status=view.status(msg, superseded=superseded),
-                )
-            )
+            items.append(item_for_message(msg, ordinal, score, view))
 
     items.sort(key=lambda x: x.score, reverse=True)
 
     if dedupe:
         # Already sorted, so the first occurrence of a rendering is also its
         # highest-scoring one.
-        seen: set[tuple[str, str]] = set()
-        distinct: list[SearchItem] = []
+        distinct: dict[tuple[str, str, str], SearchItem] = {}
         for item in items:
-            key = (item.type, item.text)
-            if key in seen:
-                continue
-            seen.add(key)
-            distinct.append(item)
-        items = distinct
+            key = (item.type, item.status, item.text)
+            if key in distinct:
+                distinct[key].sources = merge_sources(
+                    distinct[key].sources, item.sources
+                )
+            else:
+                distinct[key] = item
+        items = list(distinct.values())
 
     return interleave_by_rank(items, limit)
 
@@ -560,19 +607,8 @@ async def search_by_embedding(
             superseded = scored.message_ordinal in view.superseded_messages
             if msg is None or not view.allows(msg, superseded=superseded):
                 continue
-            vf, vt = extract_time_window(msg)
             items.append(
-                SearchItem(
-                    type="message",
-                    text=message_text(msg),
-                    score=scored.score,
-                    raw=msg,
-                    timestamp=getattr(msg, "timestamp", None),
-                    valid_from=vf,
-                    valid_to=vt,
-                    ordinal=scored.message_ordinal,
-                    status=view.status(msg, superseded=superseded),
-                )
+                item_for_message(msg, scored.message_ordinal, scored.score, view)
             )
         if len(items) >= limit or len(scored_ordinals) < depth or depth >= size:
             break

@@ -84,6 +84,27 @@ class AddResult:
 
 
 @dataclass
+class SourceReference:
+    """A source turn that can be cited without inspecting TypeAgent objects."""
+
+    text: str
+    collection: str | None = None
+    ordinal: int | None = None
+    source_id: str | None = None
+    timestamp: str | None = None
+    speaker: str | None = None
+    role: str | None = None
+    status: MemoryStatus = "current"
+
+    @property
+    def key(self) -> tuple[str | None, str | int, MemoryStatus]:
+        identity = self.source_id or (
+            self.ordinal if self.ordinal is not None else self.text
+        )
+        return self.collection, identity, self.status
+
+
+@dataclass
 class SearchItem:
     """A single search result item."""
 
@@ -107,3 +128,23 @@ class SearchItem:
     ordinal: int | None = None
     status: MemoryStatus = "current"
     """Whether this item is current, superseded, expired, or not yet effective."""
+    collection: str | None = None
+    source_id: str | None = None
+    speaker: str | None = None
+    role: str | None = None
+    sources: tuple[SourceReference, ...] = ()
+
+
+@dataclass
+class ContextCitation:
+    label: str
+    sources: tuple[SourceReference, ...]
+
+
+@dataclass
+class ContextResult:
+    text: str
+    token_count: int
+    citations: list[ContextCitation]
+    truncated: bool
+    encoding_name: str

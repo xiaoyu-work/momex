@@ -113,3 +113,17 @@ context = focused + complete
 # Bounded chronological slices are also available.
 recent = await memory.transcript(start=100, limit=50)
 ```
+
+For a bounded agent prompt, use the framework-neutral formatter instead of
+concatenating unlimited transcript text:
+
+```python
+from momex import format_context
+
+context = format_context(focused, token_budget=2048)
+prompt_evidence = context.text
+citations = context.citations
+```
+
+The budget includes metadata and citation labels. Overlapping source turns are
+merged, and historical or unconfirmed evidence remains labeled.

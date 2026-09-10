@@ -10,6 +10,7 @@ from .config import MomexConfig
 from .manager import MemoryManager
 from .memory import Memory
 from .results import SearchItem
+from .search import RRF_K
 from .timewindow import normalize_as_of
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ async def search(
     include_superseded: bool = False,
     include_unconfirmed: bool = False,
     neighbors: int = 0,
+    total_limit: int | None = None,
 ) -> list[tuple[str, list[SearchItem]]]:
     """Search memories across all collections matching a prefix.
 
@@ -36,12 +38,18 @@ async def search(
         prefix: Collection prefix.
         query_text: Search query (natural language question or topic).
         limit: Maximum results per collection.
+        total_limit: Optional maximum across all collections, ranked by fusion score.
         config: Configuration object. If None, uses default config.
 
     Returns:
         List of (collection_name, list[SearchItem]) tuples.
     """
     as_of = normalize_as_of(as_of)
+    if limit < 0 or neighbors < 0 or (total_limit is not None and total_limit < 0):
+        raise ValueError("search limits and neighbors cannot be negative")
+    if limit == 0 or total_limit == 0:
+        return []
+    per_collection = min(limit, total_limit) if total_limit is not None else limit
     config = config or MomexConfig.get_default()
     manager = MemoryManager(config=config)
 
@@ -63,7 +71,7 @@ async def search(
             try:
                 results = await memory.search(
                     query_text,
-                    limit=limit,
+                    limit=per_collection,
                     as_of=as_of,
                     include_expired=include_expired,
                     include_superseded=include_superseded,
@@ -82,6 +90,26 @@ async def search(
                 await memory.close()
 
     results = await asyncio.gather(*[search_one(c) for c in collections])
+
+    if total_limit is not None:
+        ranked = [
+            (
+                name,
+                item,
+                (
+                    item.fusion_score
+                    if item.fusion_score is not None
+                    else 1 / (RRF_K + rank + 1)
+                ),
+            )
+            for name, items in results
+            for rank, item in enumerate(items)
+        ]
+        ranked.sort(key=lambda entry: entry[2], reverse=True)
+        grouped: dict[str, list[SearchItem]] = {}
+        for name, item, _ in ranked[:total_limit]:
+            grouped.setdefault(name, []).append(item)
+        return list(grouped.items())
 
     # Filter out empty results
     return [(name, items) for name, items in results if items]
