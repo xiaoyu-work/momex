@@ -136,6 +136,7 @@ class ConversationBase(
         messages: list[TMessage],
         *,
         source_ids: list[str] | None = None,
+        knowledge_inputs: list[str | None] | None = None,
     ) -> AddMessagesResult:
         """
         Add messages and build all indexes incrementally in a single transaction.
@@ -153,6 +154,8 @@ class ConversationBase(
                 ``source_id`` is ``None`` are silently skipped.  These are marked
                 within the same transaction, so if the indexing fails, the source
                 IDs won't be marked as ingested (for SQLite storage).
+            knowledge_inputs: Optional attributed extraction text per message.
+                None entries skip LLM extraction but preserve original messages.
 
         Returns:
             Result with counts of messages/semrefs added
@@ -161,6 +164,8 @@ class ConversationBase(
             Exception: Any error
         """
         storage = await self.settings.get_storage_provider()
+        if knowledge_inputs is not None and len(knowledge_inputs) != len(messages):
+            raise ValueError("knowledge_inputs must have one entry per message")
         if source_ids is not None:
             if len(source_ids) != len(messages):
                 raise ValueError(
@@ -190,7 +195,7 @@ class ConversationBase(
             if self.settings.semantic_ref_index_settings.auto_extract_knowledge:
                 # Add LLM-extracted knowledge
                 await self._add_llm_knowledge_incremental(
-                    messages, start_points.message_count
+                    messages, start_points.message_count, knowledge_inputs
                 )
 
             await self._update_secondary_indexes_incremental(start_points)
@@ -457,6 +462,7 @@ class ConversationBase(
         self,
         messages: list[TMessage],
         start_from_message_ordinal: int,
+        knowledge_inputs: list[str | None] | None = None,
     ) -> None:
         """Extract LLM knowledge from messages starting at ordinal."""
         settings = self.settings.semantic_ref_index_settings
@@ -477,6 +483,7 @@ class ConversationBase(
             text_locations,
             knowledge_extractor,
             concurrency=settings.concurrency,
+            knowledge_inputs=knowledge_inputs,
         )
 
     async def _update_secondary_indexes_incremental(

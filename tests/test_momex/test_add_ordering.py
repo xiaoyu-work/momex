@@ -39,6 +39,9 @@ class _FakeSemanticRefs:
     async def size(self):
         return self._count
 
+    async def get_slice(self, start, stop):
+        return []
+
 
 class _FakeConversation:
     """Records the order of writes and deletions."""
@@ -46,12 +49,13 @@ class _FakeConversation:
     def __init__(self, *, fail_write=False, semref_count=0):
         self.settings = _FakeSettings()
         self.semantic_refs = _FakeSemanticRefs(semref_count)
+        self.messages = _FakeSemanticRefs()
         self.fail_write = fail_write
         self.events: list[str] = []
         self.seen_extract_flag: list[bool] = []
         self.added_messages: list = []
 
-    async def add_messages_with_indexing(self, messages):
+    async def add_messages_with_indexing(self, messages, **kwargs):
         self.seen_extract_flag.append(
             self.settings.semantic_ref_index_settings.auto_extract_knowledge
         )
@@ -184,7 +188,8 @@ async def test_valid_dates_are_normalized(monkeypatch):
 
     assert result.messages_added == 1
     (message,) = conversation.added_messages
-    assert sorted(message.tags) == ["valid_from:2026-04-01", "valid_to:2026-05-02"]
+    assert "valid_from:2026-04-01" in message.tags
+    assert "valid_to:2026-05-02" in message.tags
 
 
 # --- 3. infer=False settings race ------------------------------------------

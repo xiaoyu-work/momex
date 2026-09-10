@@ -82,6 +82,12 @@ Use `include_superseded=True` for historical evidence. Each result has a
 `status` (`current`, `superseded`, `expired`, or `future`); neighbor expansion
 uses the same visibility rules. `transcript()` includes and labels history.
 
+New conversation writes extract user facts by default. Assistant/tool turns
+remain unconfirmed context unless explicitly confirmed or written with
+`write_policy="all"`. `include_unconfirmed=True` retrieves that context with
+`status="unconfirmed"`. The extractor receives speaker, role and nearby turns,
+while storage retains the original text.
+
 Conversation answers often depend on a reply next to the turn that matched.
 Ask `search()` to widen each message result without increasing the number of
 results:

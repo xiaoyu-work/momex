@@ -90,6 +90,7 @@ async def add_batch_to_semantic_ref_index_from_list[
     batch: list[TextLocation],
     knowledge_extractor: IKnowledgeExtractor,
     concurrency: int = 4,
+    knowledge_inputs: list[str | None] | None = None,
 ) -> None:
     """Extract knowledge from messages and bulk-add to the semantic ref index."""
     if not batch:
@@ -97,6 +98,7 @@ async def add_batch_to_semantic_ref_index_from_list[
     start_ordinal = batch[0].message_ordinal
 
     text_batch = []
+    extraction_locations: list[TextLocation] = []
     for tl in batch:
         list_index = tl.message_ordinal - start_ordinal
         if list_index < 0 or list_index >= len(messages):
@@ -104,7 +106,15 @@ async def add_batch_to_semantic_ref_index_from_list[
                 f"Message ordinal {tl.message_ordinal} out of range "
                 f"for list starting at {start_ordinal}"
             )
-        text_batch.append(messages[list_index].text_chunks[tl.chunk_ordinal].strip())
+        text = (
+            knowledge_inputs[list_index]
+            if knowledge_inputs is not None
+            else messages[list_index].text_chunks[tl.chunk_ordinal].strip()
+        )
+        if text is None:
+            continue
+        text_batch.append(text)
+        extraction_locations.append(tl)
 
     knowledge_results = await extract_knowledge_from_text_batch(
         knowledge_extractor,
@@ -117,7 +127,7 @@ async def add_batch_to_semantic_ref_index_from_list[
             raise RuntimeError(
                 f"Knowledge extraction failed: {knowledge_result.message:.150}"
             )
-        tl = batch[i]
+        tl = extraction_locations[i]
         bulk_items.append(
             (tl.message_ordinal, tl.chunk_ordinal, knowledge_result.value)
         )

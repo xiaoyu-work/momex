@@ -105,7 +105,34 @@ async def main():
         print(f"[{item.type}] {item.text}")
 ```
 
-### Direct Storage (No LLM Processing)
+### Attribution and write policy
+
+By default, `add()` extracts confirmed user facts. Other roles and messages
+with `confirmed=False` are preserved as unconfirmed context, not current facts.
+They are available through `transcript()` or `include_unconfirmed=True` on
+either search method, labeled `status="unconfirmed"`. Neighbor expansion uses
+the same rule. Collections written before this policy retain their old behavior.
+
+```python
+await memory.add([
+    {"role": "assistant", "content": "Do you live in Seattle?", "session_id": "chat-1"},
+    {"role": "user", "speaker": "Alice", "content": "Yes.", "session_id": "chat-1"},
+    {"role": "assistant", "content": "Reviewed summary", "confirmed": True},
+])
+```
+
+The extractor receives the target's speaker and role plus up to two preceding
+turns (`context_turns=2`), including stored turns from earlier writes. Context
+only resolves references and confirmations; it is not itself a target for
+fact extraction. Explicit sessions do not borrow context from other sessions.
+The original text is stored unchanged, not replaced with an extraction prompt.
+
+Use `write_policy="all"` for trusted transcripts where every speaker is a
+source of facts, or `confirmed=True` on an individually reviewed message.
+`confirmed=False` always wins over that default. This is an attribution policy,
+not a guarantee that an LLM will interpret every statement correctly.
+
+### Direct storage without extraction
 
 Use `infer=False` to skip LLM knowledge extraction:
 

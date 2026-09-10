@@ -8,14 +8,15 @@ search for robust hybrid retrieval.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping, Sequence
 import json
 import logging
 from typing import Any, TYPE_CHECKING
 
+from .attribution import extraction_inputs, is_confirmed, prepare_messages, WritePolicy
 from .config import load_dotenv_once, MomexConfig
 from .contradictions import detect as detect_contradictions
 from .contradictions import find_candidates as find_contradiction_candidates
-from .identity import new_source_id
 from .ledger import SupersessionLedger
 from .paths import collection_to_db_path, utc_now
 from .providers import create_postgres_provider, create_sqlite_provider, DB_FILENAME
@@ -179,13 +180,15 @@ class Memory:
 
     async def add(
         self,
-        messages: str | list[dict[str, str]],
+        messages: str | Sequence[Mapping[str, object]],
         *,
         infer: bool = True,
         detect_contradictions: bool = True,
         valid_from: str | None = None,
         valid_to: str | None = None,
         timestamp: str | None = None,
+        write_policy: WritePolicy = "user",
+        context_turns: int = 2,
     ) -> AddResult:
         """Add memories with TypeAgent's knowledge extraction.
 
@@ -199,6 +202,10 @@ class Memory:
                 - list[dict]: Conversation messages with "role" and "content" keys
             infer: If True (default), use LLM to extract knowledge.
                    If False, add directly without LLM processing.
+            write_policy: "user" extracts confirmed user facts, keeping other
+                   roles as unconfirmed context. "all" opts into extracting all
+                   roles. A per-message confirmed boolean overrides the policy.
+            context_turns: Previous turns supplied only to resolve references.
             detect_contradictions: If True (default), use LLM to detect and remove
                    contradicting memories before adding. Set False to skip this.
             valid_from: ISO date string (e.g., "2026-04-01"). Memory is only relevant
@@ -245,48 +252,21 @@ class Memory:
         valid_from = validate_iso_date(valid_from, "valid_from")
         valid_to = validate_iso_date(valid_to, "valid_to")
         occurred_at = validate_timestamp(timestamp) if timestamp else utc_now()
+        if context_turns < 0:
+            raise ValueError("context_turns cannot be negative")
 
         # Contradiction handling runs *after* the write (see below): retiring
         # first means a failed insert leaves the old facts hidden and the
         # replacement missing.
         superseded: list[SupersededRecord] = []
 
-        from typeagent.knowpro.universal_message import (
-            ConversationMessage,
-            ConversationMessageMeta,
+        ta_messages = prepare_messages(
+            messages,
+            collection=self.collection,
+            timestamp=occurred_at,
+            tags=window_tags(valid_from, valid_to),
+            write_policy=write_policy,
         )
-
-        # Normalize input to conversation format
-        if isinstance(messages, str):
-            conversation_messages = [{"role": "user", "content": messages}]
-        else:
-            conversation_messages = messages
-
-        # Convert to TypeAgent ConversationMessage format
-        ta_messages: list[ConversationMessage] = []
-        # Store time windows as tags so they survive serialization
-        time_tags = window_tags(valid_from, valid_to)
-
-        for msg in conversation_messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if not content:
-                continue
-
-            # Use collection as speaker context, but keep role info
-            speaker = f"{self.collection}:{role}"
-
-            ta_message = ConversationMessage(
-                text_chunks=[content],
-                metadata=ConversationMessageMeta(speaker=speaker),
-                tags=list(time_tags),
-                timestamp=occurred_at,
-                # What every memory extracted from this message will be
-                # identified by. Ordinals shift; this does not. See
-                # momex.identity.
-                source_id=new_source_id(),
-            )
-            ta_messages.append(ta_message)
 
         if not ta_messages:
             return AddResult(
@@ -296,51 +276,32 @@ class Memory:
                 collections=[self.collection],
             )
 
-        # Use TypeAgent's add_messages_with_indexing for full knowledge extraction
-        if infer:
-            # Ordinals at or above this baseline belong to the write below, and
-            # must never be retired as contradictions of themselves.
-            try:
-                semref_baseline = await conversation_obj.semantic_refs.size()
-            except Exception:  # pragma: no cover - defensive
-                semref_baseline = None
-
-            result = await conversation_obj.add_messages_with_indexing(ta_messages)
-
-            # Only now that the new content is durable do we retire whatever it
-            # contradicts. The knowledge this write produced is what drives the
-            # search for candidates, and is also what the ledger's
-            # superseded_by points at -- so the replacement is recorded, not
-            # just the removal.
-            if detect_contradictions:
-                content_text = (
-                    messages
-                    if isinstance(messages, str)
-                    else " ".join(m.get("content", "") for m in messages)
-                )
-                new_ordinals: list[int] = []
-                if semref_baseline is not None:
-                    new_ordinals = list(
-                        range(semref_baseline, semref_baseline + result.semrefs_added)
+        async with self._settings_lock:
+            if infer:
+                size = await conversation_obj.messages.size()
+                previous = (
+                    await conversation_obj.messages.get_slice(
+                        max(0, size - context_turns), size
                     )
-                superseded = await self._detect_and_remove_contradictions(
-                    content_text,
-                    new_ordinals=new_ordinals,
+                    if context_turns
+                    else []
                 )
-
-            return AddResult(
-                messages_added=result.messages_added,
-                entities_extracted=result.semrefs_added,
-                contradictions_removed=len(superseded),
-                collections=[self.collection],
-                superseded=superseded or None,
-            )
-        else:
-            # Direct add without LLM processing. The toggle below mutates state
-            # shared by every concurrent add() on this instance, so serialize
-            # the whole window -- an interleaved call would otherwise have its
-            # extraction silently disabled and could restore a stale value.
-            async with self._settings_lock:
+                inputs = extraction_inputs(ta_messages, previous, context_turns)
+                semref_baseline = await conversation_obj.semantic_refs.size()
+                result = await conversation_obj.add_messages_with_indexing(
+                    ta_messages, knowledge_inputs=inputs
+                )
+                confirmed = [m for m in ta_messages if is_confirmed(m)]
+                if detect_contradictions and confirmed:
+                    superseded = await self._detect_and_remove_contradictions(
+                        "\n".join(message_text(m) for m in confirmed),
+                        new_ordinals=list(
+                            range(
+                                semref_baseline, semref_baseline + result.semrefs_added
+                            )
+                        ),
+                    )
+            else:
                 index_settings = conversation_obj.settings.semantic_ref_index_settings
                 old_setting = index_settings.auto_extract_knowledge
                 index_settings.auto_extract_knowledge = False
@@ -351,19 +312,24 @@ class Memory:
                 finally:
                     index_settings.auto_extract_knowledge = old_setting
 
-            return AddResult(
-                messages_added=result.messages_added,
-                entities_extracted=0,
-                contradictions_removed=0,
-                collections=[self.collection],
-            )
+        return AddResult(
+            messages_added=result.messages_added,
+            entities_extracted=result.semrefs_added if infer else 0,
+            contradictions_removed=len(superseded),
+            collections=[self.collection],
+            superseded=superseded or None,
+        )
 
     # =========================================================================
     # Search
     # =========================================================================
 
     async def _search_view(
-        self, *, include_expired: bool = False, include_superseded: bool = False
+        self,
+        *,
+        include_expired: bool = False,
+        include_superseded: bool = False,
+        include_unconfirmed: bool = False,
     ) -> SearchView:
         hidden = await self._ledger.hidden_ordinals()
         source_ordinals: set[int] = set()
@@ -381,6 +347,7 @@ class Memory:
             superseded_messages=source_ordinals,
             include_expired=include_expired,
             include_superseded=include_superseded,
+            include_unconfirmed=include_unconfirmed,
         )
 
     async def search(
@@ -390,6 +357,7 @@ class Memory:
         *,
         include_expired: bool = False,
         include_superseded: bool = False,
+        include_unconfirmed: bool = False,
         neighbors: int = 0,
     ) -> list[SearchItem]:
         """Hybrid search: structured term matching + embedding similarity in parallel.
@@ -440,12 +408,14 @@ class Memory:
                 limit=fetch_limit,
                 include_expired=include_expired,
                 include_superseded=include_superseded,
+                include_unconfirmed=include_unconfirmed,
             ),
             self._search_embedding(
                 query_text,
                 limit=fetch_limit,
                 include_expired=include_expired,
                 include_superseded=include_superseded,
+                include_unconfirmed=include_unconfirmed,
             ),
         )
 
@@ -458,6 +428,7 @@ class Memory:
                 view=await self._search_view(
                     include_expired=include_expired,
                     include_superseded=include_superseded,
+                    include_unconfirmed=include_unconfirmed,
                 ),
             )
         return fused
@@ -469,11 +440,14 @@ class Memory:
         *,
         include_expired: bool = False,
         include_superseded: bool = False,
+        include_unconfirmed: bool = False,
         dedupe: bool = True,
     ) -> list[SearchItem]:
         """Structured RAG search using LLM query translation + term matching."""
         view = await self._search_view(
-            include_expired=include_expired, include_superseded=include_superseded
+            include_expired=include_expired,
+            include_superseded=include_superseded,
+            include_unconfirmed=include_unconfirmed,
         )
         return await search_structured(
             self._conversation_required(),
@@ -491,6 +465,7 @@ class Memory:
         *,
         include_expired: bool = False,
         include_superseded: bool = False,
+        include_unconfirmed: bool = False,
     ) -> list[SearchItem]:
         """Structured search for the hybrid path. Degrades to empty on failure.
 
@@ -506,6 +481,7 @@ class Memory:
                 limit=limit,
                 include_expired=include_expired,
                 include_superseded=include_superseded,
+                include_unconfirmed=include_unconfirmed,
             )
         except Exception:
             logger.warning(
@@ -523,6 +499,7 @@ class Memory:
         *,
         include_expired: bool = False,
         include_superseded: bool = False,
+        include_unconfirmed: bool = False,
     ) -> list[SearchItem]:
         """Internal embedding search. Logs and degrades to empty on failure."""
         try:
@@ -531,6 +508,7 @@ class Memory:
                 limit=limit,
                 include_expired=include_expired,
                 include_superseded=include_superseded,
+                include_unconfirmed=include_unconfirmed,
             )
         except Exception:
             logger.warning(
@@ -549,6 +527,7 @@ class Memory:
         *,
         include_expired: bool = False,
         include_superseded: bool = False,
+        include_unconfirmed: bool = False,
     ) -> list[SearchItem]:
         """Embedding-only search without LLM. Used as fallback when structured search fails.
 
@@ -575,6 +554,7 @@ class Memory:
             view=await self._search_view(
                 include_expired=include_expired,
                 include_superseded=include_superseded,
+                include_unconfirmed=include_unconfirmed,
             ),
         )
 
@@ -861,7 +841,9 @@ class Memory:
             return []
         end = size if limit is None else min(start + limit, size)
         stored = await messages.get_slice(start, end)
-        view = await self._search_view(include_expired=True, include_superseded=True)
+        view = await self._search_view(
+            include_expired=True, include_superseded=True, include_unconfirmed=True
+        )
 
         items: list[SearchItem] = []
         for ordinal, message in enumerate(stored, start):
