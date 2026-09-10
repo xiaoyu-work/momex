@@ -1,14 +1,17 @@
-# Typeagent Docs
+# Momex and TypeAgent Docs
 
-## Basics
+## Momex
 
-- [Getting Started](getting-started.md)
-- [High-level API](high-level-api.md)
-- [Environment Variables](env-vars.md)
+- [Getting Started with Momex](getting-started.md)
+- [Momex API](momex.md) - Collection-based memory with attribution and history
+- [Usage and Configuration](momex-usage.md)
+- [SDK Agent Example](agent-example.md) - Use Momex from your own Python application
 
-## Momex (Simplified Multi-Tenant API)
+## TypeAgent (Upstream APIs)
 
-- [Momex Documentation](momex.md) - Simplified API with multi-tenant support
+- [TypeAgent Getting Started](typeagent-getting-started.md)
+- [TypeAgent High-level API](high-level-api.md)
+- [TypeAgent Environment Variables](env-vars.md)
 
 ## Advanced
 

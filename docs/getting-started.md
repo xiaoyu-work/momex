@@ -1,136 +1,116 @@
-# Getting Started
+# Getting Started with Momex
 
-## Installation
+Momex is a Python package and API for structured, attributed memory. Import it
+directly into your application; your application owns the agent and reply model.
+No protocol adapter, separate service or agent framework is required.
 
-```sh
-$ pip install typeagent
+## 1. Install and configure
+
+Use Python 3.12 or later, preferably in a virtual environment:
+
+```powershell
+python -m pip install momex
 ```
 
-You might also want to use a
-[virtual environment](https://docs.python.org/3/library/venv.html)
-or another tool like [poetry](https://python-poetry.org/)
-or [uv](https://docs.astral.sh/uv/), as long as your tool can
-install wheels from [PyPI](https://pypi.org).
+Supply `MOMEX_LLM_API_KEY` securely through your environment or secret manager.
+For an OpenAI-backed setup, set these non-secret options:
 
-## "Hello world" ingestion program
-
-### 1. Create a text file named `testdata.txt`
-
-```txt
-STEVE We should really make a Python library for Structured RAG.
-UMESH Who would be a good person to do the Python library?
-GUIDO I volunteer to do the Python library. Give me a few months.
+```powershell
+$env:MOMEX_LLM_PROVIDER = "openai"
+$env:MOMEX_LLM_MODEL = "gpt-4o"
+$env:MOMEX_STORAGE_PATH = ".\momex_data"
 ```
 
-### 2. Create a Python file named `ingest.py`
+`MomexConfig.from_env()` reads `MOMEX_*` variables and also loads a local/parent
+`.env` without overriding exported values. Never commit credentials or `.env`
+files. OpenAI/Azure embeddings can reuse compatible LLM credentials; other LLM
+providers need separate embedding configuration.
 
-```py
-from typeagent import create_conversation
-from typeagent.transcripts.transcript import (
-    TranscriptMessage,
-    TranscriptMessageMeta,
-)
+You can instead use `MomexConfig.from_yaml("momex.yaml")` with a non-secret file:
 
+```yaml
+llm:
+  provider: openai
+  model: gpt-4o
+storage:
+  backend: sqlite
+  path: .\momex_data
+```
 
-def read_messages(filename) -> list[TranscriptMessage]:
-    messages: list[TranscriptMessage] = []
-    with open(filename, "r") as f:
-        for line in f:
-            # Parse each line into a TranscriptMessage
-            speaker, text_chunk = line.split(None, 1)
-            message = TranscriptMessage(
-                text_chunks=[text_chunk],
-                metadata=TranscriptMessageMeta(speaker=speaker),
-            )
-            messages.append(message)
-    return messages
+Omitted YAML keys are read from `MOMEX_LLM_API_KEY` and, when separately
+configured, `MOMEX_EMBEDDING_API_KEY`. See the
+[configuration guide](momex-usage.md#configuration) for other providers and
+optional PostgreSQL settings.
+
+**Data handling:** extraction, hybrid search, embeddings and model replies can
+send input to configured providers. `infer=False` skips fact extraction, not
+embedding API calls. Use only data you are authorized to share.
+
+## 2. Store and retrieve cited evidence
+
+Save this as `memory_demo.py` and run `python memory_demo.py`:
+
+```python
+import asyncio
+
+from momex import Memory, MomexConfig, format_context
 
 
 async def main():
-    conversation = await create_conversation("demo.db", TranscriptMessage)
-    messages = read_messages("testdata.txt")
-    print(f"Indexing {len(messages)} messages...")
-    results = await conversation.add_messages_with_indexing(messages)
-    print(f"Indexed {results.messages_added} messages.")
-    print(f"Got {results.semrefs_added} semantic refs.")
+    config = MomexConfig.from_env()
+    async with Memory(collection="user:demo", config=config) as memory:
+        added = await memory.add(
+            [
+                {
+                    "role": "user",
+                    "speaker": "Demo user",
+                    "content": "I prefer Python for small automation projects.",
+                    "source_id": "demo-preference-1",
+                }
+            ]
+        )
+        print("New memory IDs:", added.memory_ids)
+
+        items = await memory.search(
+            "Which language do I prefer?", limit=5, neighbors=1
+        )
+        context = format_context(items, token_budget=512)
+        print(context.text)
+        print("Citations:", context.citations)
 
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
-### 3. Set up your environment for using OpenAI
+Repeating the same source ID with the same payload skips duplicate ingestion.
+Reusing it with different content or metadata raises an error. Keep IDs stable
+when retrying imported messages.
 
-The minimal set of environment variables is:
+The SDK returns evidence, not an answer. Results carry `collection`, `source_id`,
+`memory_id` (for extracted knowledge), `sources` and `status`. Default searches
+exclude expired, superseded and unconfirmed content. Historical `as_of` queries
+and explicit visibility flags keep that evidence labeled. `format_context`
+bounds the complete evidence text, including headers and citation labels.
 
-```sh
-export OPENAI_API_KEY=your-very-secret-openai-api-key
-export OPENAI_MODEL=gpt-4o
-```
+User assertions are eligible for extraction by default. Assistant/tool turns
+are stored as **unconfirmed context** unless reviewed with `confirmed=True` or
+explicitly trusted using `write_policy="all"`. Generated replies must not
+silently become confirmed user facts.
 
-Some OpenAI setups will require some additional environment variables.
-See [Environment Variables](env-vars.md) for more information.
-You will also find information there on how to use
-Azure-hosted OpenAI models.
+## 3. Use the API from your own agent
 
-### 4. Run your program
+The usual flow is `memory.search()` -> `format_context()` -> your reply model ->
+`memory.add()`. Your application controls prompts, model clients and resource
+lifetime. Assistant writeback remains unconfirmed under the default `user`
+policy.
 
-```sh
-$ python ingest.py
-```
+The [SDK agent example](agent-example.md) provides a small reusable Python
+function for this flow. It accepts your own async reply callback, adds no
+service or packaged command, and can skip writeback for read-only turns.
 
-Expected output looks like:
+## Further reading
 
-```txt
-0.027s -- Using OpenAI
-Indexing 3 messages...
-Indexed 3 messages.
-Got 24 semantic refs.
-```
-
-## "Hello world" query program
-
-### 1. Write this small program
-
-```py
-from typeagent import create_conversation
-from typeagent.transcripts.transcript import TranscriptMessage
-
-
-async def main():
-    conversation = await create_conversation("demo.db", TranscriptMessage)
-    question = "Who volunteered to do the python library?"
-    print("Q:", question)
-    answer = await conversation.query(question)
-    print("A:", answer)
-
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
-```
-
-### 2. Set up your environment like above
-
-### 3. Run your program
-
-```sh
-$ python query.py
-```
-
-Expected output looks like:
-
-```txt
-0.019s -- Using OpenAI
-Q: Who volunteered to do the python library?
-A: Guido volunteered to do the Python library.
-```
-
-## Next steps
-
-You can study the full documentation for `create_conversation()`
-and `conversation.query()` in [High-level API](high-level-api.md).
-
-You can also study the source code at the
-[typeagent-py repo](https://github.com/microsoft/typeagent-py).
+- [Momex API](momex.md) and [usage/configuration](momex-usage.md)
+- [SDK agent example](agent-example.md)
+- [TypeAgent tutorial (upstream APIs)](typeagent-getting-started.md) and
+  [TypeAgent high-level API](high-level-api.md), retained for legacy users

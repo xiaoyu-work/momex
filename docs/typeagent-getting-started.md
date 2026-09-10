@@ -1,0 +1,144 @@
+# TypeAgent Getting Started (Upstream APIs)
+
+This is the original low-level TypeAgent ingestion/query tutorial, not the
+Momex onboarding route. For the collection-based Momex package/API, use
+[Momex Getting Started](getting-started.md).
+
+The `momex` distribution already includes the `typeagent` namespace used below.
+The installation command here is for users choosing the separate upstream
+distribution instead.
+
+## Installation
+
+```sh
+$ pip install typeagent
+```
+
+You might also want to use a
+[virtual environment](https://docs.python.org/3/library/venv.html)
+or another tool like [poetry](https://python-poetry.org/)
+or [uv](https://docs.astral.sh/uv/), as long as your tool can
+install wheels from [PyPI](https://pypi.org).
+
+## "Hello world" ingestion program
+
+### 1. Create a text file named `testdata.txt`
+
+```txt
+STEVE We should really make a Python library for Structured RAG.
+UMESH Who would be a good person to do the Python library?
+GUIDO I volunteer to do the Python library. Give me a few months.
+```
+
+### 2. Create a Python file named `ingest.py`
+
+```py
+from typeagent import create_conversation
+from typeagent.transcripts.transcript import (
+    TranscriptMessage,
+    TranscriptMessageMeta,
+)
+
+
+def read_messages(filename) -> list[TranscriptMessage]:
+    messages: list[TranscriptMessage] = []
+    with open(filename, "r") as f:
+        for line in f:
+            # Parse each line into a TranscriptMessage
+            speaker, text_chunk = line.split(None, 1)
+            message = TranscriptMessage(
+                text_chunks=[text_chunk],
+                metadata=TranscriptMessageMeta(speaker=speaker),
+            )
+            messages.append(message)
+    return messages
+
+
+async def main():
+    conversation = await create_conversation("demo.db", TranscriptMessage)
+    messages = read_messages("testdata.txt")
+    print(f"Indexing {len(messages)} messages...")
+    results = await conversation.add_messages_with_indexing(messages)
+    print(f"Indexed {results.messages_added} messages.")
+    print(f"Got {results.semrefs_added} semantic refs.")
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
+```
+
+### 3. Set up your environment for using OpenAI
+
+The minimal set of environment variables is:
+
+```sh
+# Supply OPENAI_API_KEY securely in your environment.
+export OPENAI_MODEL=gpt-4o
+```
+
+Some OpenAI setups will require some additional environment variables.
+See [Environment Variables](env-vars.md) for more information.
+You will also find information there on how to use
+Azure-hosted OpenAI models.
+
+### 4. Run your program
+
+```sh
+$ python ingest.py
+```
+
+Expected output looks like:
+
+```txt
+0.027s -- Using OpenAI
+Indexing 3 messages...
+Indexed 3 messages.
+Got 24 semantic refs.
+```
+
+## "Hello world" query program
+
+### 1. Write this small program
+
+```py
+from typeagent import create_conversation
+from typeagent.transcripts.transcript import TranscriptMessage
+
+
+async def main():
+    conversation = await create_conversation("demo.db", TranscriptMessage)
+    question = "Who volunteered to do the python library?"
+    print("Q:", question)
+    answer = await conversation.query(question)
+    print("A:", answer)
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
+```
+
+### 2. Set up your environment like above
+
+### 3. Run your program
+
+```sh
+$ python query.py
+```
+
+Expected output looks like:
+
+```txt
+0.019s -- Using OpenAI
+Q: Who volunteered to do the python library?
+A: Guido volunteered to do the Python library.
+```
+
+## Next steps
+
+You can study the full documentation for `create_conversation()`
+and `conversation.query()` in [High-level API](high-level-api.md).
+
+You can also study the source code at the
+[typeagent-py repo](https://github.com/microsoft/typeagent-py).

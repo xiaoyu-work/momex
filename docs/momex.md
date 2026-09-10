@@ -12,9 +12,13 @@ Momex is a memory layer for AI agents, built on TypeAgent's Structured RAG. It's
 - **Embedding-only mode**: `search_by_embedding()` for fast similarity search without LLM
 - **Controlled lifecycle**: Stable IDs, retryable imports, reversible retirement,
   permanent source forgetting, and portable full backup/restore
+- **SDK example**: A framework-neutral retrieve/reply/writeback function, with
+  your application's reply model and unconfirmed assistant output by default
 
 ## Documentation
 
+- [Getting Started](getting-started.md) - Install and configure Momex
+- [SDK Agent Example](agent-example.md) - Integrate the Python API into your application
 - [Usage Guide](momex-usage.md) - How to use Momex
 - [Design Document](momex-design.md) - Architecture and internals
 
