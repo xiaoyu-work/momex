@@ -8,7 +8,7 @@ engine.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .visibility import MemoryStatus
@@ -81,6 +81,9 @@ class AddResult:
     collections: list[str] | None = None
     superseded: list[SupersededRecord] | None = None
     """What add() retired, not just how many. None when nothing was retired."""
+    source_ids: list[str] = field(default_factory=list)
+    memory_ids: list[str] = field(default_factory=list)
+    skipped_source_ids: list[str] = field(default_factory=list)
 
 
 @dataclass

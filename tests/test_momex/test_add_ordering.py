@@ -8,6 +8,7 @@ All offline: the conversation object is faked, no LLM or embedding key needed.
 """
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -30,6 +31,8 @@ class _FakeAddResult:
     def __init__(self, messages_added, semrefs_added):
         self.messages_added = messages_added
         self.semrefs_added = semrefs_added
+        self.source_ids = []
+        self.skipped_source_ids = []
 
 
 class _FakeSemanticRefs:
@@ -40,6 +43,9 @@ class _FakeSemanticRefs:
         return self._count
 
     async def get_slice(self, start, stop):
+        return []
+
+    async def get_multiple(self, ordinals):
         return []
 
 
@@ -65,7 +71,9 @@ class _FakeConversation:
             self.events.append("write-failed")
             raise RuntimeError("indexing blew up")
         self.events.append("write")
-        return _FakeAddResult(len(messages), 2)
+        result = _FakeAddResult(len(messages), 2)
+        result.source_ids = [message.source_id for message in messages]
+        return result
 
 
 def _make_memory(conversation) -> Memory:
@@ -78,6 +86,7 @@ def _make_memory(conversation) -> Memory:
     memory._initialized = True
     memory._ledger._legacy_ids = set()
     memory._ledger._records = []
+    memory.close = AsyncMock()
 
     async def _no_persist_ledger(records):
         memory._ledger._records = records

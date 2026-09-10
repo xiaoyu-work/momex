@@ -477,6 +477,74 @@ manager.delete("momex:engineering:xiaoyuzhang")
 manager.rename("user:old", "user:new")
 ```
 
+## Exact identities and data lifecycle
+
+Supply a `source_id` for a single message, or one per message in a batch, to
+make imports retryable. Source IDs identify immutable input: repeating the same
+ID and content skips extraction and storage, retaining the original timestamp.
+Different content, attribution or validity tags under the same ID raise an
+error and roll back the batch. Use a new source ID for revised information.
+
+```python
+result = await memory.add("I prefer tea", source_id="chat-42:turn-7")
+print(result.source_ids)          # Sources actually added
+print(result.memory_ids)          # Stable extracted-knowledge IDs
+print(result.skipped_source_ids)  # Existing or repeated sources
+
+source = await memory.get_source("chat-42:turn-7")
+fact = await memory.get(result.memory_ids[-1])
+assert fact is not None and fact.memory_id is not None
+await memory.delete_by_id(fact.memory_id)   # Reversible, exact match
+await memory.restore_by_id(fact.memory_id)
+```
+
+`get()` and `get_source()` return `None` for an unknown ID and include historical
+or unconfirmed records when found. Exact knowledge lookup scans stored refs in
+bounded batches; it does not call an LLM. `infer=False` returns source IDs but
+does not report extracted-knowledge IDs. Legacy sources without IDs retain their
+existing ordinal-based interfaces.
+
+### Full backup and restore
+
+`export()` retains its existing human-readable content-export format. Use
+`backup()` for recovery: it includes source text and IDs, attribution, time
+windows, extracted knowledge, vectors, every persistent index, ingestion state,
+chunk failures and the supersession ledger. Restore does not re-extract or
+re-embed, and requires matching embedding model/dimensions.
+
+```python
+await memory.backup("memory-backup.json")
+copy = Memory("user:backup-copy", config=memory.config)
+await copy.import_backup("memory-backup.json")  # Empty destination by default
+await copy.close()
+
+# Explicitly replace an existing collection only when intended.
+await memory.import_backup("memory-backup.json", replace=True)
+```
+
+The versioned JSON format is portable between SQLite and PostgreSQL. Archives
+are validated before replacement; database changes are transactional, and the
+backup file is replaced atomically. Backups contain memory content, so store
+them with the same access controls as the database.
+
+### Permanent forgetting
+
+```python
+removed_sources = await memory.forget("chat-42:turn-7")
+```
+
+`forget(source_id)` removes that source, its derived knowledge and vectors,
+orphaned term indexes, and linked audit text from the live store. It cannot be
+undone with `restore()`. Independently recorded copies under other source IDs
+are not removed. External backups, copies held by callers/services and database
+recovery logs are outside this operation's scope.
+
+Remaining ordinals are compacted to preserve the storage layer's dense-index
+invariant. Stable source and memory IDs are unchanged; prefer them over cached
+ordinals. Import and forgetting release this `Memory`'s caches and connection.
+Run these maintenance operations with other users of the collection quiescent,
+then reopen other `Memory` instances so they reload their indexes.
+
 ## Configuration
 
 Configuration has three parts:
@@ -762,8 +830,16 @@ All methods are async:
 | `await delete(query)` | Supersede memories matching query (advanced, reversible) |
 | `await history()` | Audit trail of superseded memories |
 | `await restore(ordinals)` | Undo a supersession |
+| `await get(memory_id)` | Read exact knowledge, including historical records |
+| `await get_source(source_id)` | Read an exact source message |
+| `await delete_by_id(memory_id)` | Reversibly retire exact knowledge |
+| `await restore_by_id(memory_id)` | Restore by stable knowledge ID |
+| `await forget(source_id)` | Permanently remove a source and derived data |
+| `await transcript(as_of=None)` | Read labeled source history |
 | `await stats()` | Get memory statistics |
-| `await export(path)` | Export to JSON file |
+| `await export(path)` | Human-readable JSON content export |
+| `await backup(path)` | Complete portable recovery archive |
+| `await import_backup(path, replace=False)` | Restore without model calls |
 | `await clear()` | Delete all memories in this collection |
 | `await close()` | Release the SQLite connection / PostgreSQL pool |
 
@@ -773,13 +849,20 @@ All methods are async:
 - `detect_contradictions`: bool (default True) - Auto-supersede contradicting memories
 - `valid_from`: str or None - ISO date, memory relevant from this date
 - `valid_to`: str or None - ISO date, memory expires after this date
+- `timestamp`: str or None - Event time; per-message overrides are supported
+- `source_id`: str or None - Stable source ID for a single message
+- `write_policy`: `"user"` (default) or `"all"` - Which roles supply facts
+- `context_turns`: int (default 2) - Preceding turns used to resolve references
 
 **search() / search_by_embedding() parameters:**
 - `include_expired`: bool (default False) - Include memories past their valid_to date
-
-**search() only:**
 - `include_superseded`: bool (default False) - Include memories that have been
   superseded by newer ones
+- `include_unconfirmed`: bool (default False) - Include unconfirmed context
+- `as_of`: ISO timestamp or date - Evaluate the historical snapshot
+
+**search() only:**
+- `neighbors`: int (default 0) - Visible neighboring turns to include
 
 **Releasing resources:**
 
@@ -812,6 +895,9 @@ All functions are async:
 | `await search(prefix, query, limit=10)` | Search (returns list of tuples) |
 | `await stats(prefix)` | Get combined stats for matching collections |
 
+Prefix search also accepts the same visibility/time options and `neighbors`.
+`total_limit` optionally bounds results across all matching collections.
+
 ### SearchItem
 
 Returned by `search()` and `search_by_embedding()`:
@@ -828,6 +914,10 @@ for item in results:
     print(item.timestamp)   # ISO timestamp of the source message, or None
     print(item.valid_from)  # ISO date or None — when memory becomes relevant
     print(item.valid_to)    # ISO date or None — when memory expires
+    print(item.status)      # current / superseded / expired / future / unconfirmed
+    print(item.source_id)   # Stable source identity
+    print(item.memory_id)   # Stable extracted-knowledge identity, if applicable
+    print(item.sources)     # Full provenance, including merged neighboring turns
 ```
 
 **SearchItem.type values** (from TypeAgent's knowledge_type):
@@ -857,6 +947,7 @@ result = await memory.add("I don't like Python anymore")
 print(f"Messages added: {result.messages_added}")
 print(f"Knowledge extracted: {result.entities_extracted}")
 print(f"Contradictions superseded: {result.contradictions_removed}")
+print(result.source_ids, result.memory_ids, result.skipped_source_ids)
 
 # The records themselves, not just the count (None when nothing was retired)
 for record in result.superseded or []:

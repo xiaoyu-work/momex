@@ -5,7 +5,6 @@
 
 import typing
 
-import asyncpg  # type: ignore[import-not-found]
 import numpy as np
 
 from ...aitools.embeddings import NormalizedEmbedding
@@ -15,6 +14,7 @@ from ...knowpro.convsettings import MessageTextIndexSettings
 from ...knowpro.interfaces import TextLocationData, TextToTextLocationIndexData
 from ...knowpro.textlocindex import ScoredTextLocation
 from ...storage.memory.messageindex import IMessageTextEmbeddingIndex
+from .connection import Pool
 from .schema import (
     deserialize_embedding,
     ensure_message_text_embedding_index,
@@ -27,7 +27,7 @@ class PostgresMessageTextIndex(IMessageTextEmbeddingIndex):
 
     def __init__(
         self,
-        pool: asyncpg.Pool,
+        pool: Pool,
         settings: MessageTextIndexSettings,
         message_collection: interfaces.IMessageCollection | None = None,
     ):

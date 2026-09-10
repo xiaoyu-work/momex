@@ -3,15 +3,19 @@
 
 """PostgreSQL storage provider implementation."""
 
+from contextlib import AbstractAsyncContextManager
+from contextvars import ContextVar
 from datetime import datetime, timezone
-
-import asyncpg  # type: ignore[import-not-found]
+import sys
+from types import TracebackType
+from typing import Any
 
 from ...aitools.vectorbase import TextEmbeddingIndexSettings
 from ...knowpro import interfaces
 from ...knowpro.convsettings import MessageTextIndexSettings, RelatedTermIndexSettings
 from ...knowpro.interfaces import ConversationMetadata, STATUS_INGESTED
 from .collections import PostgresMessageCollection, PostgresSemanticRefCollection
+from .connection import Pool, TransactionPool
 from .messageindex import PostgresMessageTextIndex
 from .propindex import PostgresPropertyIndex
 from .reltermsindex import PostgresRelatedTermsIndex
@@ -25,66 +29,6 @@ from .semrefindex import PostgresTermToSemanticRefIndex
 from .timestampindex import PostgresTimestampToTextRangeIndex
 
 
-class PgBouncerPoolWrapper:
-    """Wrapper for asyncpg pool that sets search_path on every connection acquire.
-
-    This is needed for pgbouncer mode where session-level settings don't persist.
-    """
-
-    def __init__(self, pool: asyncpg.Pool, schema: str):
-        self._pool = pool
-        self._schema = schema
-        from .schema import format_search_path
-
-        self._search_path = format_search_path(schema)
-
-    def acquire(self):
-        """Return a context manager that sets search_path on enter."""
-        return _PgBouncerAcquireContext(self._pool, self._search_path)
-
-    async def close(self):
-        """Close the underlying pool."""
-        await self._pool.close()
-
-    def __getattr__(self, name):
-        """Delegate other attributes to the underlying pool."""
-        return getattr(self._pool, name)
-
-
-class _PgBouncerAcquireContext:
-    """Context manager for acquiring a connection with search_path set.
-
-    Uses an explicit transaction so pgbouncer (transaction-pooling mode)
-    pins the backend connection for the entire acquire/release scope.
-    Without this, SET and subsequent queries may hit different backends.
-    """
-
-    def __init__(self, pool: asyncpg.Pool, search_path: str):
-        self._pool = pool
-        self._search_path = search_path
-        self._conn = None
-        self._tr = None
-
-    async def __aenter__(self):
-        self._conn = await self._pool.acquire()
-        self._tr = self._conn.transaction()
-        await self._tr.start()
-        await self._conn.execute(f"SET LOCAL search_path TO {self._search_path}")
-        return self._conn
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self._tr:
-            try:
-                if exc_type:
-                    await self._tr.rollback()
-                else:
-                    await self._tr.commit()
-            except Exception:
-                pass
-        if self._conn:
-            await self._pool.release(self._conn)
-
-
 class PostgresStorageProvider[TMessage: interfaces.IMessage](
     interfaces.IStorageProvider[TMessage]
 ):
@@ -96,7 +40,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
 
     def __init__(
         self,
-        pool: asyncpg.Pool,
+        pool: Pool,
         message_type: type[TMessage] = None,  # type: ignore
         semantic_ref_type: type[interfaces.SemanticRef] = None,  # type: ignore
         message_text_index_settings: MessageTextIndexSettings | None = None,
@@ -114,7 +58,10 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             related_term_index_settings: Settings for related terms index
             metadata: Initial conversation metadata
         """
-        self.pool = pool  # Will be replaced with wrapper if pgbouncer mode
+        self.pool = TransactionPool(pool, schema)
+        self._transaction: ContextVar[AbstractAsyncContextManager[Any] | None] = (
+            ContextVar("storage_transaction", default=None)
+        )
         self.message_type = message_type
         self.semantic_ref_type = semantic_ref_type
         self._metadata = metadata
@@ -236,6 +183,8 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         Returns:
             Initialized PostgresStorageProvider instance
         """
+        import asyncpg  # type: ignore[import-not-found]
+
         # For pgbouncer mode with schema, create the schema first before creating pool
         if pgbouncer and schema:
             from .schema import quote_ident
@@ -254,19 +203,9 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             "max_size": max_pool_size,
         }
 
-        # pgbouncer mode: disable prepared statements and use init callback for search_path
+        # TransactionPool sets search_path inside each pinned transaction.
         if pgbouncer:
             pool_kwargs["statement_cache_size"] = 0
-            # For pgbouncer, we need to set search_path on each connection via init
-            if schema:
-                from .schema import format_search_path
-
-                search_path = format_search_path(schema)
-
-                async def init_connection(conn):
-                    await conn.execute(f"SET search_path TO {search_path}")
-
-                pool_kwargs["init"] = init_connection
         else:
             # For non-pgbouncer, use server_settings (session-level)
             if schema:
@@ -281,14 +220,9 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             **pool_kwargs,
         )
 
-        # Wrap pool for pgbouncer mode to auto-set search_path
-        wrapped_pool = pool
-        if pgbouncer and schema:
-            wrapped_pool = PgBouncerPoolWrapper(pool, schema)
-
         # Create provider
         provider = cls(
-            pool=wrapped_pool,
+            pool=pool,
             message_type=message_type,
             semantic_ref_type=semantic_ref_type,
             message_text_index_settings=message_text_index_settings,
@@ -307,9 +241,17 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         """Enter transaction context."""
         if not self._initialized:
             await self.initialize()
-        # PostgreSQL transactions are handled at the connection level
-        # For now, we don't wrap in a transaction here
-        await self._init_conversation_metadata_if_needed()
+        context = self.pool.transaction()
+        connection = await context.__aenter__()
+        try:
+            await connection.execute(
+                "LOCK TABLE Messages, SemanticRefs IN SHARE ROW EXCLUSIVE MODE"
+            )
+            await self._init_conversation_metadata_if_needed()
+        except BaseException:
+            await context.__aexit__(*sys.exc_info())
+            raise
+        self._transaction.set(context)
         return self
 
     async def _check_embedding_consistency(self) -> None:
@@ -372,11 +314,14 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
-        exc_tb: object,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit transaction context."""
-        # asyncpg handles connection management automatically
-        pass
+        context = self._transaction.get()
+        if context is None:
+            raise RuntimeError("No active storage transaction")
+        self._transaction.set(None)
+        await context.__aexit__(exc_type, exc_val, exc_tb)
 
     async def close(self) -> None:
         """Close the database connection pool."""
@@ -448,6 +393,18 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
         return self._term_to_semantic_ref_index
 
     @property
+    def semantic_ref_index(self) -> PostgresTermToSemanticRefIndex:
+        return self.term_to_semantic_ref_index
+
+    @property
+    def conversation_threads(self) -> interfaces.IConversationThreads:
+        from ..memory.convthreads import ConversationThreads
+
+        return ConversationThreads(
+            self.message_text_index_settings.embedding_index_settings
+        )
+
+    @property
     def property_index(self) -> PostgresPropertyIndex:
         assert self._property_index is not None, "Provider not initialized"
         return self._property_index
@@ -513,6 +470,7 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             await conn.execute("DELETE FROM Messages")
             await conn.execute("DELETE FROM ConversationMetadata")
             await conn.execute("DELETE FROM IngestedSources")
+            await conn.execute("DELETE FROM ChunkFailures")
 
     def serialize(self) -> dict:
         """Serialize all storage provider data."""
@@ -650,6 +608,20 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
             )
             return row is not None and row[0] == STATUS_INGESTED
 
+    async def claim_sources(self, source_ids: list[str]) -> set[str]:
+        claimed: set[str] = set()
+        async with self.pool.acquire() as conn:
+            for source_id in dict.fromkeys(source_ids):
+                value = await conn.fetchval(
+                    "INSERT INTO IngestedSources (source_id, status) VALUES ($1, $2) "
+                    "ON CONFLICT DO NOTHING RETURNING source_id",
+                    source_id,
+                    STATUS_INGESTED,
+                )
+                if value is not None:
+                    claimed.add(value)
+        return claimed
+
     async def get_source_status(self, source_id: str) -> str | None:
         """Get the ingestion status of a source."""
         async with self.pool.acquire() as conn:
@@ -675,3 +647,51 @@ class PostgresStorageProvider[TMessage: interfaces.IMessage](
                 source_id,
                 status,
             )
+
+    async def mark_sources_ingested_batch(
+        self, source_ids: list[str], status: str = STATUS_INGESTED
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.executemany(
+                "INSERT INTO IngestedSources (source_id, status) VALUES ($1, $2) "
+                "ON CONFLICT (source_id) DO UPDATE SET status = EXCLUDED.status",
+                [(source_id, status) for source_id in source_ids],
+            )
+
+    async def record_chunk_failure(
+        self,
+        message_ordinal: int,
+        chunk_ordinal: int,
+        error_class: str,
+        error_message: str,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO ChunkFailures VALUES ($1, $2, $3, $4, $5) "
+                "ON CONFLICT (msg_id, chunk_ordinal) DO UPDATE SET "
+                "error_class=EXCLUDED.error_class, error_message=EXCLUDED.error_message, "
+                "failed_at=EXCLUDED.failed_at",
+                message_ordinal,
+                chunk_ordinal,
+                error_class,
+                error_message,
+                datetime.now(timezone.utc),
+            )
+
+    async def clear_chunk_failure(
+        self, message_ordinal: int, chunk_ordinal: int
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM ChunkFailures WHERE msg_id=$1 AND chunk_ordinal=$2",
+                message_ordinal,
+                chunk_ordinal,
+            )
+
+    async def get_chunk_failures(self) -> list[interfaces.ChunkFailure]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT msg_id, chunk_ordinal, error_class, error_message, failed_at "
+                "FROM ChunkFailures ORDER BY msg_id, chunk_ordinal"
+            )
+        return [interfaces.ChunkFailure(*row) for row in rows]

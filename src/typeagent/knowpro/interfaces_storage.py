@@ -113,6 +113,8 @@ class IMessageCollection[TMessage: IMessage](
 ):
     """A collection of Messages."""
 
+    async def lookup_source(self, source_id: str) -> tuple[int, TMessage] | None: ...
+
 
 class ISemanticRefCollection(ICollection[SemanticRef, SemanticRefOrdinal], Protocol):
     """A collection of SemanticRefs."""
@@ -178,6 +180,10 @@ class IStorageProvider[TMessage: IMessage](Protocol):
         ...
 
     # Ingested source tracking
+    async def claim_sources(self, source_ids: list[str]) -> set[str]:
+        """Atomically reserve new source IDs within the current transaction."""
+        ...
+
     async def is_source_ingested(self, source_id: str) -> bool:
         """Check if a source has already been ingested."""
         ...

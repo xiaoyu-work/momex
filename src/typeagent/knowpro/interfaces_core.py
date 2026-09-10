@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import field
 from datetime import datetime as Datetime
 from typing import (
     Any,
@@ -93,6 +94,8 @@ class AddMessagesResult:
     messages_added: int = 0
     chunks_added: int = 0
     semrefs_added: int = 0
+    source_ids: list[str] = field(default_factory=list)
+    skipped_source_ids: list[str] = field(default_factory=list)
 
 
 # Messages are referenced by their sequential ordinal numbers.

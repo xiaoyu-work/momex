@@ -273,8 +273,8 @@ class MemoryManager:
         self._require_sqlite(
             "rename",
             "Renaming a PostgreSQL collection would have to rename its schema "
-            "and rewrite its stored metadata. Create the new collection and "
-            "re-ingest, or run the ALTER SCHEMA yourself.",
+            "and rewrite its stored metadata. Use Memory.backup() and "
+            "import_backup() to copy into a new collection, or rename its schema manually.",
         )
 
         old_dir = self._get_collection_dir(old_name)
@@ -357,8 +357,8 @@ class MemoryManager:
         """
         self._require_sqlite(
             "copy",
-            "PostgreSQL has no portable schema-copy operation. Create the new "
-            "collection and re-ingest, or copy the schema with pg_dump.",
+            "Use Memory.backup() and import_backup() for a portable copy "
+            "without re-extraction, or copy the schema with pg_dump.",
         )
 
         source_dir = self._get_collection_dir(source)

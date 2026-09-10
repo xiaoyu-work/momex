@@ -278,6 +278,9 @@ class SqliteStorageProvider[TMessage: interfaces.IMessage](
             updated_at=format_timestamp_utc(current_time),
             tag=tags,  # None or list of tags
             embedding_name=metadata_embedding_name,
+            embedding_size=str(
+                self.message_text_index_settings.embedding_index_settings.embedding_size
+            ),
             **extras,
         )
 
@@ -366,9 +369,12 @@ class SqliteStorageProvider[TMessage: interfaces.IMessage](
         cursor.execute("DELETE FROM SemanticRefs")
         cursor.execute("DELETE FROM Messages")
         cursor.execute("DELETE FROM ConversationMetadata")
+        cursor.execute("DELETE FROM IngestedSources")
+        cursor.execute("DELETE FROM ChunkFailures")
 
         # Clear in-memory indexes
         await self._message_text_index.clear()
+        await self._related_terms_index.fuzzy_index.clear()
 
     def serialize(self) -> dict:
         """Serialize all storage provider data."""
@@ -495,7 +501,11 @@ class SqliteStorageProvider[TMessage: interfaces.IMessage](
                 custom_field="value"
             )
         """
-        _set_conversation_metadata(self.db, **kwds)
+        if self.db.in_transaction:
+            _set_conversation_metadata(self.db, **kwds)
+        else:
+            async with self:
+                _set_conversation_metadata(self.db, **kwds)
 
     async def update_conversation_timestamps(
         self,
@@ -558,6 +568,18 @@ class SqliteStorageProvider[TMessage: interfaces.IMessage](
         )
         row = cursor.fetchone()
         return row is not None and row[0] == STATUS_INGESTED
+
+    async def claim_sources(self, source_ids: list[str]) -> set[str]:
+        claimed: set[str] = set()
+        for source_id in dict.fromkeys(source_ids):
+            row = self.db.execute(
+                "INSERT INTO IngestedSources (source_id, status) VALUES (?, ?) "
+                "ON CONFLICT DO NOTHING RETURNING source_id",
+                (source_id, STATUS_INGESTED),
+            ).fetchone()
+            if row:
+                claimed.add(row[0])
+        return claimed
 
     async def get_source_status(self, source_id: str) -> str | None:
         """Get the ingestion status of a source.

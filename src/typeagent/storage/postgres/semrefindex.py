@@ -7,16 +7,15 @@ from collections.abc import Sequence
 import re
 import unicodedata
 
-import asyncpg  # type: ignore[import-not-found]
-
 from ...knowpro import interfaces
 from ...knowpro.interfaces import ScoredSemanticRefOrdinal
+from .connection import Pool
 
 
 class PostgresTermToSemanticRefIndex(interfaces.ITermToSemanticRefIndex):
     """PostgreSQL-backed implementation of term to semantic ref index."""
 
-    def __init__(self, pool: asyncpg.Pool):
+    def __init__(self, pool: Pool):
         self.pool = pool
 
     async def size(self) -> int:

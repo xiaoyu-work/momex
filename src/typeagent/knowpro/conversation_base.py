@@ -137,6 +137,7 @@ class ConversationBase(
         *,
         source_ids: list[str] | None = None,
         knowledge_inputs: list[str | None] | None = None,
+        skip_ingested: bool = False,
     ) -> AddMessagesResult:
         """
         Add messages and build all indexes incrementally in a single transaction.
@@ -156,6 +157,8 @@ class ConversationBase(
                 IDs won't be marked as ingested (for SQLite storage).
             knowledge_inputs: Optional attributed extraction text per message.
                 None entries skip LLM extraction but preserve original messages.
+            skip_ingested: Atomically skip existing source IDs. Reusing an ID for
+                different content, attribution or tags raises instead of updating.
 
         Returns:
             Result with counts of messages/semrefs added
@@ -180,7 +183,55 @@ class ConversationBase(
                 if source_ids is not None
                 else [m.source_id for m in messages if m.source_id is not None]
             )
-            if sids:
+            skipped: list[str] = []
+            if skip_ingested:
+                if source_ids is not None:
+                    raise ValueError("skip_ingested uses each message's source_id")
+                claimed = await storage.claim_sources(sids)
+                accepted: dict[str, TMessage] = {}
+                keep: list[int] = []
+                from .serialization import serialize_object
+
+                for index, message in enumerate(messages):
+                    source_id = message.source_id
+                    if source_id is None:
+                        raise ValueError(
+                            "skip_ingested requires a source_id per message"
+                        )
+                    if source_id in claimed and source_id not in accepted:
+                        accepted[source_id] = message
+                        keep.append(index)
+                        continue
+                    previous = accepted.get(source_id)
+                    if previous is None:
+                        found = await self.messages.lookup_source(source_id)
+                        previous = found[1] if found else None
+                    if previous is None:
+                        raise ValueError(
+                            f"Source ID {source_id!r} belongs to another import"
+                        )
+                    old_data = serialize_object(previous)
+                    new_data = serialize_object(message)
+                    old_data.pop("timestamp", None)
+                    new_data.pop("timestamp", None)
+                    if old_data != new_data:
+                        raise ValueError(
+                            f"Source ID {source_id!r} already has different content or metadata"
+                        )
+                    skipped.append(source_id)
+                messages = [messages[index] for index in keep]
+                if knowledge_inputs is not None:
+                    knowledge_inputs = [knowledge_inputs[index] for index in keep]
+                sids = [
+                    message.source_id
+                    for message in messages
+                    if message.source_id is not None
+                ]
+                if not messages:
+                    return AddMessagesResult(
+                        skipped_source_ids=list(dict.fromkeys(skipped))
+                    )
+            elif sids:
                 await storage.mark_sources_ingested_batch(sids)
 
             start_points = IndexingStartPoints(
@@ -207,6 +258,8 @@ class ConversationBase(
                 chunks_added=chunks_added,
                 semrefs_added=await self.semantic_refs.size()
                 - start_points.semref_count,
+                source_ids=sids,
+                skipped_source_ids=list(dict.fromkeys(skipped)),
             )
 
             # Update the updated_at timestamp

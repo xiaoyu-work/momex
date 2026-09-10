@@ -109,6 +109,8 @@ class _FakeAddResult:
     def __init__(self, messages_added, semrefs_added=0):
         self.messages_added = messages_added
         self.semrefs_added = semrefs_added
+        self.source_ids = []
+        self.skipped_source_ids = []
 
 
 class _FakeIndexSettings:
@@ -127,9 +129,11 @@ class _CapturingConversation:
         self.settings = _FakeSettings()
         self.added_messages: list = []
 
-    async def add_messages_with_indexing(self, messages):
+    async def add_messages_with_indexing(self, messages, **kwargs):
         self.added_messages.extend(messages)
-        return _FakeAddResult(len(messages))
+        result = _FakeAddResult(len(messages))
+        result.source_ids = [message.source_id for message in messages]
+        return result
 
 
 def _memory(tmp_path, conversation):

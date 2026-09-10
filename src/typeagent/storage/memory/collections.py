@@ -81,3 +81,13 @@ class MemoryMessageCollection[TMessage: IMessage](
     MemoryCollection[TMessage, MessageOrdinal]
 ):
     """A collection of messages."""
+
+    async def lookup_source(self, source_id: str) -> tuple[int, TMessage] | None:
+        return next(
+            (
+                (ordinal, item)
+                for ordinal, item in enumerate(self.items)
+                if item.source_id == source_id
+            ),
+            None,
+        )

@@ -8,9 +8,11 @@ search for robust hybrid retrieval.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 import json
 import logging
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from .attribution import extraction_inputs, is_confirmed, prepare_messages, WritePolicy
@@ -154,6 +156,15 @@ class Memory:
         storage = self._conversation_required().storage_provider
         await storage.set_conversation_metadata(**kwds)
 
+    @asynccontextmanager
+    async def _write_guard(self) -> AsyncIterator[None]:
+        async with self._settings_lock:
+            try:
+                yield
+            except BaseException:
+                await self.close()
+                raise
+
     def _create_sqlite_provider(
         self,
         message_text_index_settings: MessageTextIndexSettings,
@@ -191,6 +202,7 @@ class Memory:
         timestamp: str | None = None,
         write_policy: WritePolicy = "user",
         context_turns: int = 2,
+        source_id: str | None = None,
     ) -> AddResult:
         """Add memories with TypeAgent's knowledge extraction.
 
@@ -245,9 +257,6 @@ class Memory:
                 {"role": "assistant", "content": "Nice to meet you!"},
             ])
         """
-        await self._ensure_initialized()
-        conversation_obj = self._conversation_required()
-
         # Reject unusable dates before anything is written. The window checks
         # compare these lexicographically, so a non-padded value would fail
         # silently rather than loudly.
@@ -268,6 +277,7 @@ class Memory:
             timestamp=occurred_at,
             tags=window_tags(valid_from, valid_to),
             write_policy=write_policy,
+            source_id=source_id,
         )
 
         if not ta_messages:
@@ -278,7 +288,10 @@ class Memory:
                 collections=[self.collection],
             )
 
-        async with self._settings_lock:
+        ids: list[str] = []
+        async with self._write_guard():
+            await self._ensure_initialized()
+            conversation_obj = self._conversation_required()
             if infer:
                 size = await conversation_obj.messages.size()
                 previous = (
@@ -291,9 +304,13 @@ class Memory:
                 inputs = extraction_inputs(ta_messages, previous, context_turns)
                 semref_baseline = await conversation_obj.semantic_refs.size()
                 result = await conversation_obj.add_messages_with_indexing(
-                    ta_messages, knowledge_inputs=inputs
+                    ta_messages, knowledge_inputs=inputs, skip_ingested=True
                 )
-                confirmed = [m for m in ta_messages if is_confirmed(m)]
+                confirmed = [
+                    m
+                    for m in ta_messages
+                    if is_confirmed(m) and m.source_id in result.source_ids
+                ]
                 if detect_contradictions and confirmed:
                     superseded = await self._detect_and_remove_contradictions(
                         "\n".join(message_text(m) for m in confirmed),
@@ -303,13 +320,32 @@ class Memory:
                             )
                         ),
                     )
+                if result.semrefs_added:
+                    items = await items_for_semrefs(
+                        conversation_obj,
+                        list(
+                            range(
+                                semref_baseline, semref_baseline + result.semrefs_added
+                            )
+                        ),
+                        view=SearchView(
+                            include_expired=True,
+                            include_superseded=True,
+                            include_unconfirmed=True,
+                        ),
+                    )
+                    ids = list(
+                        dict.fromkeys(
+                            item.memory_id for item in items if item.memory_id
+                        )
+                    )
             else:
                 index_settings = conversation_obj.settings.semantic_ref_index_settings
                 old_setting = index_settings.auto_extract_knowledge
                 index_settings.auto_extract_knowledge = False
                 try:
                     result = await conversation_obj.add_messages_with_indexing(
-                        ta_messages
+                        ta_messages, skip_ingested=True
                     )
                 finally:
                     index_settings.auto_extract_knowledge = old_setting
@@ -320,6 +356,9 @@ class Memory:
             contradictions_removed=len(superseded),
             collections=[self.collection],
             superseded=superseded or None,
+            source_ids=result.source_ids,
+            memory_ids=ids,
+            skipped_source_ids=result.skipped_source_ids,
         )
 
     # =========================================================================
@@ -685,8 +724,146 @@ class Memory:
                 for ordinal in new_ids
             ]
         )
-
         return len(new_ids)
+
+    async def get_source(self, source_id: str) -> SearchItem | None:
+        """Read an exact source, including historical or unconfirmed content."""
+        if not source_id.strip():
+            raise ValueError("source_id cannot be empty")
+        await self._ensure_initialized()
+        found = await self._conversation_required().messages.lookup_source(source_id)
+        if found is None:
+            return None
+        view = await self._search_view(
+            include_expired=True, include_superseded=True, include_unconfirmed=True
+        )
+        return item_for_message(found[1], found[0], 0.0, view)
+
+    async def _items_by_id(self, memory_id: str) -> list[SearchItem]:
+        if not memory_id.strip():
+            raise ValueError("memory_id cannot be empty")
+        await self._ensure_initialized()
+        conversation = self._conversation_required()
+        view = await self._search_view(
+            include_expired=True, include_superseded=True, include_unconfirmed=True
+        )
+        found: list[SearchItem] = []
+        size = await conversation.semantic_refs.size()
+        for start in range(0, size, 256):
+            items = await items_for_semrefs(
+                conversation, list(range(start, min(start + 256, size))), view=view
+            )
+            found.extend(item for item in items if item.memory_id == memory_id)
+        return found
+
+    async def get(self, memory_id: str) -> SearchItem | None:
+        """Read an exact stable knowledge ID without semantic matching."""
+        items = await self._items_by_id(memory_id)
+        return items[0] if items else None
+
+    async def delete_by_id(self, memory_id: str) -> int:
+        """Reversibly retire every occurrence of an exact knowledge ID."""
+        items = await self._items_by_id(memory_id)
+        records = await self._ledger.append(
+            [
+                SupersededRecord(
+                    ordinal=item.raw.semantic_ref_ordinal,
+                    superseded_by=[],
+                    at=utc_now(),
+                    reason="delete",
+                    text=item.text,
+                    memory_id=memory_id,
+                )
+                for item in items
+            ]
+        )
+        return len(records)
+
+    async def restore_by_id(self, memory_id: str) -> int:
+        """Undo retirement by stable ID, even after source ordinals are compacted."""
+        items = await self._items_by_id(memory_id)
+        return await self._ledger.restore(
+            {item.raw.semantic_ref_ordinal for item in items}
+        )
+
+    async def backup(self, path: str) -> None:
+        """Atomically write a portable backup of sources, indexes and audit history."""
+        from .snapshot import connection, read_tables, write_file
+
+        await self._ensure_initialized()
+        async with self._settings_lock:
+            async with connection(
+                self._conversation_required().storage_provider, write=False
+            ) as (conn, sqlite):
+                data = await read_tables(conn, sqlite, self.collection)
+            write_file(path, data)
+
+    async def import_backup(self, path: str, *, replace: bool = False) -> None:
+        """Restore a full backup without LLM calls or re-embedding.
+
+        Requires an empty collection unless replace=True. The configured
+        embedding model and dimensions must match the stored vectors.
+        """
+        from .snapshot import Backup, connection, read_tables, write_tables
+
+        data = Backup.model_validate_json(Path(path).read_text(encoding="utf-8"))
+        await self._ensure_initialized()
+        conversation = self._conversation_required()
+        settings = (
+            conversation.settings.message_text_index_settings.embedding_index_settings
+        )
+        if data.embedding_model not in (
+            None,
+            settings.embedding_model.model_name,
+        ):
+            raise ValueError(
+                "backup embedding model does not match the configured model"
+            )
+        if data.embedding_dimensions not in (None, settings.embedding_size):
+            raise ValueError(
+                "backup embedding dimensions do not match the configured model"
+            )
+        async with self._settings_lock:
+            try:
+                async with connection(conversation.storage_provider, write=True) as (
+                    conn,
+                    sqlite,
+                ):
+                    current = await read_tables(conn, sqlite, self.collection)
+                    if not replace and (
+                        current.tables["Messages"] or current.tables["SemanticRefs"]
+                    ):
+                        raise ValueError(
+                            "import_backup requires an empty collection; use replace=True to overwrite"
+                        )
+                    await write_tables(conn, sqlite, data, self.collection)
+            finally:
+                await self.close()
+
+    async def forget(self, source_id: str) -> int:
+        """Permanently remove a source and its derived data from the live store.
+
+        Removes source text, knowledge, vectors and linked audit text. Remaining
+        ordinals are compacted; their stable IDs do not change. External backups
+        and filesystem/database recovery logs are outside this API's scope.
+        """
+        from .snapshot import connection, read_tables, without_source, write_tables
+
+        if not source_id.strip():
+            raise ValueError("source_id cannot be empty")
+        await self._ensure_initialized()
+        async with self._settings_lock:
+            try:
+                async with connection(
+                    self._conversation_required().storage_provider, write=True
+                ) as (conn, sqlite):
+                    data = await read_tables(conn, sqlite, self.collection)
+                    remaining, removed = without_source(data, source_id)
+                    if removed:
+                        await write_tables(conn, sqlite, remaining, self.collection)
+                    return removed
+            finally:
+                await self.close()
 
     async def _detect_and_remove_contradictions(
         self,
@@ -796,15 +973,12 @@ class Memory:
         Returns:
             True if successful.
         """
-        await self._ensure_initialized()
-        conversation = self._conversation_required()
-        await conversation.storage_provider.clear()  # type: ignore[attr-defined]
-
-        # Commit for SQLite (PostgreSQL handles this automatically)
-        if self.config.is_sqlite and hasattr(conversation.storage_provider, "db"):
-            conversation.storage_provider.db.commit()  # type: ignore[attr-defined]
-
-        await self._ledger.reset()
+        async with self._write_guard():
+            await self._ensure_initialized()
+            conversation = self._conversation_required()
+            async with conversation.storage_provider:
+                await conversation.storage_provider.clear()  # type: ignore[attr-defined]
+            await self._ledger.reset()
 
         return True
 

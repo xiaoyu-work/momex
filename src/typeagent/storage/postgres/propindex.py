@@ -5,16 +5,15 @@
 
 from collections.abc import Sequence
 
-import asyncpg  # type: ignore[import-not-found]
-
 from ...knowpro import interfaces
 from ...knowpro.interfaces import ScoredSemanticRefOrdinal
+from .connection import Pool
 
 
 class PostgresPropertyIndex(interfaces.IPropertyToSemanticRefIndex):
     """PostgreSQL-backed implementation of property to semantic ref index."""
 
-    def __init__(self, pool: asyncpg.Pool):
+    def __init__(self, pool: Pool):
         self.pool = pool
 
     async def size(self) -> int:

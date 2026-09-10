@@ -3,12 +3,12 @@
 
 """PostgreSQL-based collection implementations."""
 
+from datetime import timezone
 import json
 import typing
 
-import asyncpg  # type: ignore[import-not-found]
-
 from ...knowpro import interfaces, serialization
+from .connection import Pool
 
 
 class PostgresMessageCollection[TMessage: interfaces.IMessage](
@@ -18,7 +18,7 @@ class PostgresMessageCollection[TMessage: interfaces.IMessage](
 
     def __init__(
         self,
-        pool: asyncpg.Pool,
+        pool: Pool,
         message_type: type[TMessage] | None = None,
         message_text_index: "interfaces.IMessageTextIndex[TMessage] | None" = None,
     ):
@@ -79,7 +79,9 @@ class PostgresMessageCollection[TMessage: interfaces.IMessage](
         message_data = extra_json if extra_json else {}
         message_data["textChunks"] = chunks_json if chunks_json else []
         message_data["timestamp"] = (
-            start_timestamp.isoformat() if start_timestamp else None
+            start_timestamp.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if start_timestamp
+            else None
         )
         message_data["tags"] = tags_json if tags_json else []
         message_data["metadata"] = metadata_json if metadata_json else {}
@@ -147,6 +149,14 @@ class PostgresMessageCollection[TMessage: interfaces.IMessage](
                 stop,
             )
             return [self._deserialize_message_from_row(row) for row in rows]
+
+    async def lookup_source(self, source_id: str) -> tuple[int, TMessage] | None:
+        async with self.pool.acquire() as conn:
+            ordinal = await conn.fetchval(
+                "SELECT msg_id FROM Messages WHERE extra->>'source_id'=$1 ORDER BY msg_id LIMIT 1",
+                source_id,
+            )
+        return (ordinal, await self.get_item(ordinal)) if ordinal is not None else None
 
     async def get_multiple(self, arg: list[int]) -> list[TMessage]:
         if not arg:
@@ -230,7 +240,7 @@ class PostgresMessageCollection[TMessage: interfaces.IMessage](
 class PostgresSemanticRefCollection(interfaces.ISemanticRefCollection):
     """PostgreSQL-backed semantic reference collection."""
 
-    def __init__(self, pool: asyncpg.Pool):
+    def __init__(self, pool: Pool):
         self.pool = pool
 
     def _deserialize_semantic_ref_from_row(self, row) -> interfaces.SemanticRef:

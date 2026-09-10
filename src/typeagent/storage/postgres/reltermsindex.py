@@ -3,11 +3,11 @@
 
 """PostgreSQL-based related terms index implementations with pgvector."""
 
-import asyncpg  # type: ignore[import-not-found]
 import numpy as np
 
 from ...aitools.vectorbase import TextEmbeddingIndexSettings, VectorBase
 from ...knowpro import interfaces
+from .connection import Pool
 from .schema import (
     deserialize_embedding,
     ensure_related_terms_embedding_index,
@@ -18,7 +18,7 @@ from .schema import (
 class PostgresRelatedTermsAliases(interfaces.ITermToRelatedTerms):
     """PostgreSQL-backed implementation of term to related terms aliases."""
 
-    def __init__(self, pool: asyncpg.Pool):
+    def __init__(self, pool: Pool):
         self.pool = pool
 
     async def lookup_term(self, text: str) -> list[interfaces.Term] | None:
@@ -141,7 +141,7 @@ class PostgresRelatedTermsAliases(interfaces.ITermToRelatedTerms):
 class PostgresRelatedTermsFuzzy(interfaces.ITermToRelatedTermsFuzzy):
     """PostgreSQL-backed implementation of fuzzy term relationships with pgvector."""
 
-    def __init__(self, pool: asyncpg.Pool, settings: TextEmbeddingIndexSettings):
+    def __init__(self, pool: Pool, settings: TextEmbeddingIndexSettings):
         self.pool = pool
         self._embedding_settings = settings
         # Keep VectorBase for embedding generation
@@ -333,7 +333,7 @@ class PostgresRelatedTermsFuzzy(interfaces.ITermToRelatedTermsFuzzy):
 class PostgresRelatedTermsIndex(interfaces.ITermToRelatedTermsIndex):
     """PostgreSQL-backed implementation of ITermToRelatedTermsIndex."""
 
-    def __init__(self, pool: asyncpg.Pool, settings: TextEmbeddingIndexSettings):
+    def __init__(self, pool: Pool, settings: TextEmbeddingIndexSettings):
         self.pool = pool
         self._aliases = PostgresRelatedTermsAliases(pool)
         self._fuzzy_index = PostgresRelatedTermsFuzzy(pool, settings)

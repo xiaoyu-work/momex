@@ -119,6 +119,13 @@ class SqliteMessageCollection[TMessage: interfaces.IMessage](
             return self._deserialize_message_from_row(row)
         raise IndexError("Message not found")
 
+    async def lookup_source(self, source_id: str) -> tuple[int, TMessage] | None:
+        row = self.db.execute(
+            "SELECT msg_id FROM Messages WHERE json_extract(extra, '$.source_id') = ? ORDER BY msg_id LIMIT 1",
+            (source_id,),
+        ).fetchone()
+        return (row[0], await self.get_item(row[0])) if row else None
+
     async def get_slice(self, start: int, stop: int) -> list[TMessage]:
         if stop <= start:
             return []

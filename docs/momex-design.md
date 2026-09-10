@@ -95,6 +95,18 @@ Both backends support prefix-based queries:
 - `search("momex:engineering", ...)` → searches all under engineering
 - `search("momex", ...)` → searches entire momex
 
+## Persistence and maintenance
+
+Source-ID claims and indexed writes share one transaction. PostgreSQL pins all
+index operations to the same connection; SQLite uses its existing immediate
+write transaction. Retried source IDs do not duplicate messages or extraction.
+
+Full backups retain the persistent tables and embeddings, not just rendered
+text. Import and permanent source forgetting are atomic maintenance operations.
+Forgetting compacts message/semantic-ref ordinals and remaps ranges, indexes and
+ledger references while keeping stable IDs. Other open readers must reopen
+after these operations to refresh their in-memory indexes.
+
 ## Knowledge Extraction
 
 When you call `add()`, TypeAgent's KnowledgeExtractor processes the text:

@@ -46,12 +46,24 @@ def prepare_messages(
     timestamp: str,
     tags: list[str],
     write_policy: WritePolicy,
+    source_id: str | None = None,
 ) -> list[ConversationMessage]:
     if write_policy not in ("user", "all"):
         raise ValueError("write_policy must be 'user' or 'all'")
     inputs = [{"content": messages}] if isinstance(messages, str) else messages
+    if source_id is not None and len(inputs) != 1:
+        raise ValueError(
+            "source_id requires one message; use per-message IDs for batches"
+        )
     prepared: list[ConversationMessage] = []
     for message in inputs:
+        message_source_id = message.get("source_id", source_id)
+        if source_id is not None and message_source_id != source_id:
+            raise ValueError("conflicting source_id argument and message field")
+        if message_source_id is not None and (
+            not isinstance(message_source_id, str) or not message_source_id.strip()
+        ):
+            raise ValueError("source_id must be a non-empty string")
         content = message.get("content", "")
         role = message.get("role", "user")
         speaker = message.get("speaker", f"{collection}:{role}")
@@ -111,7 +123,7 @@ def prepare_messages(
                 metadata=ConversationMessageMeta(speaker=speaker),
                 tags=message_tags,
                 timestamp=validate_timestamp(occurred_at),
-                source_id=new_source_id(),
+                source_id=message_source_id or new_source_id(),
             )
         )
     return prepared

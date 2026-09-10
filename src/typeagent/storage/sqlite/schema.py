@@ -285,6 +285,10 @@ def init_db_schema(db: sqlite3.Connection) -> None:
     # Create all tables
     cursor.execute(CONVERSATION_METADATA_SCHEMA)
     cursor.execute(MESSAGES_SCHEMA)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_source_id "
+        "ON Messages(json_extract(extra, '$.source_id'))"
+    )
     cursor.execute(SEMANTIC_REFS_SCHEMA)
     cursor.execute(SEMANTIC_REF_INDEX_SCHEMA)
     cursor.execute(MESSAGE_TEXT_INDEX_SCHEMA)

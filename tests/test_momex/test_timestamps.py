@@ -21,6 +21,8 @@ from momex.timewindow import validate_timestamp
 class _Result:
     messages_added = 1
     semrefs_added = 0
+    source_ids = []
+    skipped_source_ids = []
 
 
 class _IndexSettings:
@@ -37,9 +39,11 @@ class _Conversation:
         self.settings = _Settings()
         self.added: list = []
 
-    async def add_messages_with_indexing(self, messages):
+    async def add_messages_with_indexing(self, messages, **kwargs):
         self.added.extend(messages)
-        return _Result()
+        result = _Result()
+        result.source_ids = [message.source_id for message in messages]
+        return result
 
 
 @pytest.fixture

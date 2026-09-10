@@ -5,9 +5,8 @@
 
 from datetime import datetime
 
-import asyncpg  # type: ignore[import-not-found]
-
 from ...knowpro import interfaces
+from .connection import Pool
 
 
 def _to_datetime(value) -> datetime | None:
@@ -29,7 +28,7 @@ def _to_datetime(value) -> datetime | None:
 class PostgresTimestampToTextRangeIndex(interfaces.ITimestampToTextRangeIndex):
     """PostgreSQL-based timestamp index that queries Messages table directly."""
 
-    def __init__(self, pool: asyncpg.Pool):
+    def __init__(self, pool: Pool):
         self.pool = pool
 
     async def size(self) -> int:

@@ -194,6 +194,9 @@ class SqliteRelatedTermsFuzzy(interfaces.ITermToRelatedTermsFuzzy):
     async def clear(self) -> None:
         cursor = self.db.cursor()
         cursor.execute("DELETE FROM RelatedTermsFuzzy")
+        self._vector_base.clear()
+        self._terms_list.clear()
+        self._added_terms.clear()
 
     async def size(self) -> int:
         return self._size()
@@ -311,7 +314,7 @@ class SqliteRelatedTermsIndex(interfaces.ITermToRelatedTermsIndex):
         return self._aliases
 
     @property
-    def fuzzy_index(self) -> interfaces.ITermToRelatedTermsFuzzy | None:
+    def fuzzy_index(self) -> SqliteRelatedTermsFuzzy:
         return self._fuzzy_index
 
     async def serialize(self) -> interfaces.TermsToRelatedTermsIndexData:

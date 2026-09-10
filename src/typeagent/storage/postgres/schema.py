@@ -142,6 +142,17 @@ CREATE TABLE IF NOT EXISTS IngestedSources (
 );
 """
 
+CHUNK_FAILURES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS ChunkFailures (
+    msg_id INTEGER NOT NULL,
+    chunk_ordinal INTEGER NOT NULL,
+    error_class TEXT NOT NULL,
+    error_message TEXT NOT NULL,
+    failed_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (msg_id, chunk_ordinal)
+);
+"""
+
 
 def serialize_embedding(embedding: NormalizedEmbedding | None) -> str | None:
     """Serialize a numpy embedding array to pgvector string format."""
@@ -245,6 +256,10 @@ async def init_db_schema(
         # Create tables
         await conn.execute(CONVERSATION_METADATA_SCHEMA)
         await conn.execute(MESSAGES_SCHEMA)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_source_id "
+            "ON Messages ((extra->>'source_id'))"
+        )
         await conn.execute(SEMANTIC_REFS_SCHEMA)
         await conn.execute(SEMANTIC_REF_INDEX_SCHEMA)
         await conn.execute(
@@ -257,6 +272,7 @@ async def init_db_schema(
         )
         await conn.execute(TIMESTAMP_INDEX_SCHEMA)
         await conn.execute(INGESTED_SOURCES_SCHEMA)
+        await conn.execute(CHUNK_FAILURES_SCHEMA)
 
         # Create indexes
         await conn.execute(SEMANTIC_REF_INDEX_TERM_INDEX)
