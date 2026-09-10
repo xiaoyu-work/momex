@@ -19,6 +19,7 @@ from typing import Any, Awaitable, Callable
 
 from .paths import utc_now
 from .results import SupersededRecord
+from .timewindow import normalize_as_of
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,8 @@ def encode_ledger(records: list[SupersededRecord]) -> dict[str, Any]:
                 "query": r.query,
                 "restored_at": r.restored_at,
                 "memory_id": r.memory_id,
+                "effective_at": r.effective_at,
+                "effective_to": r.effective_to,
             }
             for r in records
         ],
@@ -163,6 +166,16 @@ def decode_ledger(parsed: Any) -> list[SupersededRecord]:
                 memory_id=(
                     raw.get("memory_id")
                     if isinstance(raw.get("memory_id"), str)
+                    else None
+                ),
+                effective_at=(
+                    raw.get("effective_at")
+                    if isinstance(raw.get("effective_at"), str)
+                    else None
+                ),
+                effective_to=(
+                    raw.get("effective_to")
+                    if isinstance(raw.get("effective_to"), str)
                     else None
                 ),
             )
@@ -302,9 +315,10 @@ class SupersessionLedger:
             **{SUPERSESSION_METADATA_KEY: json.dumps(encode_ledger(records))}
         )
 
-    async def hidden_ordinals(self) -> set[int]:
+    async def hidden_ordinals(self, as_of: str | None = None) -> set[int]:
         """Ordinals currently hidden from search: superseded and not restored."""
-        return {r.ordinal for r in await self.load() if r.active}
+        moment = normalize_as_of(as_of) or utc_now()
+        return {r.ordinal for r in await self.load() if r.applies_at(moment)}
 
     async def append(self, records: list[SupersededRecord]) -> list[SupersededRecord]:
         """Append entries, skipping ordinals that are already hidden.
@@ -323,13 +337,23 @@ class SupersessionLedger:
         async with self._lock:
             self._records = None
             ledger = await self.load()
-            hidden = {r.ordinal for r in ledger if r.active}
-
             added: list[SupersededRecord] = []
             for record in records:
-                if record.ordinal in hidden:
+                if any(
+                    old.ordinal == record.ordinal
+                    and old.active
+                    and (old.effective_at or old.at)
+                    <= (record.effective_at or record.at)
+                    and (
+                        old.effective_to is None
+                        or (
+                            record.effective_to is not None
+                            and record.effective_to <= old.effective_to
+                        )
+                    )
+                    for old in ledger + added
+                ):
                     continue
-                hidden.add(record.ordinal)
                 added.append(record)
 
             if added:

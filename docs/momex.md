@@ -88,6 +88,11 @@ remain unconfirmed context unless explicitly confirmed or written with
 `status="unconfirmed"`. The extractor receives speaker, role and nearby turns,
 while storage retains the original text.
 
+Use `as_of="2024-05-01"` on either search method for a historical snapshot.
+Event timestamps, validity windows and replacement intervals all use that
+cutoff. Backfilling an older fact cannot replace a later conflicting fact;
+temporary replacements apply only during their effective window.
+
 Conversation answers often depend on a reply next to the turn that matched.
 Ask `search()` to widen each message result without increasing the number of
 results:

@@ -53,9 +53,22 @@ class SupersededRecord:
     has no source_id.
     """
 
+    effective_at: str | None = None
+    """Event time at which the replacement takes effect; legacy entries use at."""
+
+    effective_to: str | None = None
+    """Inclusive end of a temporary replacement, otherwise unbounded."""
+
     @property
     def active(self) -> bool:
         return self.restored_at is None
+
+    def applies_at(self, timestamp: str) -> bool:
+        return (
+            (self.effective_at or self.at) <= timestamp
+            and (self.effective_to is None or timestamp <= self.effective_to)
+            and (self.restored_at is None or timestamp < self.restored_at)
+        )
 
 
 @dataclass

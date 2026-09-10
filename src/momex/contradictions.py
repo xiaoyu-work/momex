@@ -12,6 +12,7 @@ than raising, because by the time it runs the new memory is already committed.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Awaitable, Callable
 
@@ -126,6 +127,8 @@ async def find_candidates(
     *,
     hidden_ordinals: set[int] | None = None,
     limit: int = CANDIDATE_LIMIT,
+    include_expired: bool = False,
+    include_new_peers: bool = False,
 ) -> list[SearchItem]:
     """Find what the memories just written might contradict.
 
@@ -137,9 +140,13 @@ async def find_candidates(
     The caller's own semantic refs are excluded -- they match by construction,
     and a memory must not be retired as a contradiction of itself.
     """
-    new_refs = await items_for_semrefs(conversation, list(new_ordinals))
+    new_refs = await items_for_semrefs(
+        conversation, list(new_ordinals), include_expired=include_expired
+    )
 
-    exclude = set(new_ordinals) | (hidden_ordinals or set())
+    exclude = (set() if include_new_peers else set(new_ordinals)) | (
+        hidden_ordinals or set()
+    )
     found: set[int] = set()
     for item in new_refs:
         if not is_propositional(item):
@@ -150,8 +157,24 @@ async def find_candidates(
     if not ordinals:
         return []
 
-    candidates = await items_for_semrefs(conversation, ordinals[:limit])
-    return [item for item in candidates if is_propositional(item)]
+    candidates = await items_for_semrefs(
+        conversation, ordinals, include_expired=include_expired
+    )
+    candidates = [item for item in candidates if is_propositional(item)]
+    if include_new_peers:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if any(
+                is_propositional(item)
+                and item.raw.semantic_ref_ordinal != candidate.raw.semantic_ref_ordinal
+                and item.text != candidate.text
+                for item in new_refs
+            )
+        ]
+    if include_expired:
+        candidates.sort(key=lambda item: item.timestamp or "", reverse=True)
+    return candidates[:limit]
 
 
 def is_propositional(item: SearchItem) -> bool:
@@ -177,6 +200,9 @@ def is_propositional(item: SearchItem) -> bool:
     keeping memories.
     """
     if item.type == "action":
+        knowledge = getattr(item.raw, "knowledge", None)
+        if getattr(knowledge, "verbs", None) == ["say", "speak"]:
+            return False
         return True
     if item.type == "entity":
         knowledge = getattr(item.raw, "knowledge", None)
@@ -244,6 +270,85 @@ def records_for(
     ]
 
 
+def temporal_prompt(new_items: list[SearchItem], candidates: list[SearchItem]) -> str:
+    def describe(item: SearchItem) -> dict[str, str | None]:
+        return {
+            "text": item.text,
+            "timestamp": item.timestamp,
+            "valid_from": item.valid_from,
+            "valid_to": item.valid_to,
+        }
+
+    return (
+        "Identify direct contradictions between NEW and EXISTING propositions. "
+        "Do not treat multi-valued additions (another food, language or office) "
+        "as replacements without clear evidence. Dates are event times, not "
+        "ingestion order: a NEW entry can be older than an EXISTING entry. "
+        "Report incompatible pairs only, not which side should win. Return "
+        "only a JSON array of [new_index, existing_index] pairs, or [] if none.\n"
+        + json.dumps(
+            {
+                "NEW": [describe(item) for item in new_items],
+                "EXISTING": [describe(item) for item in candidates],
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+def temporal_records(
+    response: str, new_items: list[SearchItem], candidates: list[SearchItem]
+) -> list[SupersededRecord]:
+    """A later event replaces an earlier one, only during their overlap."""
+    pairs = json.loads(response)
+    if not isinstance(pairs, list):
+        raise ValueError("contradiction response must be an array of index pairs")
+
+    def start(item: SearchItem) -> str:
+        return max(
+            item.timestamp or "",
+            f"{item.valid_from}T00:00:00Z" if item.valid_from else "",
+        )
+
+    records: list[SupersededRecord] = []
+    for pair in pairs:
+        if (
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or any(type(index) is not int for index in pair)
+            or not 0 <= pair[0] < len(new_items)
+            or not 0 <= pair[1] < len(candidates)
+        ):
+            raise ValueError("invalid contradiction index pair")
+        new, existing = new_items[pair[0]], candidates[pair[1]]
+        if new.raw.semantic_ref_ordinal == existing.raw.semantic_ref_ordinal:
+            continue
+        older, newer = (
+            (new, existing) if start(new) < start(existing) else (existing, new)
+        )
+        effective_at = start(newer) or utc_now()
+        ends = [
+            f"{item.valid_to}T23:59:59Z" for item in (older, newer) if item.valid_to
+        ]
+        effective_to = min(ends) if ends else None
+        if effective_to and effective_to < effective_at:
+            continue
+        records.append(
+            SupersededRecord(
+                ordinal=older.raw.semantic_ref_ordinal,
+                superseded_by=[newer.raw.semantic_ref_ordinal],
+                at=utc_now(),
+                reason="contradiction",
+                text=older.text,
+                query=newer.text,
+                memory_id=older.memory_id,
+                effective_at=effective_at,
+                effective_to=effective_to,
+            )
+        )
+    return records
+
+
 async def detect(
     new_content: str,
     *,
@@ -252,6 +357,7 @@ async def detect(
     create_llm: Callable[[], Any],
     append: Callable[[list[SupersededRecord]], Awaitable[list[SupersededRecord]]],
     superseded_by: list[int] | None = None,
+    find_new_items: Callable[[], Awaitable[list[SearchItem]]] | None = None,
 ) -> list[SupersededRecord]:
     """Retire the memories `new_content` contradicts, and report what was retired.
 
@@ -271,6 +377,11 @@ async def detect(
     # messages by this point, and raising here would report a failure for a
     # write that actually landed.
     try:
+        new_items = (
+            [item for item in await find_new_items() if is_propositional(item)]
+            if find_new_items is not None
+            else None
+        )
         candidates = await find_candidates()
     except Exception:
         logger.warning(
@@ -281,15 +392,24 @@ async def detect(
         )
         return []
 
-    if not candidates:
+    if not candidates or new_items == []:
         return []
 
     try:
         llm = create_llm()
         response = await llm.complete(
-            build_prompt(new_content, candidates), max_tokens=100
+            (
+                temporal_prompt(new_items, candidates)
+                if new_items is not None
+                else build_prompt(new_content, candidates)
+            ),
+            max_tokens=512 if new_items is not None else 100,
         )
         response_text = response.content.strip().lower()
+
+        if new_items is not None:
+            records = temporal_records(response_text, new_items, candidates)
+            return await append(records) if records else []
 
         if response_text == "none" or not response_text:
             return []

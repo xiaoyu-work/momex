@@ -25,12 +25,14 @@ from .search import (
     expand_with_neighbors,
     fetch_many,
     fuse_results,
+    items_for_semrefs,
     message_text,
     search_by_embedding,
     search_structured,
 )
 from .timewindow import (
     extract_time_window,
+    normalize_as_of,
     validate_iso_date,
     validate_timestamp,
     window_tags,
@@ -330,8 +332,9 @@ class Memory:
         include_expired: bool = False,
         include_superseded: bool = False,
         include_unconfirmed: bool = False,
+        as_of: str | None = None,
     ) -> SearchView:
-        hidden = await self._ledger.hidden_ordinals()
+        hidden = await self._ledger.hidden_ordinals(as_of)
         source_ordinals: set[int] = set()
         if hidden:
             refs = await fetch_many(
@@ -348,6 +351,7 @@ class Memory:
             include_expired=include_expired,
             include_superseded=include_superseded,
             include_unconfirmed=include_unconfirmed,
+            as_of=as_of,
         )
 
     async def search(
@@ -359,6 +363,7 @@ class Memory:
         include_superseded: bool = False,
         include_unconfirmed: bool = False,
         neighbors: int = 0,
+        as_of: str | None = None,
     ) -> list[SearchItem]:
         """Hybrid search: structured term matching + embedding similarity in parallel.
 
@@ -386,6 +391,7 @@ class Memory:
         logged and contributes nothing, and the results of the other are
         returned on their own. Both failing yields an empty list.
         """
+        as_of = normalize_as_of(as_of)
         await self._ensure_initialized()
 
         # Retrieval depth is decoupled from presentation depth. Asking each
@@ -409,6 +415,7 @@ class Memory:
                 include_expired=include_expired,
                 include_superseded=include_superseded,
                 include_unconfirmed=include_unconfirmed,
+                as_of=as_of,
             ),
             self._search_embedding(
                 query_text,
@@ -416,6 +423,7 @@ class Memory:
                 include_expired=include_expired,
                 include_superseded=include_superseded,
                 include_unconfirmed=include_unconfirmed,
+                as_of=as_of,
             ),
         )
 
@@ -429,6 +437,7 @@ class Memory:
                     include_expired=include_expired,
                     include_superseded=include_superseded,
                     include_unconfirmed=include_unconfirmed,
+                    as_of=as_of,
                 ),
             )
         return fused
@@ -442,12 +451,14 @@ class Memory:
         include_superseded: bool = False,
         include_unconfirmed: bool = False,
         dedupe: bool = True,
+        as_of: str | None = None,
     ) -> list[SearchItem]:
         """Structured RAG search using LLM query translation + term matching."""
         view = await self._search_view(
             include_expired=include_expired,
             include_superseded=include_superseded,
             include_unconfirmed=include_unconfirmed,
+            as_of=as_of,
         )
         return await search_structured(
             self._conversation_required(),
@@ -466,6 +477,7 @@ class Memory:
         include_expired: bool = False,
         include_superseded: bool = False,
         include_unconfirmed: bool = False,
+        as_of: str | None = None,
     ) -> list[SearchItem]:
         """Structured search for the hybrid path. Degrades to empty on failure.
 
@@ -482,6 +494,7 @@ class Memory:
                 include_expired=include_expired,
                 include_superseded=include_superseded,
                 include_unconfirmed=include_unconfirmed,
+                as_of=as_of,
             )
         except Exception:
             logger.warning(
@@ -500,6 +513,7 @@ class Memory:
         include_expired: bool = False,
         include_superseded: bool = False,
         include_unconfirmed: bool = False,
+        as_of: str | None = None,
     ) -> list[SearchItem]:
         """Internal embedding search. Logs and degrades to empty on failure."""
         try:
@@ -509,6 +523,7 @@ class Memory:
                 include_expired=include_expired,
                 include_superseded=include_superseded,
                 include_unconfirmed=include_unconfirmed,
+                as_of=as_of,
             )
         except Exception:
             logger.warning(
@@ -528,6 +543,7 @@ class Memory:
         include_expired: bool = False,
         include_superseded: bool = False,
         include_unconfirmed: bool = False,
+        as_of: str | None = None,
     ) -> list[SearchItem]:
         """Embedding-only search without LLM. Used as fallback when structured search fails.
 
@@ -543,6 +559,7 @@ class Memory:
         Returns:
             List of SearchItem with type="message".
         """
+        as_of = normalize_as_of(as_of)
         await self._ensure_initialized()
         return await search_by_embedding(
             self._conversation_required(),
@@ -555,6 +572,7 @@ class Memory:
                 include_expired=include_expired,
                 include_superseded=include_superseded,
                 include_unconfirmed=include_unconfirmed,
+                as_of=as_of,
             ),
         )
 
@@ -694,8 +712,12 @@ class Memory:
             return await find_contradiction_candidates(
                 conversation,
                 ordinals,
-                hidden_ordinals=await self._ledger.hidden_ordinals(),
+                include_expired=True,
+                include_new_peers=True,
             )
+
+        async def new_items() -> list[SearchItem]:
+            return await items_for_semrefs(conversation, ordinals, include_expired=True)
 
         return await detect_contradictions(
             new_content,
@@ -704,6 +726,7 @@ class Memory:
             create_llm=self.config.create_llm,
             append=self._ledger.append,
             superseded_by=ordinals,
+            find_new_items=new_items,
         )
 
     async def history(
@@ -789,7 +812,7 @@ class Memory:
         semref_count = await conversation.semantic_refs.size()
 
         ledger = await self._ledger.load()
-        active_supersessions = sum(1 for r in ledger if r.active)
+        active_supersessions = len(await self._ledger.hidden_ordinals())
 
         backend_name = "postgres" if self.config.is_postgres else "sqlite"
 
@@ -810,6 +833,7 @@ class Memory:
         *,
         start: int = 0,
         limit: int | None = None,
+        as_of: str | None = None,
     ) -> list[SearchItem]:
         """Return source messages in conversation order.
 
@@ -827,6 +851,7 @@ class Memory:
             Message SearchItems ordered by ordinal. Scores are zero because
             history is chronological, not a ranked retrieval.
         """
+        as_of = normalize_as_of(as_of)
         if start < 0:
             raise ValueError("start cannot be negative")
         if limit is not None and limit < 0:
@@ -842,11 +867,16 @@ class Memory:
         end = size if limit is None else min(start + limit, size)
         stored = await messages.get_slice(start, end)
         view = await self._search_view(
-            include_expired=True, include_superseded=True, include_unconfirmed=True
+            include_expired=True,
+            include_superseded=True,
+            include_unconfirmed=True,
+            as_of=as_of,
         )
 
         items: list[SearchItem] = []
         for ordinal, message in enumerate(stored, start):
+            if not view.allows(message):
+                continue
             valid_from, valid_to = extract_time_window(message)
             items.append(
                 SearchItem(

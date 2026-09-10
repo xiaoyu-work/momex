@@ -56,6 +56,15 @@ def validate_timestamp(value: str) -> str:
     return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def normalize_as_of(value: str | None) -> str | None:
+    """A date includes its entire UTC day; a timestamp is an exact cutoff."""
+    if value is None:
+        return None
+    if len(value) == 10:
+        return f"{validate_iso_date(value, 'as_of')}T23:59:59Z"
+    return validate_timestamp(value)
+
+
 def window_tags(valid_from: str | None, valid_to: str | None) -> list[str]:
     """Render a window as message tags, so it survives serialization."""
     tags: list[str] = []
@@ -84,18 +93,18 @@ def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def is_expired(valid_to: str | None) -> bool:
+def is_expired(valid_to: str | None, as_of: str | None = None) -> bool:
     """Check if a time window has expired (valid_to < today UTC)."""
     if not valid_to:
         return False
-    return valid_to < _today()
+    return valid_to < (as_of[:10] if as_of else _today())
 
 
-def is_not_yet_active(valid_from: str | None) -> bool:
+def is_not_yet_active(valid_from: str | None, as_of: str | None = None) -> bool:
     """Check if a time window has not opened yet (valid_from > today UTC)."""
     if not valid_from:
         return False
-    return valid_from > _today()
+    return valid_from > (as_of[:10] if as_of else _today())
 
 
 def is_outside_window(valid_from: str | None, valid_to: str | None) -> bool:

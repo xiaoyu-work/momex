@@ -256,7 +256,33 @@ async def main():
         print(f"{item.text} (expires: {item.valid_to})")
 ```
 
-### Explicit Delete (Advanced Users)
+### Historical snapshots and backfills
+
+Both search methods and prefix search accept `as_of`, an ISO timestamp or a
+date (through the end of that UTC day). Validity and supersession are evaluated
+at that time, and later events are excluded even when history flags are enabled.
+`transcript(as_of=...)` provides the corresponding source cutoff.
+
+```python
+await memory.add("I live in Portland", timestamp="2024-06-01")
+await memory.add("I live in Seattle", timestamp="2024-01-01")  # backfill
+then = await memory.search("Where do I live?", as_of="2024-05-01")
+now = await memory.search("Where do I live?", as_of="2024-07-01")
+```
+
+When the model identifies a contradiction, event time determines its direction:
+the later fact replaces the earlier one, regardless of ingestion order.
+The ledger retains audit time `at` separately from `effective_at` and optional
+`effective_to`. Future replacements wait until their validity window opens;
+temporary replacements hide the earlier fact only during their overlapping
+window. Historical supersessions remain inspectable after a manual restore.
+
+Each input message can override `timestamp`, `valid_from`, and `valid_to`, so a
+single batch can preserve an imported conversation's timeline. Invalid or
+reversed windows are rejected before writing. Legacy ledger entries without
+event-time fields retain their original audit-time interpretation.
+
+### Explicit deletion
 
 For manual control over deletion:
 

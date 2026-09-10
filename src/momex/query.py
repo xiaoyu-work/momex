@@ -10,6 +10,7 @@ from .config import MomexConfig
 from .manager import MemoryManager
 from .memory import Memory
 from .results import SearchItem
+from .timewindow import normalize_as_of
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,12 @@ async def search(
     query_text: str,
     limit: int = 10,
     config: MomexConfig | None = None,
+    *,
+    as_of: str | None = None,
+    include_expired: bool = False,
+    include_superseded: bool = False,
+    include_unconfirmed: bool = False,
+    neighbors: int = 0,
 ) -> list[tuple[str, list[SearchItem]]]:
     """Search memories across all collections matching a prefix.
 
@@ -34,6 +41,7 @@ async def search(
     Returns:
         List of (collection_name, list[SearchItem]) tuples.
     """
+    as_of = normalize_as_of(as_of)
     config = config or MomexConfig.get_default()
     manager = MemoryManager(config=config)
 
@@ -53,7 +61,15 @@ async def search(
         async with sem:
             memory = Memory(collection=coll_name, config=config)
             try:
-                results = await memory.search(query_text, limit=limit)
+                results = await memory.search(
+                    query_text,
+                    limit=limit,
+                    as_of=as_of,
+                    include_expired=include_expired,
+                    include_superseded=include_superseded,
+                    include_unconfirmed=include_unconfirmed,
+                    neighbors=neighbors,
+                )
                 return (coll_name, results)
             except Exception:
                 logger.warning(

@@ -145,6 +145,12 @@ Contradiction detection, from the knowledge just extracted:
     supersession ledger entries
 ```
 
+Contradiction adjudication identifies pairs of incompatible extracted
+propositions. Event time, not insertion order, determines which side replaces
+the other. Ledger entries retain audit time separately from their effective
+interval; searches can evaluate that interval at an explicit `as_of` cutoff.
+The original source messages remain historical evidence.
+
 `source_id` is what gives each extracted memory a stable identity
 (`memory_id`), independent of the semantic-ref ordinals that positions
 depend on.

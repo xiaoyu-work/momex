@@ -10,6 +10,13 @@ from typeagent.knowpro.universal_message import (
 )
 
 from .identity import new_source_id
+from .timewindow import (
+    VALID_FROM_TAG,
+    VALID_TO_TAG,
+    validate_iso_date,
+    validate_timestamp,
+    window_tags,
+)
 
 WritePolicy = Literal["user", "all"]
 ROLE_TAG = "momex:role:"
@@ -50,6 +57,29 @@ def prepare_messages(
         speaker = message.get("speaker", f"{collection}:{role}")
         session = message.get("session_id")
         confirmed = message.get("confirmed", role == "user" or write_policy == "all")
+        occurred_at = message.get("timestamp", timestamp)
+        valid_from = message.get(
+            "valid_from",
+            next(
+                (
+                    tag[len(VALID_FROM_TAG) :]
+                    for tag in tags
+                    if tag.startswith(VALID_FROM_TAG)
+                ),
+                None,
+            ),
+        )
+        valid_to = message.get(
+            "valid_to",
+            next(
+                (
+                    tag[len(VALID_TO_TAG) :]
+                    for tag in tags
+                    if tag.startswith(VALID_TO_TAG)
+                ),
+                None,
+            ),
+        )
         if not isinstance(content, str) or not isinstance(role, str):
             raise ValueError("message content and role must be strings")
         if not isinstance(speaker, str) or not speaker:
@@ -58,9 +88,19 @@ def prepare_messages(
             raise ValueError("message session_id must be a string")
         if not isinstance(confirmed, bool):
             raise ValueError("message confirmed must be a boolean")
+        if not isinstance(occurred_at, str):
+            raise ValueError("message timestamp must be a string")
+        if valid_from is not None and not isinstance(valid_from, str):
+            raise ValueError("message valid_from must be a string or None")
+        if valid_to is not None and not isinstance(valid_to, str):
+            raise ValueError("message valid_to must be a string or None")
+        valid_from = validate_iso_date(valid_from, "valid_from")
+        valid_to = validate_iso_date(valid_to, "valid_to")
+        if valid_from and valid_to and valid_from > valid_to:
+            raise ValueError("valid_from cannot be after valid_to")
         if not content:
             continue
-        message_tags = [*tags, f"{ROLE_TAG}{role}"]
+        message_tags = [*window_tags(valid_from, valid_to), f"{ROLE_TAG}{role}"]
         if session is not None:
             message_tags.append(f"{SESSION_TAG}{session}")
         if not confirmed:
@@ -70,7 +110,7 @@ def prepare_messages(
                 text_chunks=[content],
                 metadata=ConversationMessageMeta(speaker=speaker),
                 tags=message_tags,
-                timestamp=timestamp,
+                timestamp=validate_timestamp(occurred_at),
                 source_id=new_source_id(),
             )
         )

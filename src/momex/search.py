@@ -377,7 +377,12 @@ async def search_structured(
     result = await searchlang.search_conversation_with_language(
         conversation,
         conversation._query_translator,
-        query_text,
+        (
+            f"Interpret relative dates as of {view.as_of} (UTC). "
+            f"Only consider events through that time. Question: {query_text}"
+            if view.as_of
+            else query_text
+        ),
         options,
     )
 
@@ -528,49 +533,50 @@ async def search_by_embedding(
         return []
 
     msg_index = conversation.secondary_indexes.message_index
-
-    try:
-        scored_ordinals = await msg_index.lookup_messages(
-            query_text,
-            max_matches=limit,
-            threshold_score=min_score,
-        )
-    except Exception:
-        logger.warning(
-            "Message index lookup failed for collection %r.",
-            collection,
-            exc_info=True,
-        )
+    if limit <= 0:
         return []
-
-    if not scored_ordinals:
-        return []
-
+    size = await conversation.messages.size()
+    depth = min(size, limit)
     items: list[SearchItem] = []
-    for scored in scored_ordinals:
+    while depth:
         try:
-            msg = await conversation.messages.get_item(scored.message_ordinal)
-        except (IndexError, KeyError):
-            continue
-
-        vf, vt = extract_time_window(msg)
-        superseded = scored.message_ordinal in view.superseded_messages
-        if not view.allows(msg, superseded=superseded):
-            continue
-
-        items.append(
-            SearchItem(
-                type="message",
-                text=message_text(msg),
-                score=scored.score,
-                raw=msg,
-                timestamp=getattr(msg, "timestamp", None),
-                valid_from=vf,
-                valid_to=vt,
-                ordinal=scored.message_ordinal,
-                status=view.status(msg, superseded=superseded),
+            scored_ordinals = await msg_index.lookup_messages(
+                query_text, max_matches=depth, threshold_score=min_score
             )
+        except Exception:
+            logger.warning(
+                "Message index lookup failed for collection %r.",
+                collection,
+                exc_info=True,
+            )
+            return []
+        scored_ordinals = scored_ordinals or []
+        messages = await fetch_many(
+            conversation.messages, [item.message_ordinal for item in scored_ordinals]
         )
+        items = []
+        for scored in scored_ordinals:
+            msg = messages.get(scored.message_ordinal)
+            superseded = scored.message_ordinal in view.superseded_messages
+            if msg is None or not view.allows(msg, superseded=superseded):
+                continue
+            vf, vt = extract_time_window(msg)
+            items.append(
+                SearchItem(
+                    type="message",
+                    text=message_text(msg),
+                    score=scored.score,
+                    raw=msg,
+                    timestamp=getattr(msg, "timestamp", None),
+                    valid_from=vf,
+                    valid_to=vt,
+                    ordinal=scored.message_ordinal,
+                    status=view.status(msg, superseded=superseded),
+                )
+            )
+        if len(items) >= limit or len(scored_ordinals) < depth or depth >= size:
+            break
+        depth = min(size, depth * 2)
 
     items.sort(key=lambda x: x.score, reverse=True)
     return items[:limit]
